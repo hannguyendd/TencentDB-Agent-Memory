@@ -5,7 +5,7 @@
 
 
 /**
- * @description 统一响应外壳。`code = 0` 表示成功；非 0 表示业务错误。\n常见业务错误语义：\n  - `400`：参数不合法（如关键 ID 缺失、互斥字段同时出现、空入参等）；\n  - `401`：鉴权失败；\n  - `403`：**全接口统一**——多个业务字段均可见但归属一致性校验\n    失败（如 `(team_id, agent_id)` 不构成有效 Agent 归属、\n    `task_id` 不属于 `team_id`、`(task_id, agent_id) ∉\n    task_agents`、`creator_user_id` 不是该 team 成员等）；\n    写审计日志；\n  - `404`：资源不存在或不属于当前调用上下文（记忆原子层 / 资产层 /\n    实体 CRUD 一律按 404，与 offload.yaml 同契约，不暴露存在性）；\n  - `409`：会话级 / 资产级并发竞争超时；\n  - `422`：Schema 校验通过但业务规则不通过（如 Skill 重名 / 版本冲突）；\n  - `429`：频控触发；\n  - `500`：内部错误，可有限重试；\n  - `503-LLM_UNAVAILABLE` / `503-STORAGE_UNAVAILABLE`：依赖不可用；\n  - `504`：请求超时。\n
+ * @description Unified response envelope. `code = 0` means success; non-zero means a business error.\nCommon business error semantics:\n  - `400`: invalid parameters (e.g. missing key ID, mutually exclusive fields present together, empty input);\n  - `401`: authentication failed;\n  - `403`: **uniform across all endpoints** - several business fields are visible but the ownership consistency check\n    fails (e.g. `(team_id, agent_id)` is not a valid Agent ownership,\n    `task_id` does not belong to `team_id`, `(task_id, agent_id) ∉\n    task_agents`, `creator_user_id` is not a member of the team);\n    an audit log entry is written;\n  - `404`: the resource does not exist or does not belong to the current call context (memory atomic layer / asset layer /\n    entity CRUD always return 404, same contract as offload.yaml, existence is not exposed);\n  - `409`: session-level / asset-level concurrency contention timed out;\n  - `422`: schema validation passed but a business rule failed (e.g. duplicate Skill name / version conflict);\n  - `429`: rate limit triggered;\n  - `500`: internal error, limited retries allowed;\n  - `503-LLM_UNAVAILABLE` / `503-STORAGE_UNAVAILABLE`: dependency unavailable;\n  - `504`: request timed out.\n
 */
 export type ApiResponseEnvelope = {
     /**
@@ -21,28 +21,28 @@ export type ApiResponseEnvelope = {
     */
     request_id: string;
     /**
-     * @description 接口特定数据，结构见各接口定义。
+     * @description Endpoint-specific data; see each endpoint definition for its structure.
      * @type object | undefined
     */
     data?: object;
 };
 
 /**
- * @description 团队记忆 4 ID 隔离字段（单值）。**全部可选**：接口 schema 层不做必填\n校验，由内核侧按\"接口语义\"决定哪些 ID 在该接口下必需。\n\n**错误码（与全接口统一）**：\n  - 任一 ID 不属于当前鉴权凭证解析出的租户 / 实例 → `404`\n    （不暴露存在性，与 offload.yaml 同契约）；\n  - 多个 ID 均可见但归属关系不一致（如 `(team_id, agent_id)` 不\n    构成有效 Agent 归属、`task_id` 不属于 `team_id`、`(task_id,\n    agent_id) ∉ task_agents`） → `403`，写审计日志。\n\n**复合唯一键 `(team_id, agent_id)`** 是**全接口统一规则**：\nagent_id 本身已全局唯一；同一 agent_id 不会出现在两个 team_id\n下。任何接口同时传入 team_id 与 agent_id 时（无论显式 IdFields、\n资产对象内嵌 team_id+agent_id，或 `agent_ids` 集合归属校验），\n都按上述错误码处理。详见 `info.description` 的\n\"复合唯一键：`(team_id, agent_id)`\" 章节。\n\n所有 Memory 数据面接口（L0/L1/L2 等）**只接受单值精确寻址**，\n不提供 `agent_ids` / `user_ids` / `task_ids` 之类的多值范围收敛。\n一次调用对应一个 (team, agent, user, task) 组合。\n\n与 `tdai-memory-plugin/src/gateway/v2-skill-schemas.ts`\n的 IdFields 定义一致。\n
+ * @description Team memory 4-ID isolation fields (single-valued). **All optional**: the endpoint schema layer does not enforce required\nchecks; the kernel decides which IDs are required for each endpoint based on \"endpoint semantics\".\n\n**Error codes (uniform across all endpoints)**:\n  - Any ID that does not belong to the tenant / instance resolved from the current auth credential → `404`\n    (existence is not exposed, same contract as offload.yaml);\n  - Several IDs are visible but their ownership relationship is inconsistent (e.g. `(team_id, agent_id)` is not\n    a valid Agent ownership, `task_id` does not belong to `team_id`, `(task_id,\n    agent_id) ∉ task_agents`) → `403`, with an audit log entry.\n\n**Composite unique key `(team_id, agent_id)`** is a **rule uniform across all endpoints**:\nagent_id is already globally unique; the same agent_id never appears under two team_ids.\nWhenever an endpoint receives both team_id and agent_id (whether as explicit IdFields,\nteam_id+agent_id embedded in an asset object, or an `agent_ids` collection ownership check),\nthe error codes above apply. See the \"Composite unique key: `(team_id, agent_id)`\" section of `info.description`.\n\nAll Memory data-plane endpoints (L0/L1/L2 etc.) **accept only single-valued exact addressing**;\nthey provide no multi-valued range narrowing such as `agent_ids` / `user_ids` / `task_ids`.\nOne call corresponds to one (team, agent, user, task) combination.\n\nConsistent with the IdFields definition in `tdai-memory-plugin/src/gateway/v2-skill-schemas.ts`.\n
 */
 export type IdFields = {
     /**
-     * @description 团队 ID（PRD §3.2）。
+     * @description Team ID (PRD §3.2).
      * @type string | undefined
     */
     team_id?: string;
     /**
-     * @description Agent ID（PRD §3.2）。全局唯一；与 `team_id` 组成\n复合唯一键 `(team_id, agent_id)`。\n
+     * @description Agent ID (PRD §3.2). Globally unique; together with `team_id` forms the\ncomposite unique key `(team_id, agent_id)`.\n
      * @type string | undefined
     */
     agent_id?: string;
     /**
-     * @description 用户 ID（PRD §3.2，太湖账号映射）。
+     * @description User ID (PRD §3.2, mapped to the Taihu account).
      * @type string | undefined
     */
     user_id?: string;
@@ -66,7 +66,7 @@ export type ConversationRoleEnumKey = (typeof conversationRoleEnum)[keyof typeof
 export type ConversationRole = ConversationRoleEnumKey;
 
 /**
- * @description 紧凑的人员引用，用于 owner / collaborators 等展示场景。\n服务端有用户档案时填充 `display_name`，UI 可直接渲染，\n避免列表页 N 次二次查询；缺省时退化为仅显示 `user_id`。\n
+ * @description Compact person reference, used for display scenarios such as owner / collaborators.\nWhen the server has a user profile it fills in `display_name` so the UI can render it directly,\navoiding N extra lookups on list pages; when absent it degrades to showing only `user_id`.\n
 */
 export type ActorRef = {
     /**
@@ -106,11 +106,11 @@ export type AssetTypeEnumKey = (typeof assetTypeEnum)[keyof typeof assetTypeEnum
 export type AssetType = AssetTypeEnumKey;
 
 /**
- * @description 通用资产变更返回。`asset_id` 为全局唯一、不可变 id，按资产类型\n前缀区分：Skill=`skl-`，LLM-Wiki=`wiki-`，Code-Graph=`cg-`。\n具体接口语义上等价于 `skill_id` / `wiki_id` / `code_graph_id`。\n
+ * @description Generic asset mutation result. `asset_id` is a globally unique, immutable id, distinguished by asset type\nprefix: Skill=`skl-`, LLM-Wiki=`wiki-`, Code-Graph=`cg-`.\nSemantically equivalent to `skill_id` / `wiki_id` / `code_graph_id` for the specific endpoint.\n
 */
 export type AssetMutateData = {
     /**
-     * @description 全局唯一、不可变；跨 team/agent/user/task 全局唯一。
+     * @description Globally unique and immutable; unique across team/agent/user/task.
      * @type string
     */
     asset_id: string;
@@ -157,7 +157,7 @@ export type AssetSearchRequest = (IdFields & {
 
 export type AssetSearchHit = {
     /**
-     * @description 全局唯一资产 id，按 asset_type 取值与\n`skill_id` / `wiki_id` / `code_graph_id` / `memory_id` 对齐。\n
+     * @description Globally unique asset id; its value is aligned with `skill_id` / `wiki_id` / `code_graph_id` / `memory_id` according to asset_type.\n
      * @type string
     */
     asset_id: string;
@@ -170,7 +170,7 @@ export type AssetSearchHit = {
     */
     name?: string;
     /**
-     * @description 命中片段，便于直接展示，不保证可重放。
+     * @description Matched snippet, for direct display; replayability is not guaranteed.
      * @type string | undefined
     */
     snippet?: string;
@@ -188,7 +188,7 @@ export type AssetSearchData = {
 };
 
 /**
- * @description 一条原始对话消息。形状与 offload.yaml 同名 schema 一致。\n`id` / `version` 为只读字段：写入入口不接受调用方指定，读取\n入口必返回；`version` 在每次该消息被更新时自增。\n
+ * @description A raw conversation message. The shape matches the same-named schema in offload.yaml.\n`id` / `version` are read-only fields: write endpoints do not accept caller-specified values, read\nendpoints always return them; `version` is incremented each time the message is updated.\n
 */
 export type ConversationItem = {
     /**
@@ -196,7 +196,7 @@ export type ConversationItem = {
     */
     readonly id?: string;
     /**
-     * @description 该消息当前版本号。
+     * @description Current version number of the message.
      * @type string | undefined
     */
     readonly version?: string;
@@ -211,12 +211,12 @@ export type ConversationItem = {
     */
     content: string;
     /**
-     * @description 消息实际发生时间；不传时使用服务端接收时间。
+     * @description Time the message actually occurred; the server receive time is used if omitted.
      * @type string | undefined, date-time
     */
     timestamp?: string;
     /**
-     * @description 历史导入时指定原始入库时间；不传时使用服务端接收时间。
+     * @description Original ingestion time specified during historical import; the server receive time is used if omitted.
      * @type string | undefined, date-time
     */
     recorded_at?: string;
@@ -224,7 +224,7 @@ export type ConversationItem = {
 
 export type ConversationAddRequest = (IdFields & {
     /**
-     * @description 业务侧会话 ID；不传则由平台自动生成临时 session。
+     * @description Business-side session ID; if omitted the platform auto-generates a temporary session.
      * @type string
     */
     session_id: string;
@@ -240,7 +240,7 @@ export type ConversationAddData = {
     */
     accepted_ids: string[];
     /**
-     * @description 与 `accepted_ids` 一一对应、同序的版本号列表。新建消息\n版本号固定为 `v1`。\n
+     * @description List of version numbers aligned one-to-one and in the same order as `accepted_ids`. For newly created messages\nthe version is fixed at `v1`.\n
      * @type array
     */
     accepted_versions: string[];
@@ -333,17 +333,17 @@ export type ConversationSearchData = {
 
 export type ConversationDeleteRequest = {
     /**
-     * @description 待删除的对话消息 id 列表。单次至多 5000 条。
+     * @description List of conversation message ids to delete. At most 5000 per call.
      * @type array
     */
     message_ids?: string[];
     /**
-     * @description 待清空的会话 id 列表，删除选中 session 下的所有 message。单次至多 100 条。
+     * @description List of session ids to clear; deletes all messages under the selected sessions. At most 100 per call.
      * @type array
     */
     session_ids?: string[];
     /**
-     * @deprecated 改用 `session_ids`。
+     * @deprecated Use `session_ids` instead.
      * @type string
     */
     session_id?: string;
@@ -357,7 +357,7 @@ export type ConversationDeleteData = {
 };
 
 /**
- * @description L1 记忆笔记对外视图。一期对外暴露 6 个字段；新增可选 4 ID\n透传字段供调用方按需消费（缺省 / 全空表示未挂团队上下文）。\n`version` 每次 `/atomic/update` 自增；新建笔记初始版本 `v1`。\n
+ * @description Public view of an L1 memory note. Phase 1 exposes 6 fields externally; optional 4-ID\npass-through fields are added for callers to consume as needed (missing / all empty means no team context attached).\n`version` is incremented on every `/atomic/update`; a newly created note starts at version `v1`.\n
 */
 export type AtomicDetail = {
     /**
@@ -365,7 +365,7 @@ export type AtomicDetail = {
     */
     id: string;
     /**
-     * @description 当前版本号。
+     * @description Current version number.
      * @type string
     */
     version: string;
@@ -430,7 +430,7 @@ export type AtomicUpdateData = {
     */
     id: string;
     /**
-     * @description 更新后的新版本号。
+     * @description New version number after the update.
      * @type string
     */
     version: string;
@@ -510,11 +510,11 @@ export type AtomicSearchData = {
 };
 
 /**
- * @description L1 笔记按 id 批量删除请求。本期仅支持按主键精确删除，不接受\n按 `type` / 时间区间等条件批删；`ids` 缺省或为空数组视为非法\n请求，返回业务错误码 `400`。本接口不带分页参数。\n
+ * @description Batch delete of L1 notes by id. This phase supports exact deletion by primary key only; it does not accept\nconditional batch deletion by `type` / time range etc.; a missing or empty `ids` array is treated as an invalid\nrequest and returns business error code `400`. This endpoint takes no pagination parameters.\n
  */
 export type AtomicDeleteRequest = {
     /**
-     * @description 笔记主键列表，单次至多 5000 条。
+     * @description List of note primary keys, at most 5000 per call.
      * @type array
     */
     ids: string[];
@@ -529,12 +529,12 @@ export type AtomicDeleteData = {
 
 export type ScenarioEntry = {
     /**
-     * @description 文件形如 `工作/交付物/2026Q1.md`；目录以 `/` 结尾。
+     * @description File path such as `work/deliverables/2026Q1.md`; directories end with `/`.
      * @type string
     */
     path: string;
     /**
-     * @description 该文件当前版本号；每次 `/scenario/write` 自增（新建文件\n初始版本 `v1`）。目录条目此字段固定为 `v0`。\n
+     * @description Current version number of the file; incremented on each `/scenario/write` (a newly created file\nstarts at version `v1`). Fixed to `v0` for directory entries.\n
      * @type string
     */
     version: string;
@@ -554,7 +554,7 @@ export type ScenarioFile = {
     */
     path: string;
     /**
-     * @description 当前版本号。
+     * @description Current version number.
      * @type string
     */
     version: string;
@@ -574,7 +574,7 @@ export type ScenarioFile = {
 
 export type ScenarioListRequest = (IdFields & {
     /**
-     * @description 空字符串或不传表示根目录递归列举。
+     * @description An empty string or omitted means recursive listing from the root directory.
      * @type string | undefined
     */
     path_prefix?: string;
@@ -597,7 +597,7 @@ export type ScenarioReadRequest = (IdFields & {
     */
     path: string;
     /**
-     * @description 可选；指定返回的历史版本号（`/scenario/write` 返回的\n`version`）。缺省返回当前最新版本。\n
+     * @description Optional; the historical version number to return (the `version` returned by `/scenario/write`).\nDefaults to the latest current version.\n
      * @type string | undefined
     */
     version?: string;
@@ -624,7 +624,7 @@ export type ScenarioWriteData = {
     */
     path: string;
     /**
-     * @description 写入后的新版本号。
+     * @description New version number after the write.
      * @type string
     */
     version: string;
@@ -636,7 +636,7 @@ export type ScenarioWriteData = {
 
 export type ScenarioRmRequest = {
     /**
-     * @description 待删除的场景文件路径列表（L2 Scenario 的原子 id 即 path）。
+     * @description List of scenario file paths to delete (the atomic id of an L2 Scenario is its path).
      * @type array
     */
     paths: string[];
@@ -644,7 +644,7 @@ export type ScenarioRmRequest = {
 
 export type CoreFile = {
     /**
-     * @description 核心记忆文件当前版本号；每次 `/core/write` 自增。
+     * @description Current version number of the core memory file; incremented on each `/core/write`.
      * @type string
     */
     version: string;
@@ -664,7 +664,7 @@ export type CoreFile = {
 
 export type CoreReadRequest = (IdFields & {
     /**
-     * @description 可选；指定返回的历史版本号（`/core/write` 返回的\n`version`）。缺省返回当前最新版本。\n
+     * @description Optional; the historical version number to return (the `version` returned by `/core/write`).\nDefaults to the latest current version.\n
      * @type string | undefined
     */
     version?: string;
@@ -679,7 +679,7 @@ export type CoreWriteRequest = (IdFields & {
 
 export type CoreWriteData = {
     /**
-     * @description 写入后的新版本号。
+     * @description New version number after the write.
      * @type string
     */
     version: string;
@@ -718,11 +718,11 @@ export const skillSummaryVisibilityEnum = {
 export type SkillSummaryVisibilityEnumKey = (typeof skillSummaryVisibilityEnum)[keyof typeof skillSummaryVisibilityEnum];
 
 /**
- * @description Skill 列表 / 检索 / 相似项等场景的紧凑表示，**不含** SKILL.md 全文。\n与 PRD §9.1.2 / §15.9 字段对齐。`SkillDetail` 在此基础上额外返回 `content`。\n
+ * @description Compact representation of a Skill for list / search / similar-item scenarios; **does not include** the full SKILL.md text.\nAligned with the fields in PRD §9.1.2 / §15.9. `SkillDetail` additionally returns `content`.\n
 */
 export type SkillSummary = {
     /**
-     * @description 全局唯一、不可变 Skill id（跨 team/agent/user/task 全局唯一），\n首选寻址键。`name` 不强制唯一（允许重名）；前缀固定 `skl-`。\n
+     * @description Globally unique, immutable Skill id (unique across team/agent/user/task),\nthe preferred addressing key. `name` is not enforced unique (duplicates allowed); the prefix is fixed to `skl-`.\n
      * @type string
     */
     skill_id: string;
@@ -782,12 +782,12 @@ export type SkillSummary = {
 
 export type SkillDetail = (SkillSummary & {
     /**
-     * @description SKILL.md 全文（即 SKILL.md 这一个文件的正文）。
+     * @description Full text of SKILL.md (the body of the SKILL.md file itself).
      * @type string
     */
     content: string;
     /**
-     * @description Skill 包内除 SKILL.md 之外的全部脚本/资源文件路径列表\n（UNIX 风格相对路径，可能为空数组）。如需读取脚本正文请\n另行通过 `/skill/file/read`（按需）或将该 path 作为后续\n调用方资源管线的输入。\n
+     * @description List of paths of all script/resource files in the Skill package other than SKILL.md\n(UNIX-style relative paths, may be an empty array). To read a script body, call\n`/skill/file/read` separately (on demand) or use the path as input to the\ncaller's downstream resource pipeline.\n
      * @type array
     */
     script_paths: string[];
@@ -810,7 +810,7 @@ export type SkillListRequest = (IdFields & {
 });
 
 /**
- * @description 列表项使用 `SkillSummary`（不含 `content`）。需要 SKILL.md 全文请\n改调 `/skill/get`，避免列表 payload 随 SKILL.md 大小线性放大。\n
+ * @description List items use `SkillSummary` (without `content`). To get the full SKILL.md text call\n`/skill/get`, so the list payload does not grow linearly with SKILL.md size.\n
 */
 export type SkillListData = {
     /**
@@ -824,16 +824,16 @@ export type SkillListData = {
 };
 
 /**
- * @description **只允许按 `skill_id` 单值精确寻址**（与 Memory 数据面寻址\n规则一致；name / file_path 等历史寻址方式已下线）。\n\n本接口**不接受 IdFields**：`team_id` / `agent_id` / `user_id` /\n`task_id` 均不可传入。`skill_id` 全局唯一，归属（team / agent）\n由服务端按 skill 实体内嵌的归属字段解析；调用方所传 `skill_id`\n不在自身可见范围内 → `404`（不暴露存在性）。\n\n`version` 可选：不传返回当前最新版本；传具体版本号（如 `v2`）\n则返回该历史版本快照，未保留该版本时按 `404` 处理。\n
+ * @description **Only exact addressing by a single `skill_id` is allowed** (consistent with the Memory data-plane addressing\nrules; legacy addressing such as name / file_path has been retired).\n\nThis endpoint **does not accept IdFields**: `team_id` / `agent_id` / `user_id` /\n`task_id` must not be passed. `skill_id` is globally unique; ownership (team / agent)\nis resolved by the server from the ownership fields embedded in the skill entity; if the `skill_id` passed by the caller\nis outside its visible scope → `404` (existence is not exposed).\n\n`version` is optional: if omitted the latest current version is returned; if a specific version (e.g. `v2`) is passed,\na snapshot of that historical version is returned, and `404` is returned if that version was not retained.\n
 */
 export type SkillGetRequest = {
     /**
-     * @description 全局唯一 Skill id，前缀 `skl-`。
+     * @description Globally unique Skill id, prefix `skl-`.
      * @type string
     */
     skill_id: string;
     /**
-     * @description 可选；指定返回的历史版本号（写入接口返回的 `version`，如\n`v1` / `v2` / ...）。缺省返回当前最新版本。\n
+     * @description Optional; the historical version number to return (the `version` returned by write endpoints, e.g.\n`v1` / `v2` / ...). Defaults to the latest current version.\n
      * @type string | undefined
     */
     version?: string;
@@ -847,16 +847,16 @@ export const skillFileEncodingEnum = {
 export type SkillFileEncodingEnumKey = (typeof skillFileEncodingEnum)[keyof typeof skillFileEncodingEnum];
 
 /**
- * @description Skill 包内的单个**脚本/资源文件**（不包含 SKILL.md；SKILL.md\n始终由顶层 `content` 承载）。`content` 编码由 `encoding` 决定，\n默认 utf-8 文本；二进制资源（图片等）请用 base64。\n
+ * @description A single **script/resource file** in a Skill package (excluding SKILL.md; SKILL.md\nis always carried by the top-level `content`). The `content` encoding is determined by `encoding`,\nUTF-8 text by default; use base64 for binary resources (images etc.).\n
 */
 export type SkillFile = {
     /**
-     * @description 包内相对路径，UNIX 风格分隔符。**禁止**等于 `SKILL.md`、\n**禁止**以 `/` 开头、**禁止**包含 `..` 段、**禁止**绝对\n路径或盘符；服务端会做规范化与白名单字符校验，违反返 400。\n
+     * @description Relative path inside the package, UNIX-style separators. **Must not** equal `SKILL.md`,\n**must not** start with `/`, **must not** contain `..` segments, **must not** be an absolute\npath or contain a drive letter; the server normalizes the path and validates against an allow-list of characters, and returns 400 on violation.\n
      * @type string
     */
     path: string;
     /**
-     * @description 文件内容；当 `encoding=base64` 时为 base64 字符串。
+     * @description File content; a base64 string when `encoding=base64`.
      * @type string
     */
     content: string;
@@ -866,7 +866,7 @@ export type SkillFile = {
     */
     encoding?: SkillFileEncodingEnumKey;
     /**
-     * @description 可选 MIME 提示。服务端按黑名单拒绝可执行类型\n（`application/x-sh` / `text/x-php` 等），违反返 415。\n
+     * @description Optional MIME hint. The server rejects executable types via a blocklist\n(`application/x-sh` / `text/x-php` etc.), and returns 415 on violation.\n
      * @type string | undefined
     */
     mime_type?: string;
@@ -874,22 +874,22 @@ export type SkillFile = {
 
 export type SkillCreateRequest = (IdFields & {
     /**
-     * @description Skill 名；须等于 SKILL.md frontmatter.name；不强制唯一。
+     * @description Skill name; must equal SKILL.md frontmatter.name; not enforced unique.
      * @type string
     */
     name: string;
     /**
-     * @description 一句话说明；未传则从 SKILL.md frontmatter 取。
+     * @description One-line description; taken from SKILL.md frontmatter if omitted.
      * @type string | undefined
     */
     description?: string;
     /**
-     * @description SKILL.md 全文。
+     * @description Full text of SKILL.md.
      * @type string
     */
     content: string;
     /**
-     * @description Skill 包内除 SKILL.md 之外的脚本/资源文件。**总大小**\n（base64 解码后实际字节数）≤ 5 MB；**单文件** ≤ 1 MB；\n超出按 413 拒绝。`path` 不可等于 `SKILL.md`（按 422 拒绝；\nSKILL.md 永远走顶层 `content`）；路径冲突（多个相同\n`path`）按 422 拒绝。\n
+     * @description Script/resource files in the Skill package other than SKILL.md. **Total size**\n(actual bytes after base64 decoding) ≤ 5 MB; **single file** ≤ 1 MB;\nanything larger is rejected with 413. `path` must not equal `SKILL.md` (rejected with 422;\nSKILL.md always goes through the top-level `content`); path conflicts (multiple identical\n`path`) are rejected with 422.\n
      * @type array | undefined
     */
     script_files?: SkillFile[];
@@ -897,12 +897,12 @@ export type SkillCreateRequest = (IdFields & {
 
 export type SkillUpdateRequest = (IdFields & {
     /**
-     * @description 全局唯一 Skill id，前缀 `skl-`。
+     * @description Globally unique Skill id, prefix `skl-`.
      * @type string
     */
     skill_id: string;
     /**
-     * @description 可选改名；新名仍须在 team+agent 内唯一。
+     * @description Optional rename; the new name must still be unique within team+agent.
      * @type string | undefined
     */
     name?: string;
@@ -911,28 +911,28 @@ export type SkillUpdateRequest = (IdFields & {
     */
     description?: string;
     /**
-     * @description SKILL.md 全文，**全量覆盖**语义。
+     * @description Full text of SKILL.md, with **full overwrite** semantics.
      * @type string | undefined
     */
     content?: string;
     /**
-     * @description 新增的脚本/资源文件。语义、约束与 `SkillCreateRequest\n.script_files` 一致：单文件 ≤ 1 MB、总 ≤ 5 MB（按更新\n后的整包计算）、`path` 防穿越、不可等于 `SKILL.md`。\n
+     * @description Added script/resource files. Semantics and constraints are the same as `SkillCreateRequest\n.script_files`: single file ≤ 1 MB, total ≤ 5 MB (computed over the whole package after the\nupdate), `path` traversal protection, must not equal `SKILL.md`.\n
      * @type array | undefined
     */
     add_script_files?: SkillFile[];
     /**
-     * @description 要删除的脚本文件路径列表（与 `script_paths[]` 中的\n值匹配）。不存在的路径按 422 拒绝；包含 `SKILL.md`\n按 422 拒绝。\n
+     * @description List of script file paths to delete (matched against the values in `script_paths[]`).\nNon-existent paths are rejected with 422; including `SKILL.md` is rejected\nwith 422.\n
      * @type array | undefined
     */
     remove_script_paths?: string[];
 });
 
 /**
- * @description Skill 写入类操作（create/update）返回的元信息。`skill_id`\n是后续寻址（get/update/delete）的首选键；首次 create 时由\n服务端分配并返回。\n
+ * @description Metadata returned by Skill write operations (create/update). `skill_id`\nis the preferred key for subsequent addressing (get/update/delete); it is assigned by the\nserver and returned on first create.\n
 */
 export type SkillMutateData = {
     /**
-     * @description 全局唯一 Skill id，前缀 `skl-`。
+     * @description Globally unique Skill id, prefix `skl-`.
      * @type string
     */
     skill_id: string;
@@ -951,11 +951,11 @@ export type SkillMutateData = {
 };
 
 /**
- * @description 批量按 `skill_id` 删除**整个 Skill**：每个 Skill 的 SKILL.md\n`content`、`name`、`description` 以及全部脚本文件\n（`script_paths[]` 指向的）一并失效。软删（status 改为\narchived，可后续治理类接口物理清理）。\n
+ * @description Batch delete of **entire Skills** by `skill_id`: for each Skill, its SKILL.md\n`content`, `name`, `description` and all script files\n(those referenced by `script_paths[]`) are invalidated together. Soft delete (status changed to\narchived; can later be physically purged by governance endpoints).\n
 */
 export type SkillDeleteRequest = {
     /**
-     * @description 待删除的 Skill id 列表，前缀 `skl-`。
+     * @description List of Skill ids to delete, prefix `skl-`.
      * @type array
     */
     skill_ids: string[];
@@ -1005,22 +1005,22 @@ export const skillImportRoleEnum = {
 export type SkillImportRoleEnumKey = (typeof skillImportRoleEnum)[keyof typeof skillImportRoleEnum];
 
 /**
- * @description `/skill/import` 入参 `messages[].role` 的取值。在 L0 add\n（`ConversationRole`）的 `user` / `assistant` 基础上扩展两种：\n- `tool_call`：模型发起的工具调用；\n- `tool_result`：工具调用返回。\n
+ * @description Allowed values of `messages[].role` in the `/skill/import` input. Extends the L0 add\n(`ConversationRole`) values `user` / `assistant` with two more:\n- `tool_call`: a tool call initiated by the model;\n- `tool_result`: the result returned by a tool call.\n
  * @example tool_call
 */
 export type SkillImportRole = SkillImportRoleEnumKey;
 
 /**
- * @description 一条用于抽取的会话消息。形状与 `ConversationItem` 完全一致\n（`{role, content, timestamp}`），仅 `role` 使用 `SkillImportRole`\n以承载 `tool_call` / `tool_result` 两种角色。\n\n语义约束：\n- 所有 role：`content` 非空。\n- `tool_call`：工具名、入参由调用方序列化/摘要后写入 `content`；\n  服务端不做结构化解析。\n- `tool_result`：工具结果或错误信息同样由调用方序列化/摘要后\n  写入 `content`。\n- call/result 的配对关系由 `messages[]` 的相对顺序与 `content`\n  内容表达，服务端不维护显式配对键。\n
+ * @description A conversation message used for extraction. Its shape is identical to `ConversationItem`\n(`{role, content, timestamp}`), except that `role` uses `SkillImportRole`\nto carry the two roles `tool_call` / `tool_result`.\n\nSemantic constraints:\n- All roles: `content` must be non-empty.\n- `tool_call`: the tool name and arguments are serialized/summarized by the caller into `content`;\n  the server does no structured parsing.\n- `tool_result`: the tool result or error message is likewise serialized/summarized by the caller into\n  `content`.\n- The pairing of call/result is expressed by the relative order of `messages[]` and the `content`;\n  the server does not maintain an explicit pairing key.\n
 */
 export type SkillImportMessage = {
     /**
-     * @description `/skill/import` 入参 `messages[].role` 的取值。在 L0 add\n（`ConversationRole`）的 `user` / `assistant` 基础上扩展两种：\n- `tool_call`：模型发起的工具调用；\n- `tool_result`：工具调用返回。\n
+     * @description Allowed values of `messages[].role` in the `/skill/import` input. Extends the L0 add\n(`ConversationRole`) values `user` / `assistant` with two more:\n- `tool_call`: a tool call initiated by the model;\n- `tool_result`: the result returned by a tool call.\n
      * @type string
     */
     role: SkillImportRole;
     /**
-     * @description 与 L0 add 同形状的正文文本。`tool_call` / `tool_result` 时\n为调用方对工具名、入参、结果或错误的序列化或摘要结果。\n
+     * @description Body text with the same shape as L0 add. For `tool_call` / `tool_result`,\nit is the caller's serialized or summarized form of the tool name, arguments, result or error.\n
      * @minLength 1
      * @maxLength 8192
      * @type string
@@ -1034,7 +1034,7 @@ export type SkillImportMessage = {
 
 export type SkillImportRequest = (IdFields & {
     /**
-     * @description 业务侧会话 ID；与 L0 add 同义。会写入抽取产物的\n`source_refs.session_id`，用于后续溯源。不会触发\n服务端跨接口隐式取数据。\n
+     * @description Business-side session ID; same meaning as in L0 add. It is written to the extracted artifact's\n`source_refs.session_id` for later provenance tracing. It does not trigger\nthe server to implicitly fetch data across endpoints.\n
      * @type string | undefined
     */
     session_id?: string;
@@ -1053,7 +1053,7 @@ export const skillImportDiagnosticCodeEnum = {
 export type SkillImportDiagnosticCodeEnumKey = (typeof skillImportDiagnosticCodeEnum)[keyof typeof skillImportDiagnosticCodeEnum];
 
 /**
- * @description 抽取过程中的非阻断警告。
+ * @description Non-blocking warning during extraction.
 */
 export type SkillImportDiagnostic = {
     /**
@@ -1065,7 +1065,7 @@ export type SkillImportDiagnostic = {
     */
     message: string;
     /**
-     * @description 触发该诊断的 messages[] 下标；不针对单消息的诊断可省略。
+     * @description Index in messages[] that triggered this diagnostic; may be omitted for diagnostics not tied to a single message.
      * @minLength 0
      * @type integer | undefined
     */
@@ -1079,11 +1079,11 @@ export const skillImportDataStatusEnum = {
 export type SkillImportDataStatusEnumKey = (typeof skillImportDataStatusEnum)[keyof typeof skillImportDataStatusEnum];
 
 /**
- * @description 抽取响应。服务端固定落库为 `status=draft`，等待审核\n（对齐 PRD §16）。\n
+ * @description Extraction response. The server always persists it as `status=draft`, pending review\n(aligned with PRD §16).\n
 */
 export type SkillImportData = {
     /**
-     * @description 全局唯一 Skill id，前缀 `skl-`。
+     * @description Globally unique Skill id, prefix `skl-`.
      * @type string
     */
     skill_id: string;
@@ -1100,12 +1100,12 @@ export type SkillImportData = {
     */
     version?: string;
     /**
-     * @description 抽取出的完整 SKILL.md 文本，供客户端渲染预览。
+     * @description Complete extracted SKILL.md text, for the client to render a preview.
      * @type string
     */
     preview_content: string;
     /**
-     * @description 写入 Skill 元数据的 source 引用，对齐 PRD §M。
+     * @description Source reference written into the Skill metadata, aligned with PRD §M.
      * @type object | undefined
     */
     source_refs?: {
@@ -1118,7 +1118,7 @@ export type SkillImportData = {
         */
         message_count?: number;
         /**
-         * @description messages 数组的稳定哈希，用于幂等去重。
+         * @description Stable hash of the messages array, used for idempotent de-duplication.
          * @type string | undefined
         */
         messages_sha256?: string;
@@ -1191,7 +1191,7 @@ export type AgentVisibilityEnumKey = (typeof agentVisibilityEnum)[keyof typeof a
 export type AgentVisibility = AgentVisibilityEnumKey;
 
 /**
- * @description 批量软删的结果，部分成功语义：成功的 id 进入 `deleted_ids`，\n其余进入 `failed`，每条带 `id` 与 `reason`（鉴权 / 不存在 / 状态不可删 等）。\n外层 envelope 仍返回 200；调用方需检查 `failed` 是否为空。\n
+ * @description Result of a batch soft delete, with partial-success semantics: successful ids go into `deleted_ids`,\nthe rest go into `failed`, each with `id` and `reason` (authentication / not found / status not deletable, etc.).\nThe outer envelope still returns 200; callers must check whether `failed` is empty.\n
 */
 export type BatchDeleteResult = {
     /**
@@ -1242,16 +1242,16 @@ export type TaskBatchDeleteRequest = {
 };
 
 /**
- * @description 团队主表（PRD §15.1 teams），并在 `/team/get` 响应里回填该团队\n当前的成员/资产 id 集合（`user_ids` / `agent_ids` / `task_ids`），\n作为 4 实体反向归属的唯一查询入口（替代被砍掉的 list 接口）。\n
+ * @description Team master table (PRD §15.1 teams); the `/team/get` response also backfills the team's\ncurrent member/asset id sets (`user_ids` / `agent_ids` / `task_ids`),\nserving as the single query entry for the reverse ownership of the 4 entities (replacing the removed list endpoints).\n
 */
 export type TeamData = {
     /**
-     * @description 全局唯一团队 id，服务端创建时生成。
+     * @description Globally unique team id, generated by the server on creation.
      * @type string
     */
     team_id: string;
     /**
-     * @description 团队名称，租户内唯一。
+     * @description Team name, unique within the tenant.
      * @type string
     */
     name: string;
@@ -1260,7 +1260,7 @@ export type TeamData = {
     */
     description?: string;
     /**
-     * @description 团队 Owner 的 user_id（须为已存在 user）。
+     * @description user_id of the Team Owner (must be an existing user).
      * @type string
     */
     owner_user_id: string;
@@ -1269,17 +1269,17 @@ export type TeamData = {
     */
     status: TeamStatus;
     /**
-     * @description 该 Team 当前的成员 user_id 列表（active 态，含 owner）。\nTeam↔User **多对多关系的写权威字段**（写入入口：\n`TeamUpdateRequest.user_ids`）；同步反查视图\n`UserData.team_ids`。`/team/get` 保证回填；create/update\n响应可能为空数组或缺省。\n
+     * @description List of user_ids of the Team's current members (active state, including owner).\nAuthoritative write field of the Team↔User **many-to-many relationship** (write entry:\n`TeamUpdateRequest.user_ids`); synchronized reverse-lookup view:\n`UserData.team_ids`. `/team/get` guarantees backfill; create/update\nresponses may return an empty array or omit it.\n
      * @type array | undefined
     */
     user_ids?: string[];
     /**
-     * @description 该 Team 当前的 Agent id 列表（active 态）。Team↔Agent **多对多\n关系的写权威字段**（写入入口：`TeamUpdateRequest.agent_ids`，\n或 `AgentCreateRequest.team_id` 在 agent 创建时建立归属）；\nagent 自身的 `team_id` 仍是该归属的镜像。`/team/get` 保证回填，\ncreate/update 响应可缺省。\n
+     * @description List of the Team's current Agent ids (active state). Authoritative write field of the Team↔Agent **many-to-many\nrelationship** (write entry: `TeamUpdateRequest.agent_ids`,\nor `AgentCreateRequest.team_id`, which establishes ownership when the agent is created);\nthe agent's own `team_id` remains a mirror of that ownership. `/team/get` guarantees backfill,\ncreate/update responses may omit it.\n
      * @type array | undefined
     */
     agent_ids?: string[];
     /**
-     * @description 该 Team 当前的 Task id 列表（非 archived 态）。只读字段，\n语义同 `user_ids`：`/team/get` 必返，create/update 响应可缺省。\n
+     * @description List of the Team's current Task ids (non-archived state). Read-only field,\nsame semantics as `user_ids`: always returned by `/team/get`, may be omitted in create/update responses.\n
      * @type array | undefined
     */
     task_ids?: string[];
@@ -1316,7 +1316,7 @@ export type TeamGetRequest = {
 };
 
 /**
- * @description PATCH 语义，仅更新传入字段。`user_ids` / `agent_ids` 为 Team↔User\n与 Team↔Agent 多对多关系的**写权威字段**：传入则整体替换该 Team\n当前关联集合，不传则保持不变，传空数组表示清空（owner 永远保留\n在 `user_ids` 内，移除 owner 须先 `owner_user_id` 转移）。\n
+ * @description PATCH semantics, only the passed fields are updated. `user_ids` / `agent_ids` are the **authoritative write fields** of the Team↔User\nand Team↔Agent many-to-many relationships: if passed, they replace the Team's\ncurrent association set as a whole; if omitted, it is unchanged; an empty array means clear (the owner is always kept\nin `user_ids`; to remove the owner, first transfer ownership via `owner_user_id`).\n
 */
 export type TeamUpdateRequest = {
     /**
@@ -1332,17 +1332,17 @@ export type TeamUpdateRequest = {
     */
     description?: string;
     /**
-     * @description 转移 Owner 时传入；新 Owner 须为该团队成员。
+     * @description Pass when transferring the Owner; the new Owner must be a member of the team.
      * @type string | undefined
     */
     owner_user_id?: string;
     /**
-     * @description 该 Team 的成员 user_id 全集（含 owner）。传入则整体替换；不传\n保持不变；空数组语义为\"仅保留 owner\"（服务端自动并入 owner，\n禁止移除 owner）。每个 `user_id` 须为已存在 user。\n同步反查视图 `UserData.team_ids`。\n
+     * @description Complete set of the Team's member user_ids (including owner). If passed, it replaces the set as a whole; if omitted,\nit is unchanged; an empty array means \"keep only the owner\" (the server automatically merges in the owner,\nremoving the owner is forbidden). Each `user_id` must be an existing user.\nSynchronized reverse-lookup view: `UserData.team_ids`.\n
      * @type array | undefined
     */
     user_ids?: string[];
     /**
-     * @description 该 Team 当前的 Agent id 全集。传入则整体替换；不传保持不变，\n空数组表示清空。每个 `agent_id` 须满足 `(team_id, agent_id)`\n复合键一致性（即该 agent 现有 `team_id` 必须等于本 team），\n否则按全接口统一规则处理（404 / 403）。本字段仅用于\"接管/解除\nagent 与 team 的关联\"，不修改 agent 自身其它字段。\n
+     * @description Complete set of the Team's current Agent ids. If passed, it replaces the set as a whole; if omitted it is unchanged,\nan empty array means clear. Each `agent_id` must satisfy `(team_id, agent_id)`\ncomposite key consistency (i.e. the agent's existing `team_id` must equal this team),\notherwise the uniform cross-endpoint rules apply (404 / 403). This field is only used to \"take over / release\nthe association between an agent and a team\" and does not modify any other fields of the agent.\n
      * @type array | undefined
     */
     agent_ids?: string[];
@@ -1353,41 +1353,41 @@ export type TeamUpdateRequest = {
 };
 
 /**
- * @description 用户主表（PRD §15.2 users）。User 自身只承载身份信息（name /\njob_description / status）；与 Team / Task / Agent 的所有关联\n**写路径都在对方侧**（Team 由 `TeamUpdateRequest.user_ids` 维护\n成员、`TeamCreateRequest.owner_user_id` 写入首位 owner；Agent 写\n`owner_user_id`；Task 写 `creator_user_id`）。此处的 `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` 均为**只读反查\n视图**，仅 `/user/get` 保证回填；create/update 响应可能为空数组\n或缺省。\n
+ * @description User master table (PRD §15.2 users). A User itself only carries identity information (name /\njob_description / status); all associations with Team / Task / Agent are\n**written on the other side** (Team maintains members via `TeamUpdateRequest.user_ids`,\n`TeamCreateRequest.owner_user_id` writes the first owner; Agent writes\n`owner_user_id`; Task writes `creator_user_id`). Here `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` are all **read-only reverse-lookup\nviews**, backfilled only by `/user/get`; create/update responses may return an empty array\nor omit them.\n
 */
 export type UserData = {
     /**
-     * @description 用户 id，服务端创建时生成。
+     * @description User id, generated by the server on creation.
      * @type string
     */
     user_id: string;
     /**
-     * @description 用户名/显示名。
+     * @description User name / display name.
      * @type string
     */
     name: string;
     /**
-     * @description 职位/岗位描述（自由文本，给 Agent 提示用）。
+     * @description Job title / role description (free text, used as a hint for the Agent).
      * @type string | undefined
     */
     job_description?: string;
     /**
-     * @description 该 user 所属 Team id 列表。**只读反查视图**，仅 `/user/get`\n保证回填；写路径在 team 侧（`TeamUpdateRequest.user_ids`）。\n
+     * @description List of Team ids the user belongs to. **Read-only reverse-lookup view**, backfilled only by `/user/get`;\nthe write path is on the team side (`TeamUpdateRequest.user_ids`).\n
      * @type array | undefined
     */
     readonly team_ids?: string[];
     /**
-     * @description 该 user 作为 creator 或参与方关联的 Task id 列表。**只读反查\n视图**，仅 `/user/get` 保证回填；写路径在 task 侧\n（`TaskCreateRequest.creator_user_id` / `TaskData.user_ids`）。\n
+     * @description List of Task ids the user is associated with as creator or participant. **Read-only reverse-lookup\nview**, backfilled only by `/user/get`; the write path is on the task side\n(`TaskCreateRequest.creator_user_id` / `TaskData.user_ids`).\n
      * @type array | undefined
     */
     readonly task_ids?: string[];
     /**
-     * @description 该 user 拥有的 Agent id 列表（即 `AgentData.owner_user_id`\n指向该 user 的全部 Agent）。**只读反查视图**，仅 `/user/get`\n保证回填；写路径在 agent 侧（`AgentCreateRequest.owner_user_id`\n/ `AgentUpdateRequest.owner_user_id`）。\n
+     * @description List of Agent ids owned by the user (i.e. all Agents whose `AgentData.owner_user_id`\npoints to this user). **Read-only reverse-lookup view**, backfilled only by `/user/get`;\nthe write path is on the agent side (`AgentCreateRequest.owner_user_id`\n/ `AgentUpdateRequest.owner_user_id`).\n
      * @type array | undefined
     */
     readonly owned_agent_ids?: string[];
     /**
-     * @description 通过 `task_ids` 间接关联到的 Agent id 列表（即所参与的每个\nTask 的 `agent_ids` 并集，去重）。**只读派生字段**，仅\n`/user/get` 保证回填。\n
+     * @description List of Agent ids indirectly associated via `task_ids` (i.e. the de-duplicated union of the `agent_ids` of every\nTask the user participates in). **Read-only derived field**, backfilled only by\n`/user/get`.\n
      * @type array | undefined
     */
     readonly task_agent_ids?: string[];
@@ -1406,7 +1406,7 @@ export type UserData = {
 };
 
 /**
- * @description 创建 user。仅承载身份信息；跨实体关联不在这里写——加入 Team\n通过 team 侧 owner 关系派生，关联 Agent 通过 `AgentCreateRequest\n.owner_user_id`，关联 Task 通过 `TaskCreateRequest.creator_user_id`\n/ `TaskCreateRequest.user_ids`。\n
+ * @description Create a user. Carries identity information only; cross-entity associations are not written here - joining a Team\nis derived via the team-side owner relationship, associating an Agent is done via `AgentCreateRequest\n.owner_user_id`, associating a Task via `TaskCreateRequest.creator_user_id`\n/ `TaskCreateRequest.user_ids`.\n
 */
 export type UserCreateRequest = {
     /**
@@ -1420,7 +1420,7 @@ export type UserCreateRequest = {
 };
 
 /**
- * @description PATCH 语义，仅更新传入字段。跨实体关联同 `UserCreateRequest`，\n全部由对方侧承载，user 侧不接受关联写入。\n
+ * @description PATCH semantics, only the passed fields are updated. Cross-entity associations are the same as `UserCreateRequest`:\nall are carried by the other side; the user side does not accept association writes.\n
 */
 export type UserUpdateRequest = {
     /**
@@ -1449,36 +1449,36 @@ export type UserGetRequest = {
 };
 
 /**
- * @description Agent 主表（PRD §15.4 agents）。`agent_id` 全局唯一、不可变；\n与 `team_id` 组成**复合唯一键** `(team_id, agent_id)`，即同一\n`agent_id` 不会出现在两个 `team_id` 下。\n
+ * @description Agent master table (PRD §15.4 agents). `agent_id` is globally unique and immutable;\ntogether with `team_id` it forms the **composite unique key** `(team_id, agent_id)`, i.e. the same\n`agent_id` never appears under two `team_id`s.\n
 */
 export type AgentData = {
     /**
-     * @description 全局唯一 Agent id，服务端创建时生成。
+     * @description Globally unique Agent id, generated by the server on creation.
      * @type string
     */
     agent_id: string;
     /**
-     * @description 所属团队（一个 Agent 只属于一个 team）；与 `agent_id` 组成\n全局唯一复合键 `(team_id, agent_id)`。\n
+     * @description Owning team (an Agent belongs to exactly one team); together with `agent_id` forms the\nglobally unique composite key `(team_id, agent_id)`.\n
      * @type string
     */
     team_id: string;
     /**
-     * @description Agent 名称，team 内唯一。
+     * @description Agent name, unique within the team.
      * @type string
     */
     name: string;
     /**
-     * @description 一句话描述。
+     * @description One-line description.
      * @type string | undefined
     */
     description?: string;
     /**
-     * @description 职责和行为约束。
+     * @description Responsibilities and behavioral constraints.
      * @type string | undefined
     */
     prompt?: string;
     /**
-     * @description 该 Agent 的拥有者 user_id。Agent↔User \"拥有\"关系的**唯一\n写入路径**；同步反查视图 `UserData.owned_agent_ids`。\n
+     * @description user_id of the Agent's owner. The **only write path** for the Agent↔User \"ownership\" relationship;\nsynchronized reverse-lookup view: `UserData.owned_agent_ids`.\n
      * @type string | undefined
     */
     owner_user_id?: string;
@@ -1491,7 +1491,7 @@ export type AgentData = {
     */
     status: AgentStatus;
     /**
-     * @description 关联到本 Agent 的 Task id 列表。**只读反查视图**，仅\n`/agent/get` 保证回填；写路径在 task 侧\n（`TaskCreateRequest.agent_ids` / `TaskUpdateRequest.agent_ids`）。\n
+     * @description List of Task ids associated with this Agent. **Read-only reverse-lookup view**, backfilled only by\n`/agent/get`; the write path is on the task side\n(`TaskCreateRequest.agent_ids` / `TaskUpdateRequest.agent_ids`).\n
      * @type array | undefined
     */
     readonly task_ids?: string[];
@@ -1533,7 +1533,7 @@ export type AgentCreateRequest = {
 };
 
 /**
- * @description 以 `agent_id` 全局唯一寻址。客户端可**可选**额外传 `team_id`\n以触发 `(team_id, agent_id)` 复合键一致性校验（不可见 → 404；\n可见但不匹配 → 403，规则同 `info.description`）。\n
+ * @description Addressed by the globally unique `agent_id`. The client **may optionally** also pass `team_id`\nto trigger the `(team_id, agent_id)` composite key consistency check (not visible → 404;\nvisible but mismatched → 403, same rules as `info.description`).\n
 */
 export type AgentGetRequest = {
     /**
@@ -1541,14 +1541,14 @@ export type AgentGetRequest = {
     */
     agent_id: string;
     /**
-     * @description 可选；传入则与 `agent_id` 做复合键一致性校验。\n
+     * @description Optional; if passed, a composite key consistency check is performed against `agent_id`.\n
      * @type string | undefined
     */
     team_id?: string;
 };
 
 /**
- * @description PATCH 语义，仅更新传入字段。\n客户端可**可选**额外传 `team_id` 触发 `(team_id, agent_id)`\n复合键一致性校验（语义同 `AgentGetRequest`）。\n注意：`team_id` 不可作为更新目标（Agent 归属 team 不可变）；\n若与 `agent_id` 实际归属不一致按 403 处理。\n
+ * @description PATCH semantics, only the passed fields are updated.\nThe client **may optionally** also pass `team_id` to trigger the `(team_id, agent_id)`\ncomposite key consistency check (same semantics as `AgentGetRequest`).\nNote: `team_id` cannot be an update target (the team an Agent belongs to is immutable);\nif it does not match the actual ownership of `agent_id`, 403 is returned.\n
 */
 export type AgentUpdateRequest = {
     /**
@@ -1556,7 +1556,7 @@ export type AgentUpdateRequest = {
     */
     agent_id: string;
     /**
-     * @description 可选；仅用于复合键一致性校验，不参与更新。\n
+     * @description Optional; used only for the composite key consistency check, not part of the update.\n
      * @type string | undefined
     */
     team_id?: string;
@@ -1573,7 +1573,7 @@ export type AgentUpdateRequest = {
     */
     prompt?: string;
     /**
-     * @description 可选；传入即触发 owner 转移。新 owner 必须是本 Agent 所属\nteam 的当前成员，否则 422。转移成功后同步刷新双方\n`UserData.owned_agent_ids` 反查视图。\n
+     * @description Optional; if passed, triggers an owner transfer. The new owner must be a current member of\nthe team the Agent belongs to, otherwise 422. After a successful transfer, the\n`UserData.owned_agent_ids` reverse-lookup views of both parties are refreshed.\n
      * @type string | undefined
     */
     owner_user_id?: string;
@@ -1588,11 +1588,11 @@ export type AgentUpdateRequest = {
 };
 
 /**
- * @description Task 主表（PRD §15.5 tasks），含关联 Agent 与参与 User 列表。\nTask 是 User↔Task 与 Agent↔Task 两组多对多关系的**写权威侧**。\n
+ * @description Task master table (PRD §15.5 tasks), including the associated Agent and participant User lists.\nTask is the **authoritative write side** of the two many-to-many relationships User↔Task and Agent↔Task.\n
 */
 export type TaskData = {
     /**
-     * @description 全局唯一 Task id，服务端创建时生成。
+     * @description Globally unique Task id, generated by the server on creation.
      * @type string
     */
     task_id: string;
@@ -1601,7 +1601,7 @@ export type TaskData = {
     */
     team_id: string;
     /**
-     * @description 创建者 user_id，**创建时必填、不可改**；与 `user_ids` 不重复\n语义——创建者自动计入 `user_ids` 反查集合。\n
+     * @description Creator user_id, **required at creation and immutable**; not redundant with `user_ids`\nsemantically - the creator is automatically counted in the `user_ids` reverse-lookup set.\n
      * @type string
     */
     creator_user_id: string;
@@ -1622,12 +1622,12 @@ export type TaskData = {
     */
     source_url?: string;
     /**
-     * @description 该 Task 关联的 Agent id 列表。每个 `agent_id` 都必须满足\n`(team_id, agent_id)` 复合键一致性（与本 Task 的 `team_id`\n同一 team）；否则按全接口统一规则处理（不可见 404 /\n可见但归属不匹配 403）。\n
+     * @description List of Agent ids associated with this Task. Each `agent_id` must satisfy\n`(team_id, agent_id)` composite key consistency (same team as this Task's `team_id`);\notherwise the uniform cross-endpoint rules apply (not visible 404 /\nvisible but ownership mismatch 403).\n
      * @type array | undefined
     */
     agent_ids?: string[];
     /**
-     * @description 该 Task 关联的参与方 user_id 列表（不含 `creator_user_id`；\n创建者由 `creator_user_id` 单独承载）。User↔Task **多对多\n关系的写权威字段**；同步反查视图 `UserData.task_ids`。\n每个 `user_id` 须为本 Task 所属 team 的当前成员。\n
+     * @description List of participant user_ids associated with this Task (excluding `creator_user_id`;\nthe creator is carried separately by `creator_user_id`). Authoritative write field of the User↔Task **many-to-many\nrelationship**; synchronized reverse-lookup view: `UserData.task_ids`.\nEach `user_id` must be a current member of the team this Task belongs to.\n
      * @type array | undefined
     */
     user_ids?: string[];
@@ -1643,12 +1643,12 @@ export type TaskData = {
 
 export type TaskCreateRequest = {
     /**
-     * @description 所属 team；**创建时必填、不可改**（更新无此字段）。
+     * @description Owning team; **required at creation and immutable** (not present on update).
      * @type string
     */
     team_id: string;
     /**
-     * @description 创建者 user_id，**创建时必填、不可改**（更新无此字段）。须为\n`team_id` 所属 team 的当前成员。\n
+     * @description Creator user_id, **required at creation and immutable** (not present on update). Must be a\ncurrent member of the team identified by `team_id`.\n
      * @type string
     */
     creator_user_id: string;
@@ -1665,17 +1665,17 @@ export type TaskCreateRequest = {
     */
     source_type?: TaskSourceType;
     /**
-     * @description 来源链接；SSRF 白名单同 WikiCreateRequest.source_url。
+     * @description Source link; the SSRF allow-list is the same as WikiCreateRequest.source_url.
      * @type string | undefined
     */
     source_url?: string;
     /**
-     * @description 可选，创建时一并关联的 Agent id。每个 `agent_id` 须满足\n`(team_id, agent_id)` 复合键一致性（与 `team_id` 同一 team）；\n否则按全接口统一规则处理（404 / 403）。\n
+     * @description Optional; Agent ids to associate at creation time. Each `agent_id` must satisfy\n`(team_id, agent_id)` composite key consistency (same team as `team_id`);\notherwise the uniform cross-endpoint rules apply (404 / 403).\n
      * @type array | undefined
     */
     agent_ids?: string[];
     /**
-     * @description 可选，创建时一并关联的参与方 user_id 列表（不含 creator；\ncreator 由 `creator_user_id` 单独承载）。每个 `user_id` 须为\n`team_id` 所属 team 的当前成员，否则 422。\n
+     * @description Optional; participant user_ids to associate at creation time (excluding creator;\ncreator is carried separately by `creator_user_id`). Each `user_id` must be a\ncurrent member of the team identified by `team_id`, otherwise 422.\n
      * @type array | undefined
     */
     user_ids?: string[];
@@ -1689,7 +1689,7 @@ export type TaskGetRequest = {
 };
 
 /**
- * @description PATCH 语义，仅更新传入字段。`team_id` 与 `creator_user_id` **不\n可改**（请求体不接受这两个字段）；如需变更归属请走删除重建。\n
+ * @description PATCH semantics, only the passed fields are updated. `team_id` and `creator_user_id` are **immutable**\n(the request body does not accept these two fields); to change ownership, delete and recreate.\n
 */
 export type TaskUpdateRequest = {
     /**
@@ -1713,19 +1713,19 @@ export type TaskUpdateRequest = {
     */
     source_url?: string;
     /**
-     * @description 传入则整体替换 Task 的关联 Agent 集合；不传则保持不变，传空\n数组表示清空关联。每个 `agent_id` 须满足 `(team_id,\nagent_id)` 复合键一致性（与该 Task 的 `team_id` 同一 team），\n否则按全接口统一规则处理（404 / 403）。\n
+     * @description If passed, replaces the Task's associated Agent set as a whole; if omitted it is unchanged, an empty\narray means clear the associations. Each `agent_id` must satisfy `(team_id,\nagent_id)` composite key consistency (same team as the Task's `team_id`),\notherwise the uniform cross-endpoint rules apply (404 / 403).\n
      * @type array | undefined
     */
     agent_ids?: string[];
     /**
-     * @description 传入则整体替换 Task 的关联参与方 user 集合（不含 creator）；\n不传则保持不变，传空数组表示清空关联。每个 `user_id` 须为\n本 Task 所属 team 的当前成员，否则 422。\n
+     * @description If passed, replaces the Task's associated participant user set as a whole (excluding creator);\nif omitted it is unchanged, an empty array means clear the associations. Each `user_id` must be a\ncurrent member of the team this Task belongs to, otherwise 422.\n
      * @type array | undefined
     */
     user_ids?: string[];
 };
 
 /**
- * @description 受理成功
+ * @description Accepted
 */
 export type AddConversation200 = (ApiResponseEnvelope & {
     /**
@@ -1735,7 +1735,7 @@ export type AddConversation200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type AddConversationError = ApiResponseEnvelope;
 
@@ -1750,7 +1750,7 @@ export type AddConversationMutation = {
 };
 
 /**
- * @description 查询成功
+ * @description Query succeeded
 */
 export type QueryConversation200 = (ApiResponseEnvelope & {
     /**
@@ -1760,7 +1760,7 @@ export type QueryConversation200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type QueryConversationError = ApiResponseEnvelope;
 
@@ -1775,7 +1775,7 @@ export type QueryConversationMutation = {
 };
 
 /**
- * @description 检索成功
+ * @description Search succeeded
 */
 export type SearchConversation200 = (ApiResponseEnvelope & {
     /**
@@ -1785,7 +1785,7 @@ export type SearchConversation200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type SearchConversationError = ApiResponseEnvelope;
 
@@ -1800,7 +1800,7 @@ export type SearchConversationMutation = {
 };
 
 /**
- * @description 删除成功
+ * @description Delete succeeded
 */
 export type DeleteConversation200 = (ApiResponseEnvelope & {
     /**
@@ -1810,7 +1810,7 @@ export type DeleteConversation200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteConversationError = ApiResponseEnvelope;
 
@@ -1825,7 +1825,7 @@ export type DeleteConversationMutation = {
 };
 
 /**
- * @description 更新成功
+ * @description Update succeeded
 */
 export type UpdateAtomic200 = (ApiResponseEnvelope & {
     /**
@@ -1835,7 +1835,7 @@ export type UpdateAtomic200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type UpdateAtomicError = ApiResponseEnvelope;
 
@@ -1850,7 +1850,7 @@ export type UpdateAtomicMutation = {
 };
 
 /**
- * @description 查询成功
+ * @description Query succeeded
 */
 export type QueryAtomic200 = (ApiResponseEnvelope & {
     /**
@@ -1860,7 +1860,7 @@ export type QueryAtomic200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type QueryAtomicError = ApiResponseEnvelope;
 
@@ -1875,7 +1875,7 @@ export type QueryAtomicMutation = {
 };
 
 /**
- * @description 检索成功
+ * @description Search succeeded
 */
 export type SearchAtomic200 = (ApiResponseEnvelope & {
     /**
@@ -1885,7 +1885,7 @@ export type SearchAtomic200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type SearchAtomicError = ApiResponseEnvelope;
 
@@ -1900,7 +1900,7 @@ export type SearchAtomicMutation = {
 };
 
 /**
- * @description 删除成功
+ * @description Delete succeeded
 */
 export type DeleteAtomic200 = (ApiResponseEnvelope & {
     /**
@@ -1910,7 +1910,7 @@ export type DeleteAtomic200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteAtomicError = ApiResponseEnvelope;
 
@@ -1925,7 +1925,7 @@ export type DeleteAtomicMutation = {
 };
 
 /**
- * @description 列举成功
+ * @description List succeeded
 */
 export type LsScenario200 = (ApiResponseEnvelope & {
     /**
@@ -1935,7 +1935,7 @@ export type LsScenario200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type LsScenarioError = ApiResponseEnvelope;
 
@@ -1950,7 +1950,7 @@ export type LsScenarioMutation = {
 };
 
 /**
- * @description 读取成功
+ * @description Read succeeded
 */
 export type ReadScenario200 = (ApiResponseEnvelope & {
     /**
@@ -1960,7 +1960,7 @@ export type ReadScenario200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type ReadScenarioError = ApiResponseEnvelope;
 
@@ -1975,7 +1975,7 @@ export type ReadScenarioMutation = {
 };
 
 /**
- * @description 写入成功
+ * @description Write succeeded
 */
 export type WriteScenario200 = (ApiResponseEnvelope & {
     /**
@@ -1985,7 +1985,7 @@ export type WriteScenario200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type WriteScenarioError = ApiResponseEnvelope;
 
@@ -2000,12 +2000,12 @@ export type WriteScenarioMutation = {
 };
 
 /**
- * @description 删除成功
+ * @description Delete succeeded
 */
 export type RmScenario200 = ApiResponseEnvelope;
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type RmScenarioError = ApiResponseEnvelope;
 
@@ -2020,7 +2020,7 @@ export type RmScenarioMutation = {
 };
 
 /**
- * @description 读取成功
+ * @description Read succeeded
 */
 export type ReadCore200 = (ApiResponseEnvelope & {
     /**
@@ -2030,7 +2030,7 @@ export type ReadCore200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type ReadCoreError = ApiResponseEnvelope;
 
@@ -2045,7 +2045,7 @@ export type ReadCoreMutation = {
 };
 
 /**
- * @description 写入成功
+ * @description Write succeeded
 */
 export type WriteCore200 = (ApiResponseEnvelope & {
     /**
@@ -2055,7 +2055,7 @@ export type WriteCore200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type WriteCoreError = ApiResponseEnvelope;
 
@@ -2070,18 +2070,18 @@ export type WriteCoreMutation = {
 };
 
 /**
- * @description 列举成功
+ * @description List succeeded
 */
 export type ListSkill200 = (ApiResponseEnvelope & {
     /**
-     * @description 列表项使用 `SkillSummary`（不含 `content`）。需要 SKILL.md 全文请\n改调 `/skill/get`，避免列表 payload 随 SKILL.md 大小线性放大。\n
+     * @description List items use `SkillSummary` (without `content`). To get the full SKILL.md text call\n`/skill/get`, so the list payload does not grow linearly with SKILL.md size.\n
      * @type object | undefined
     */
     data?: SkillListData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type ListSkillError = ApiResponseEnvelope;
 
@@ -2096,14 +2096,14 @@ export type ListSkillMutation = {
 };
 
 /**
- * @description 读取成功
+ * @description Read succeeded
 */
 export type GetSkill200 = (ApiResponseEnvelope & {
     data?: SkillDetail;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type GetSkillError = ApiResponseEnvelope;
 
@@ -2118,18 +2118,18 @@ export type GetSkillMutation = {
 };
 
 /**
- * @description 新建成功
+ * @description Created successfully
 */
 export type CreateSkill200 = (ApiResponseEnvelope & {
     /**
-     * @description Skill 写入类操作（create/update）返回的元信息。`skill_id`\n是后续寻址（get/update/delete）的首选键；首次 create 时由\n服务端分配并返回。\n
+     * @description Metadata returned by Skill write operations (create/update). `skill_id`\nis the preferred key for subsequent addressing (get/update/delete); it is assigned by the\nserver and returned on first create.\n
      * @type object | undefined
     */
     data?: SkillMutateData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type CreateSkillError = ApiResponseEnvelope;
 
@@ -2144,18 +2144,18 @@ export type CreateSkillMutation = {
 };
 
 /**
- * @description 更新成功
+ * @description Update succeeded
 */
 export type UpdateSkill200 = (ApiResponseEnvelope & {
     /**
-     * @description Skill 写入类操作（create/update）返回的元信息。`skill_id`\n是后续寻址（get/update/delete）的首选键；首次 create 时由\n服务端分配并返回。\n
+     * @description Metadata returned by Skill write operations (create/update). `skill_id`\nis the preferred key for subsequent addressing (get/update/delete); it is assigned by the\nserver and returned on first create.\n
      * @type object | undefined
     */
     data?: SkillMutateData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type UpdateSkillError = ApiResponseEnvelope;
 
@@ -2170,12 +2170,12 @@ export type UpdateSkillMutation = {
 };
 
 /**
- * @description 删除成功
+ * @description Delete succeeded
 */
 export type DeleteSkill200 = ApiResponseEnvelope;
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteSkillError = ApiResponseEnvelope;
 
@@ -2190,7 +2190,7 @@ export type DeleteSkillMutation = {
 };
 
 /**
- * @description 检索成功
+ * @description Search succeeded
 */
 export type SearchSkill200 = (ApiResponseEnvelope & {
     /**
@@ -2200,7 +2200,7 @@ export type SearchSkill200 = (ApiResponseEnvelope & {
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type SearchSkillError = ApiResponseEnvelope;
 
@@ -2215,18 +2215,18 @@ export type SearchSkillMutation = {
 };
 
 /**
- * @description 抽取成功
+ * @description Extraction succeeded
 */
 export type ImportSkill200 = (ApiResponseEnvelope & {
     /**
-     * @description 抽取响应。服务端固定落库为 `status=draft`，等待审核\n（对齐 PRD §16）。\n
+     * @description Extraction response. The server always persists it as `status=draft`, pending review\n(aligned with PRD §16).\n
      * @type object | undefined
     */
     data?: SkillImportData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type ImportSkillError = ApiResponseEnvelope;
 
@@ -2241,18 +2241,18 @@ export type ImportSkillMutation = {
 };
 
 /**
- * @description 创建成功
+ * @description Created successfully
 */
 export type CreateTeam200 = (ApiResponseEnvelope & {
     /**
-     * @description 团队主表（PRD §15.1 teams），并在 `/team/get` 响应里回填该团队\n当前的成员/资产 id 集合（`user_ids` / `agent_ids` / `task_ids`），\n作为 4 实体反向归属的唯一查询入口（替代被砍掉的 list 接口）。\n
+     * @description Team master table (PRD §15.1 teams); the `/team/get` response also backfills the team's\ncurrent member/asset id sets (`user_ids` / `agent_ids` / `task_ids`),\nserving as the single query entry for the reverse ownership of the 4 entities (replacing the removed list endpoints).\n
      * @type object | undefined
     */
     data?: TeamData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type CreateTeamError = ApiResponseEnvelope;
 
@@ -2267,18 +2267,18 @@ export type CreateTeamMutation = {
 };
 
 /**
- * @description 查询成功
+ * @description Query succeeded
 */
 export type GetTeam200 = (ApiResponseEnvelope & {
     /**
-     * @description 团队主表（PRD §15.1 teams），并在 `/team/get` 响应里回填该团队\n当前的成员/资产 id 集合（`user_ids` / `agent_ids` / `task_ids`），\n作为 4 实体反向归属的唯一查询入口（替代被砍掉的 list 接口）。\n
+     * @description Team master table (PRD §15.1 teams); the `/team/get` response also backfills the team's\ncurrent member/asset id sets (`user_ids` / `agent_ids` / `task_ids`),\nserving as the single query entry for the reverse ownership of the 4 entities (replacing the removed list endpoints).\n
      * @type object | undefined
     */
     data?: TeamData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type GetTeamError = ApiResponseEnvelope;
 
@@ -2293,18 +2293,18 @@ export type GetTeamMutation = {
 };
 
 /**
- * @description 更新成功
+ * @description Update succeeded
 */
 export type UpdateTeam200 = (ApiResponseEnvelope & {
     /**
-     * @description 团队主表（PRD §15.1 teams），并在 `/team/get` 响应里回填该团队\n当前的成员/资产 id 集合（`user_ids` / `agent_ids` / `task_ids`），\n作为 4 实体反向归属的唯一查询入口（替代被砍掉的 list 接口）。\n
+     * @description Team master table (PRD §15.1 teams); the `/team/get` response also backfills the team's\ncurrent member/asset id sets (`user_ids` / `agent_ids` / `task_ids`),\nserving as the single query entry for the reverse ownership of the 4 entities (replacing the removed list endpoints).\n
      * @type object | undefined
     */
     data?: TeamData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type UpdateTeamError = ApiResponseEnvelope;
 
@@ -2319,18 +2319,18 @@ export type UpdateTeamMutation = {
 };
 
 /**
- * @description 删除完成（可能部分成功）
+ * @description Delete completed (may be partial success)
 */
 export type DeleteTeam200 = (ApiResponseEnvelope & {
     /**
-     * @description 批量软删的结果，部分成功语义：成功的 id 进入 `deleted_ids`，\n其余进入 `failed`，每条带 `id` 与 `reason`（鉴权 / 不存在 / 状态不可删 等）。\n外层 envelope 仍返回 200；调用方需检查 `failed` 是否为空。\n
+     * @description Result of a batch soft delete, with partial-success semantics: successful ids go into `deleted_ids`,\nthe rest go into `failed`, each with `id` and `reason` (authentication / not found / status not deletable, etc.).\nThe outer envelope still returns 200; callers must check whether `failed` is empty.\n
      * @type object | undefined
     */
     data?: BatchDeleteResult;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteTeamError = ApiResponseEnvelope;
 
@@ -2345,18 +2345,18 @@ export type DeleteTeamMutation = {
 };
 
 /**
- * @description 创建成功
+ * @description Created successfully
 */
 export type CreateUser200 = (ApiResponseEnvelope & {
     /**
-     * @description 用户主表（PRD §15.2 users）。User 自身只承载身份信息（name /\njob_description / status）；与 Team / Task / Agent 的所有关联\n**写路径都在对方侧**（Team 由 `TeamUpdateRequest.user_ids` 维护\n成员、`TeamCreateRequest.owner_user_id` 写入首位 owner；Agent 写\n`owner_user_id`；Task 写 `creator_user_id`）。此处的 `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` 均为**只读反查\n视图**，仅 `/user/get` 保证回填；create/update 响应可能为空数组\n或缺省。\n
+     * @description User master table (PRD §15.2 users). A User itself only carries identity information (name /\njob_description / status); all associations with Team / Task / Agent are\n**written on the other side** (Team maintains members via `TeamUpdateRequest.user_ids`,\n`TeamCreateRequest.owner_user_id` writes the first owner; Agent writes\n`owner_user_id`; Task writes `creator_user_id`). Here `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` are all **read-only reverse-lookup\nviews**, backfilled only by `/user/get`; create/update responses may return an empty array\nor omit them.\n
      * @type object | undefined
     */
     data?: UserData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type CreateUserError = ApiResponseEnvelope;
 
@@ -2371,18 +2371,18 @@ export type CreateUserMutation = {
 };
 
 /**
- * @description 查询成功
+ * @description Query succeeded
 */
 export type GetUser200 = (ApiResponseEnvelope & {
     /**
-     * @description 用户主表（PRD §15.2 users）。User 自身只承载身份信息（name /\njob_description / status）；与 Team / Task / Agent 的所有关联\n**写路径都在对方侧**（Team 由 `TeamUpdateRequest.user_ids` 维护\n成员、`TeamCreateRequest.owner_user_id` 写入首位 owner；Agent 写\n`owner_user_id`；Task 写 `creator_user_id`）。此处的 `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` 均为**只读反查\n视图**，仅 `/user/get` 保证回填；create/update 响应可能为空数组\n或缺省。\n
+     * @description User master table (PRD §15.2 users). A User itself only carries identity information (name /\njob_description / status); all associations with Team / Task / Agent are\n**written on the other side** (Team maintains members via `TeamUpdateRequest.user_ids`,\n`TeamCreateRequest.owner_user_id` writes the first owner; Agent writes\n`owner_user_id`; Task writes `creator_user_id`). Here `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` are all **read-only reverse-lookup\nviews**, backfilled only by `/user/get`; create/update responses may return an empty array\nor omit them.\n
      * @type object | undefined
     */
     data?: UserData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type GetUserError = ApiResponseEnvelope;
 
@@ -2397,18 +2397,18 @@ export type GetUserMutation = {
 };
 
 /**
- * @description 更新成功
+ * @description Update succeeded
 */
 export type UpdateUser200 = (ApiResponseEnvelope & {
     /**
-     * @description 用户主表（PRD §15.2 users）。User 自身只承载身份信息（name /\njob_description / status）；与 Team / Task / Agent 的所有关联\n**写路径都在对方侧**（Team 由 `TeamUpdateRequest.user_ids` 维护\n成员、`TeamCreateRequest.owner_user_id` 写入首位 owner；Agent 写\n`owner_user_id`；Task 写 `creator_user_id`）。此处的 `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` 均为**只读反查\n视图**，仅 `/user/get` 保证回填；create/update 响应可能为空数组\n或缺省。\n
+     * @description User master table (PRD §15.2 users). A User itself only carries identity information (name /\njob_description / status); all associations with Team / Task / Agent are\n**written on the other side** (Team maintains members via `TeamUpdateRequest.user_ids`,\n`TeamCreateRequest.owner_user_id` writes the first owner; Agent writes\n`owner_user_id`; Task writes `creator_user_id`). Here `team_ids` /\n`task_ids` / `owned_agent_ids` / `task_agent_ids` are all **read-only reverse-lookup\nviews**, backfilled only by `/user/get`; create/update responses may return an empty array\nor omit them.\n
      * @type object | undefined
     */
     data?: UserData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type UpdateUserError = ApiResponseEnvelope;
 
@@ -2423,18 +2423,18 @@ export type UpdateUserMutation = {
 };
 
 /**
- * @description 删除完成（可能部分成功）
+ * @description Delete completed (may be partial success)
 */
 export type DeleteUser200 = (ApiResponseEnvelope & {
     /**
-     * @description 批量软删的结果，部分成功语义：成功的 id 进入 `deleted_ids`，\n其余进入 `failed`，每条带 `id` 与 `reason`（鉴权 / 不存在 / 状态不可删 等）。\n外层 envelope 仍返回 200；调用方需检查 `failed` 是否为空。\n
+     * @description Result of a batch soft delete, with partial-success semantics: successful ids go into `deleted_ids`,\nthe rest go into `failed`, each with `id` and `reason` (authentication / not found / status not deletable, etc.).\nThe outer envelope still returns 200; callers must check whether `failed` is empty.\n
      * @type object | undefined
     */
     data?: BatchDeleteResult;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteUserError = ApiResponseEnvelope;
 
@@ -2449,18 +2449,18 @@ export type DeleteUserMutation = {
 };
 
 /**
- * @description 创建成功
+ * @description Created successfully
 */
 export type CreateAgent200 = (ApiResponseEnvelope & {
     /**
-     * @description Agent 主表（PRD §15.4 agents）。`agent_id` 全局唯一、不可变；\n与 `team_id` 组成**复合唯一键** `(team_id, agent_id)`，即同一\n`agent_id` 不会出现在两个 `team_id` 下。\n
+     * @description Agent master table (PRD §15.4 agents). `agent_id` is globally unique and immutable;\ntogether with `team_id` it forms the **composite unique key** `(team_id, agent_id)`, i.e. the same\n`agent_id` never appears under two `team_id`s.\n
      * @type object | undefined
     */
     data?: AgentData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type CreateAgentError = ApiResponseEnvelope;
 
@@ -2475,18 +2475,18 @@ export type CreateAgentMutation = {
 };
 
 /**
- * @description 查询成功
+ * @description Query succeeded
 */
 export type GetAgent200 = (ApiResponseEnvelope & {
     /**
-     * @description Agent 主表（PRD §15.4 agents）。`agent_id` 全局唯一、不可变；\n与 `team_id` 组成**复合唯一键** `(team_id, agent_id)`，即同一\n`agent_id` 不会出现在两个 `team_id` 下。\n
+     * @description Agent master table (PRD §15.4 agents). `agent_id` is globally unique and immutable;\ntogether with `team_id` it forms the **composite unique key** `(team_id, agent_id)`, i.e. the same\n`agent_id` never appears under two `team_id`s.\n
      * @type object | undefined
     */
     data?: AgentData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type GetAgentError = ApiResponseEnvelope;
 
@@ -2501,18 +2501,18 @@ export type GetAgentMutation = {
 };
 
 /**
- * @description 更新成功
+ * @description Update succeeded
 */
 export type UpdateAgent200 = (ApiResponseEnvelope & {
     /**
-     * @description Agent 主表（PRD §15.4 agents）。`agent_id` 全局唯一、不可变；\n与 `team_id` 组成**复合唯一键** `(team_id, agent_id)`，即同一\n`agent_id` 不会出现在两个 `team_id` 下。\n
+     * @description Agent master table (PRD §15.4 agents). `agent_id` is globally unique and immutable;\ntogether with `team_id` it forms the **composite unique key** `(team_id, agent_id)`, i.e. the same\n`agent_id` never appears under two `team_id`s.\n
      * @type object | undefined
     */
     data?: AgentData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type UpdateAgentError = ApiResponseEnvelope;
 
@@ -2527,18 +2527,18 @@ export type UpdateAgentMutation = {
 };
 
 /**
- * @description 删除完成（可能部分成功）
+ * @description Delete completed (may be partial success)
 */
 export type DeleteAgent200 = (ApiResponseEnvelope & {
     /**
-     * @description 批量软删的结果，部分成功语义：成功的 id 进入 `deleted_ids`，\n其余进入 `failed`，每条带 `id` 与 `reason`（鉴权 / 不存在 / 状态不可删 等）。\n外层 envelope 仍返回 200；调用方需检查 `failed` 是否为空。\n
+     * @description Result of a batch soft delete, with partial-success semantics: successful ids go into `deleted_ids`,\nthe rest go into `failed`, each with `id` and `reason` (authentication / not found / status not deletable, etc.).\nThe outer envelope still returns 200; callers must check whether `failed` is empty.\n
      * @type object | undefined
     */
     data?: BatchDeleteResult;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteAgentError = ApiResponseEnvelope;
 
@@ -2553,18 +2553,18 @@ export type DeleteAgentMutation = {
 };
 
 /**
- * @description 创建成功
+ * @description Created successfully
 */
 export type CreateTask200 = (ApiResponseEnvelope & {
     /**
-     * @description Task 主表（PRD §15.5 tasks），含关联 Agent 与参与 User 列表。\nTask 是 User↔Task 与 Agent↔Task 两组多对多关系的**写权威侧**。\n
+     * @description Task master table (PRD §15.5 tasks), including the associated Agent and participant User lists.\nTask is the **authoritative write side** of the two many-to-many relationships User↔Task and Agent↔Task.\n
      * @type object | undefined
     */
     data?: TaskData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type CreateTaskError = ApiResponseEnvelope;
 
@@ -2579,18 +2579,18 @@ export type CreateTaskMutation = {
 };
 
 /**
- * @description 查询成功
+ * @description Query succeeded
 */
 export type GetTask200 = (ApiResponseEnvelope & {
     /**
-     * @description Task 主表（PRD §15.5 tasks），含关联 Agent 与参与 User 列表。\nTask 是 User↔Task 与 Agent↔Task 两组多对多关系的**写权威侧**。\n
+     * @description Task master table (PRD §15.5 tasks), including the associated Agent and participant User lists.\nTask is the **authoritative write side** of the two many-to-many relationships User↔Task and Agent↔Task.\n
      * @type object | undefined
     */
     data?: TaskData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type GetTaskError = ApiResponseEnvelope;
 
@@ -2605,18 +2605,18 @@ export type GetTaskMutation = {
 };
 
 /**
- * @description 更新成功
+ * @description Update succeeded
 */
 export type UpdateTask200 = (ApiResponseEnvelope & {
     /**
-     * @description Task 主表（PRD §15.5 tasks），含关联 Agent 与参与 User 列表。\nTask 是 User↔Task 与 Agent↔Task 两组多对多关系的**写权威侧**。\n
+     * @description Task master table (PRD §15.5 tasks), including the associated Agent and participant User lists.\nTask is the **authoritative write side** of the two many-to-many relationships User↔Task and Agent↔Task.\n
      * @type object | undefined
     */
     data?: TaskData;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type UpdateTaskError = ApiResponseEnvelope;
 
@@ -2631,18 +2631,18 @@ export type UpdateTaskMutation = {
 };
 
 /**
- * @description 删除完成（可能部分成功）
+ * @description Delete completed (may be partial success)
 */
 export type DeleteTask200 = (ApiResponseEnvelope & {
     /**
-     * @description 批量软删的结果，部分成功语义：成功的 id 进入 `deleted_ids`，\n其余进入 `failed`，每条带 `id` 与 `reason`（鉴权 / 不存在 / 状态不可删 等）。\n外层 envelope 仍返回 200；调用方需检查 `failed` 是否为空。\n
+     * @description Result of a batch soft delete, with partial-success semantics: successful ids go into `deleted_ids`,\nthe rest go into `failed`, each with `id` and `reason` (authentication / not found / status not deletable, etc.).\nThe outer envelope still returns 200; callers must check whether `failed` is empty.\n
      * @type object | undefined
     */
     data?: BatchDeleteResult;
 });
 
 /**
- * @description 业务错误（HTTP 200/4xx/5xx 均可能返回）
+ * @description Business error (may be returned with HTTP 200/4xx/5xx)
 */
 export type DeleteTaskError = ApiResponseEnvelope;
 
