@@ -1933,7 +1933,7 @@ function stripScenarioMeta(content: string): string {
 
 function stripL3SceneTail(content: string): string {
   const withFooter = content.search(
-    /\n---\s*\n\s*> \*\*最后更新\*\*[\s\S]*?\n---\s*\n## 🗺️ Scene Navigation/,
+    /\n---\s*\n\s*> \*\*(?:最后更新|Last updated)\*\*[\s\S]*?\n---\s*\n## 🗺️ Scene Navigation/,
   );
   if (withFooter >= 0) return content.slice(0, withFooter).trimEnd();
   const sceneIndex = content.search(

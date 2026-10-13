@@ -248,7 +248,7 @@ Refer to the format below and use the **write** or **edit** tool to write the fi
 
 ---
 
-> **最后更新**: [current time] · **Source scenes**: [number of scenes] · **Total memories**: [total memories]
+> **Last updated**: [current time] · **Source scenes**: [number of scenes] · **Total memories**: [total memories]
 
 ---
 

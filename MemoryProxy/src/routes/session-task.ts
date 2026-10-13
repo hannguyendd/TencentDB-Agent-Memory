@@ -503,7 +503,7 @@ export async function updateTaskFromSession(
     return {
       success: false,
       error:
-        "no task bound to this session (session is in \"暂时跳过\" mode or task_id missing); " +
+        "no task bound to this session (session is in \"skip for now\" mode or task_id missing); " +
         "use mem:create-task to create and bind a new task first",
     };
   }

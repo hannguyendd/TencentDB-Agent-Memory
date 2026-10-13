@@ -24,7 +24,7 @@
  *        tool_use_error / tool_result, etc.)
  *      - single-line tool echoes (Bash completed / Read's cat -n format / Write success receipts)
  *      - MEMORY.md-style yaml frontmatter blocks
- *      - leftover title lines "会话初始化 — ..." ("Session initialization — ..."; Chinese marker matched at runtime)
+ *      - leftover title lines "Session Init — ..." (legacy Chinese marker "会话初始化" also matched for old sessions)
  *      -> whatever remains after stripping is what the user typed
  *
  * Migration history: this file was extracted from tdai/recorder.ts (originally private to tdai); semantics unchanged.
@@ -36,7 +36,7 @@
  * Title marker of the session initialization (choose Team / Agent / task) form Q&A.
  * Used to strip leftover title lines; real user input is unaffected.
  */
-const SESSION_INIT_TITLE_MARKER = "会话初始化";
+const SESSION_INIT_TITLE_MARKERS = ["Session Init", "会话初始化"];
 
 /**
  * Recognizer for "internal auxiliary prompts" that the Claude Code CLI stuffs into the conversation stream with role=user.
@@ -183,10 +183,10 @@ export function extractUserQueryText(raw: string): string {
     "\n",
   );
 
-  // 2e) Leftover session initialization form title lines (e.g. "会话初始化 — 选择 Agent 与任务", i.e. "Session initialization — choose Agent and task")
+  // 2e) Leftover session initialization form title lines (e.g. "Session Init — choose Agent and task"; legacy Chinese "会话初始化 — ..." also matched)
   text = text
     .split("\n")
-    .filter((line) => !line.includes(SESSION_INIT_TITLE_MARKER))
+    .filter((line) => !SESSION_INIT_TITLE_MARKERS.some((m) => line.includes(m)))
     .join("\n");
 
   // 2f) Collapse extra blank lines (large blank runs may remain after the earlier stripping)

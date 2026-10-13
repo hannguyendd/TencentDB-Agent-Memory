@@ -223,7 +223,7 @@ export function registerMetaProxyRoutes(api: Hono, deps: PanelDeps): void {
 
 // Default Agent preset fields (aligned with kernel DEFAULT_AGENT_*, used to create default-agent when there is no template)
 const DEFAULT_AGENT_NAME = 'default-agent';
-const DEFAULT_AGENT_DESCRIPTION = 'Default assistant that handles general development tasks and everyday collaboration.';
+const DEFAULT_AGENT_DESCRIPTION = 'Default assistant that can handle general development tasks and day-to-day collaboration.';
 const DEFAULT_AGENT_PROMPT = '';
 const DEFAULT_AGENT_METADATA_JSON = JSON.stringify({
   ui: { role_prompt: '', rules_prompt: '' },

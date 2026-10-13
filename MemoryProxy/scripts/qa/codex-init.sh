@@ -96,14 +96,14 @@ CID1="$(echo "$R1" | call_id_of)"
 echo "  call_id=$CID1  stage=$(echo "$R1" | extract_stage)" >&2
 
 if [[ "$MODE" == "bypass" ]]; then
-    R2="$(send_form_answer "$CID1" "否，本次不关联")"  # option label: "No, do not link this time"
+    R2="$(send_form_answer "$CID1" "No, do not associate this time")"
   echo "  BYPASSED" >&2
   echo "$SID"
   echo "SID=$SID BYPASSED=1" > /tmp/codex-qa-sid.env
   exit 0
 fi
 
-R2="$(send_form_answer "$CID1" "是，关联团队资产")"  # option label: "Yes, link team assets"
+R2="$(send_form_answer "$CID1" "Yes, associate team assets")"
 CID2="$(echo "$R2" | call_id_of)"
 STAGE2="$(echo "$R2" | extract_stage)"
 echo "  step2 stage=$STAGE2 call_id=$CID2" >&2
