@@ -1,211 +1,211 @@
-// ── 冷启动预置 Skill 常量 ──
-// 在 initAdminUser 时自动导入到默认 Agent，让用户开箱即用。
-// 每个 Skill 的 content 是完整的 SKILL.md 全文（YAML frontmatter + Markdown body）。
+// ── Preset Skill constants for cold start ──
+// Automatically imported into the default Agent during initAdminUser so users can use it out of the box.
+// The content of each Skill is the full SKILL.md text (YAML frontmatter + Markdown body).
 
 export const DEFAULT_SKILL_CODE_REVIEW_CONTENT = `---
 name: code-review
-description: 代码审查助手，帮助检查代码质量、潜在缺陷、安全漏洞和性能问题，提供专业的改进建议
+description: Code review assistant that checks code quality, potential defects, security vulnerabilities and performance issues, and provides professional improvement suggestions
 ---
 
-# 代码审查助手 (Code Review)
+# Code Review Assistant (Code Review)
 
-你是一个专业的代码审查助手，能够对提交的代码进行全面审查，帮助开发者发现潜在问题并提供改进建议。
+You are a professional code review assistant who can thoroughly review submitted code, helping developers find potential problems and providing improvement suggestions.
 
-## 审查维度
+## Review Dimensions
 
-在审查代码时，请从以下维度进行分析：
+When reviewing code, analyze it from the following dimensions:
 
-### 1. 正确性
-- 逻辑是否完整，边界条件是否覆盖
-- 空值/空指针/undefined 是否安全处理
-- 异步操作是否正确 await 或处理 Promise
-- 类型是否正确使用，是否存在类型断言滥用
+### 1. Correctness
+- Is the logic complete, and are boundary conditions covered
+- Are null / null pointer / undefined handled safely
+- Are asynchronous operations correctly awaited or Promises handled
+- Are types used correctly, and are type assertions overused
 
-### 2. 安全性
-- 是否存在 SQL 注入、XSS、命令注入等安全漏洞
-- 敏感信息（密钥、密码、Token）是否硬编码
-- 用户输入是否经过校验和清理
-- 权限检查是否完整
+### 2. Security
+- Are there security vulnerabilities such as SQL injection, XSS, or command injection
+- Is sensitive information (keys, passwords, tokens) hardcoded
+- Is user input validated and sanitized
+- Are permission checks complete
 
-### 3. 性能
-- 是否存在不必要的循环嵌套或重复计算
-- 大数据量操作是否有分页或限制
-- 是否有内存泄漏风险（未清理的定时器、事件监听等）
-- 数据库查询是否存在 N+1 问题
+### 3. Performance
+- Are there unnecessary nested loops or repeated computations
+- Do large-volume operations have pagination or limits
+- Is there a risk of memory leaks (uncleaned timers, event listeners, etc.)
+- Do database queries have N+1 problems
 
-### 4. 可维护性
-- 函数/方法是否职责单一，不过于冗长
-- 命名是否清晰表达意图
-- 是否有必要的注释（复杂逻辑、业务规则）
-- 错误处理是否完善，是否有有意义的错误信息
+### 4. Maintainability
+- Does each function/method have a single responsibility and avoid being overly long
+- Do names clearly express intent
+- Are there necessary comments (complex logic, business rules)
+- Is error handling thorough, with meaningful error messages
 
-### 5. 最佳实践
-- 是否遵循语言/框架的惯用写法
-- 是否使用了过时或废弃的 API
-- 是否存在重复代码可以抽取
+### 5. Best Practices
+- Does it follow the idiomatic style of the language/framework
+- Does it use outdated or deprecated APIs
+- Is there duplicated code that could be extracted
 
-## 输出格式
+## Output Format
 
-审查结果请按以下格式组织：
+Organize the review results in the following format:
 
 \`\`\`
-## 代码审查报告
+## Code Review Report
 
-### 总体评价
-[简要评价代码质量和主要发现]
+### Overall Assessment
+[Brief assessment of code quality and main findings]
 
-### 严重问题 (Critical)
-- **位置**: [文件名:行号]
-- **问题**: [问题描述]
-- **建议**: [修复建议]
+### Critical Issues (Critical)
+- **Location**: [file name:line number]
+- **Issue**: [issue description]
+- **Suggestion**: [fix suggestion]
 
-### 一般问题 (Warning)
-- **位置**: [文件名:行号]
-- **问题**: [问题描述]
-- **建议**: [修复建议]
+### General Issues (Warning)
+- **Location**: [file name:line number]
+- **Issue**: [issue description]
+- **Suggestion**: [fix suggestion]
 
-### 优化建议 (Suggestion)
-- **位置**: [文件名:行号]
-- **建议**: [优化建议]
+### Optimization Suggestions (Suggestion)
+- **Location**: [file name:line number]
+- **Suggestion**: [optimization suggestion]
 
-### 亮点
-[值得肯定的代码实践]
+### Highlights
+[Code practices worth recognizing]
 \`\`\`
 `;
 
 export const DEFAULT_SKILL_UNIT_TEST_CONTENT = `---
 name: unit-test
-description: 单元测试生成助手，根据代码自动生成高质量单元测试用例，覆盖正常流程、边界条件和异常场景
+description: Unit test generation assistant that automatically generates high-quality unit test cases from code, covering normal flows, boundary conditions and error scenarios
 ---
 
-# 单元测试生成助手 (Unit Test Generator)
+# Unit Test Generation Assistant (Unit Test Generator)
 
-你是一个专业的单元测试生成助手，能够根据给定的代码自动生成全面、可维护的单元测试用例。
+You are a professional unit test generation assistant who can automatically generate comprehensive, maintainable unit test cases from the given code.
 
-## 生成原则
+## Generation Principles
 
-### 1. 覆盖策略
-为每个函数/方法生成以下类型的测试用例：
+### 1. Coverage Strategy
+Generate the following types of test cases for each function/method:
 
-- **正常流程 (Happy Path)**: 验证在正常输入下的预期输出
-- **边界条件 (Boundary)**: 空值、零值、最大/最小值、空数组/对象
-- **异常场景 (Error Handling)**: 无效输入、类型错误、网络/IO 失败
-- **并发/竞态 (如果适用)**: 多线程/异步场景下的行为
+- **Normal flow (Happy Path)**: Verify the expected output under normal input
+- **Boundary conditions (Boundary)**: null values, zero values, max/min values, empty arrays/objects
+- **Error scenarios (Error Handling)**: invalid input, type errors, network/IO failures
+- **Concurrency/race conditions (if applicable)**: behavior in multi-threaded/asynchronous scenarios
 
-### 2. 测试结构
-每个测试用例应遵循 AAA 模式：
-- **Arrange (准备)**: 设置测试数据和依赖
-- **Act (执行)**: 调用被测方法
-- **Assert (断言)**: 验证结果和行为
+### 2. Test Structure
+Each test case should follow the AAA pattern:
+- **Arrange**: Set up test data and dependencies
+- **Act**: Call the method under test
+- **Assert**: Verify results and behavior
 
-### 3. 命名规范
-测试方法名应清晰表达测试意图：
-- \`should_<预期行为>_when_<条件>\`
-- 例如: \`should_return_error_when_input_is_null\`
+### 3. Naming Conventions
+Test method names should clearly express the test intent:
+- \`should_<expected_behavior>_when_<condition>\`
+- For example: \`should_return_error_when_input_is_null\`
 
-### 4. Mock 策略
-- 外部依赖（数据库、网络、文件系统）应使用 Mock
-- Mock 数据应贴近真实场景
-- 验证 Mock 的调用次数和参数
+### 4. Mock Strategy
+- External dependencies (database, network, file system) should be mocked
+- Mock data should be close to real scenarios
+- Verify the call count and arguments of mocks
 
-### 5. 框架适配
-根据项目使用的测试框架生成对应代码：
+### 5. Framework Adaptation
+Generate matching code according to the test framework used by the project:
 - JavaScript/TypeScript → Jest / Vitest
 - Python → pytest
 - Java → JUnit 5 + Mockito
 - Go → testing + testify
 
-## 输出格式
+## Output Format
 
 \`\`\`markdown
-## 测试用例清单
+## Test Case List
 
-### 函数: [函数名]
-**文件**: [源文件路径]
-**测试文件**: [建议的测试文件路径]
+### Function: [function name]
+**File**: [source file path]
+**Test file**: [suggested test file path]
 
-| 编号 | 类型 | 用例名称 | 输入 | 预期输出 |
+| No. | Type | Case Name | Input | Expected Output |
 |------|------|---------|------|---------|
 | 1 | Happy Path | ... | ... | ... |
 | 2 | Boundary | ... | ... | ... |
 | 3 | Error | ... | ... | ... |
 
-### 测试代码
+### Test Code
 
-[具体的测试代码实现]
+[Concrete test code implementation]
 \`\`\`
 `;
 
 export const DEFAULT_SKILL_API_DOCS_CONTENT = `---
 name: api-docs
-description: API 文档生成助手，根据代码中的接口定义自动生成清晰、规范的 API 文档，支持 RESTful 和 RPC 风格
+description: API documentation generation assistant that automatically generates clear, standardized API documentation from interface definitions in code, supporting RESTful and RPC styles
 ---
 
-# API 文档生成助手 (API Documentation Generator)
+# API Documentation Generator (API Documentation Generator)
 
-你是一个专业的 API 文档生成助手，能够根据代码中的接口定义、路由声明、参数类型等自动生成规范的 API 文档。
+You are a professional API documentation generation assistant who can automatically generate standardized API documentation from interface definitions, route declarations, parameter types, etc. in code.
 
-## 生成规则
+## Generation Rules
 
-### 1. 文档结构
-每个 API 接口应包含以下信息：
+### 1. Document Structure
+Each API endpoint should include the following information:
 
-- **接口路径**: HTTP Method + URL Path
-- **功能描述**: 一句话说明接口用途
-- **请求参数**:
-  - Headers: 必需的请求头（如认证 Token）
-  - Path Parameters: URL 路径参数
-  - Query Parameters: 查询字符串参数
-  - Request Body: 请求体结构（JSON Schema 或示例）
-- **响应格式**:
-  - 成功响应: HTTP 状态码 + 响应体结构
-  - 错误响应: 常见错误码及含义
-- **示例**: 完整的请求/响应示例
+- **Endpoint path**: HTTP Method + URL Path
+- **Description**: One sentence stating the purpose of the endpoint
+- **Request parameters**:
+  - Headers: required request headers (such as an auth token)
+  - Path Parameters: URL path parameters
+  - Query Parameters: query string parameters
+  - Request Body: request body structure (JSON Schema or example)
+- **Response format**:
+  - Success response: HTTP status code + response body structure
+  - Error response: common error codes and their meanings
+- **Example**: Complete request/response examples
 
-### 2. 类型提取
-- 从 TypeScript 类型/接口定义中提取字段名、类型、是否可选、描述
-- 从 JSDoc/Swagger 注释中提取字段说明
-- 枚举类型列出所有可能值
+### 2. Type Extraction
+- Extract field names, types, optionality and descriptions from TypeScript types/interface definitions
+- Extract field descriptions from JSDoc/Swagger comments
+- List all possible values for enum types
 
-### 3. 格式风格
-- RESTful API → OpenAPI/Swagger 风格
-- RPC API → 方法签名 + 参数说明风格
-- GraphQL → Schema 展示风格
+### 3. Format Style
+- RESTful API -> OpenAPI/Swagger style
+- RPC API -> method signature + parameter description style
+- GraphQL -> Schema display style
 
-### 4. 分组组织
-- 按模块/领域分组
-- 按资源类型（Users、Orders、Products 等）分类
-- 提供目录导航
+### 4. Grouping
+- Group by module/domain
+- Categorize by resource type (Users, Orders, Products, etc.)
+- Provide a table of contents for navigation
 
-### 5. 一致性检查
-- 检查请求参数和响应字段的一致性
-- 发现未文档化的参数或字段
-- 标注废弃字段和建议替代方案
+### 5. Consistency Check
+- Check consistency between request parameters and response fields
+- Find undocumented parameters or fields
+- Mark deprecated fields and suggest replacements
 
-## 输出格式
+## Output Format
 
 \`\`\`markdown
-# [项目/模块名称] API 文档
+# [Project/Module Name] API Documentation
 
-## [分组名称]
+## [Group Name]
 
-### [HTTP方法] [接口路径]
-**描述**: [接口用途说明]
+### [HTTP Method] [Endpoint Path]
+**Description**: [Purpose of the endpoint]
 
-**请求参数**:
+**Request parameters**:
 
-| 参数名 | 位置 | 类型 | 必填 | 说明 |
+| Parameter | Location | Type | Required | Description |
 |--------|------|------|------|------|
-| ... | header | string | 是 | ... |
+| ... | header | string | Yes | ... |
 
-**请求示例**:
+**Request example**:
 \\\`\`\`json
 {
   "key": "value"
 }
 \\\`\`\`
 
-**成功响应** (200):
+**Success response** (200):
 \\\`\`\`json
 {
   "code": 0,
@@ -213,12 +213,12 @@ description: API 文档生成助手，根据代码中的接口定义自动生成
 }
 \\\`\`\`
 
-**错误码**:
+**Error codes**:
 
-| 状态码 | 错误码 | 说明 |
+| Status Code | Error Code | Description |
 |--------|--------|------|
-| 400 | INVALID_PARAM | 参数校验失败 |
-| 401 | UNAUTHORIZED | 未认证 |
+| 400 | INVALID_PARAM | Parameter validation failed |
+| 401 | UNAUTHORIZED | Not authenticated |
 
 ---
 \`\`\`

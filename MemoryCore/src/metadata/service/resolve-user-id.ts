@@ -1,5 +1,5 @@
 /**
- * 将 user_id 或 user_key 解析为 user_id（权限/查询类接口共用）。
+ * Resolve user_id or user_key into user_id (shared by permission/query-type endpoints).
  */
 import type { MetadataService } from "./metadata-service.js";
 import { MetadataError } from "./metadata-service.js";

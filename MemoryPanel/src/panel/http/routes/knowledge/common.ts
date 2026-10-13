@@ -1,9 +1,9 @@
 /**
- * Knowledge Panel 路由共享助手。
+ * Shared helpers for Knowledge Panel routes.
  *
- * 与 chat-memory.ts 同款风格：从 panelMeta 组 ctx、auth/verify 反查 caller、
- * team-member/get 门控、统一 envelope。KS 上游错误（CoreUpstreamError/DomainError）
- * 映射为 Control envelope。
+ * Same style as chat-memory.ts: build ctx from panelMeta, look up the caller via auth/verify,
+ * gate on team-member/get, unified envelope. KS upstream errors (CoreUpstreamError/DomainError)
+ * are mapped to the Control envelope.
  */
 import type { Context } from 'hono';
 import type { PanelDeps } from '../../../panel-deps.js';
@@ -52,7 +52,7 @@ export function extractListItems<T>(env: MetaEnvelope<unknown>): T[] {
   return [];
 }
 
-/** 通过 auth/verify 反查 caller 的 user_id。失败返 null。 */
+/** Look up the caller's user_id via auth/verify. Returns null on failure. */
 export async function resolveCallerUserId(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -66,7 +66,7 @@ export async function resolveCallerUserId(
   return typeof uid === 'string' && uid.length > 0 ? uid : null;
 }
 
-/** 判断当前 caller 是否为 system_admin（auth/verify 返回 user.user_type）。失败保守返 false。 */
+/** Determine whether the current caller is system_admin (auth/verify returns user.user_type). Conservatively returns false on failure. */
 export async function isCallerSystemAdmin(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -78,7 +78,7 @@ export async function isCallerSystemAdmin(
   return data?.valid === true && data.user?.user_type === 'system_admin';
 }
 
-/** 校验 user 是否是 team 成员（team-member/get 存在→成员）。异常保守返 false。 */
+/** Verify whether the user is a team member (team-member/get exists -> member). Conservatively returns false on error. */
 export async function isTeamMember(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -95,8 +95,8 @@ export async function isTeamMember(
 }
 
 /**
- * team 门控：要求 caller 是有效用户且为 team 成员。
- * 通过返回 { userId }；不通过返回 { error: Response }（路由直接 return）。
+ * Team gate: requires the caller to be a valid user and a team member.
+ * On pass returns { userId }; otherwise returns { error: Response } (the route returns it directly).
  */
 export async function requireTeamMember(
   deps: PanelDeps,
@@ -111,7 +111,7 @@ export async function requireTeamMember(
   return { userId };
 }
 
-/** id-only 端点门控：仅要求 caller 是有效用户（KS 按 service_id + team 隔离）。 */
+/** id-only endpoint gate: only requires the caller to be a valid user (KS isolates by service_id + team). */
 export async function requireCaller(
   deps: PanelDeps,
   c: Context,
@@ -123,7 +123,7 @@ export async function requireCaller(
 }
 
 /**
- * 把 KS 调用包起来：成功 → okEnvelope；上游/领域错误 → 映射 Control envelope。
+ * Wrap a KS call: success -> okEnvelope; upstream/domain error -> mapped to the Control envelope.
  */
 export async function runKs<T>(
   c: Context,
@@ -140,15 +140,15 @@ export async function runKs<T>(
   }
 }
 
-// ── meta_asset 生命周期（见设计 §0.6）────────────────────────────
-// asset_id == knowledge_id（wiki_id / cg_id），asset_type 映射如下。
+// ── meta_asset lifecycle (see design §0.6) ────────────────────────────
+// asset_id == knowledge_id (wiki_id / cg_id); asset_type is mapped as follows.
 export const ASSET_TYPE_WIKI = 'llm_wiki';
 export const ASSET_TYPE_CODE_GRAPH = 'code_graph';
 
 /**
- * create 时（ForCaller）幂等登记 meta_asset：asset_id = KS 返回的 knowledge_id。
- * 已存在（同名 KS 幂等复用）→ 跳过；不存在 → asset/create。
- * 失败返回 { ok:false, env }，路由据此报错（用户重试，KS 幂等自愈）。
+ * At create time (ForCaller) idempotently register meta_asset: asset_id = the knowledge_id returned by KS.
+ * Already exists (idempotent reuse of the same-named KS item) -> skip; does not exist -> asset/create.
+ * On failure returns { ok:false, env }, and the route reports the error accordingly (user retries; KS self-heals idempotently).
  */
 export async function ensureKnowledgeAsset(
   deps: PanelDeps,
@@ -168,7 +168,7 @@ export async function ensureKnowledgeAsset(
     log.info('[ensure-knowledge-asset] already present; idempotent skip', {
       asset_id: params.assetId, asset_type: params.assetType, team_id: params.teamId,
     });
-    return { ok: true }; // 幂等：已存在
+    return { ok: true }; // idempotent: already exists
   }
   log.info('[ensure-knowledge-asset] not present; creating', {
     asset_id: params.assetId, asset_type: params.assetType, team_id: params.teamId, owner: params.ownerUserId,
@@ -197,7 +197,7 @@ export async function ensureKnowledgeAsset(
   return { ok: true };
 }
 
-/** 删除内核明细 entity_knowledge（S2S，/v3/knowledge/delete）。best-effort，不抛。 */
+/** Delete the kernel detail entity_knowledge (S2S, /v3/knowledge/delete). best-effort, does not throw. */
 export async function deleteKnowledgeDetail(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -211,8 +211,8 @@ export async function deleteKnowledgeDetail(
   }
 }
 
-/** 删除 meta_asset（ForCaller，asset/delete）。best-effort，不抛。
- *  kernel 侧 asset/delete 会级联清理 agent-fixed-asset 绑定 + ACL，无需额外解绑。 */
+/** Delete meta_asset (ForCaller, asset/delete). best-effort, does not throw.
+ *  Kernel-side asset/delete cascades to clean up agent-fixed-asset bindings + ACL, so no extra unbinding is needed. */
 export async function deleteKnowledgeAssets(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -225,8 +225,8 @@ export async function deleteKnowledgeAssets(
   }
 }
 
-/** 删除 knowledge 的远端侧级联：entity_knowledge 明细 + meta_asset（含 agent 绑定级联）。
- *  KS 侧删除由调用方负责（返回 KS result 给前端）。两步均 best-effort，不抛。 */
+/** Remote-side cascade for deleting knowledge: entity_knowledge detail + meta_asset (including agent binding cascade).
+ *  KS-side deletion is the caller's responsibility (return the KS result to the frontend). Both steps are best-effort and do not throw. */
 export async function deleteKnowledgeCascade(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -236,7 +236,7 @@ export async function deleteKnowledgeCascade(
   await deleteKnowledgeAssets(deps, ctx, ids);
 }
 
-// ── meta list 分页 + 鉴权 + KS join ─────────────────────────────
+// ── meta list pagination + authorization + KS join ─────────────────────────────
 
 const META_LIST_PAGE = 100;
 const FILTERED_ASSET_STATUSES = new Set(['archived', 'deprecated', 'failed']);
@@ -255,16 +255,16 @@ export interface KnowledgeAssetMetaRaw {
 }
 
 /**
- * 分页拉取 meta list 全部 items（不限具体 action —— 任何返回 `{items:[], total}` 的
- * list 接口都可复用，避免单页 DEFAULT_PAGINATION=20 在资产多时被静默截断）。
+ * Page through all items of a meta list (not tied to a specific action -- any
+ * list endpoint returning `{items:[], total}` can reuse it, avoiding silent truncation by the single-page DEFAULT_PAGINATION=20 when there are many assets).
  *
- * 注意：内核 `DEFAULT_PAGINATION = {limit: 20}`，调用方不传 limit 时只会拿到前 20 条；
- * 任何做「list 全量 → 改 → set 全量替换」语义的接口（如 knowledge/allocate 里的
- * agent-fixed-asset/list）必须用本工具拿到全量，否则后段老 binding 会被静默覆盖。
+ * Note: kernel `DEFAULT_PAGINATION = {limit: 20}`; when the caller passes no limit only the first 20 are returned;
+ * any endpoint with "list all -> modify -> set full replacement" semantics (such as agent-fixed-asset/list in knowledge/allocate)
+ * must use this utility to get everything, otherwise the later old bindings would be silently overwritten.
  *
- * 错误处理：分页中途失败时调用 `onError(env)` 并返回已收集的数据，由调用方决定
- * 是透传错误还是继续 —— 禁止静默忽略（写路径上会把错误当"空列表"做全量替换，
- * 造成数据清空）。
+ * Error handling: if pagination fails midway, call `onError(env)` and return the data collected so far, and the caller decides
+ * whether to pass the error through or continue -- silent ignoring is forbidden (on a write path it would treat the error as an "empty list" and do a full replacement,
+ * wiping the data).
  */
 export async function fetchAllMetaListItems<T>(
   deps: PanelDeps,
@@ -285,8 +285,8 @@ export async function fetchAllMetaListItems<T>(
     all.push(...batch);
     const total = (env.data as { total?: number } | null)?.total;
     if (batch.length === 0) {
-      // 空页：已到末尾（无 total 接口的唯一终止信号）。但带过滤语义的接口中间页
-      // 可能整页为空（total 仍是绑定总数），此时继续推进避免漏拉。
+      // Empty page: reached the end (the only termination signal for endpoints without total). But for endpoints with filter semantics a middle page
+      // may be entirely empty (total is still the total number of bindings), so keep advancing to avoid missing items.
       if (typeof total === 'number' && offset < total) {
         offset += META_LIST_PAGE;
         continue;
@@ -303,7 +303,7 @@ export function isActiveMetaAsset(status: string | undefined): boolean {
   return !!status && !FILTERED_ASSET_STATUSES.has(status);
 }
 
-/** acl/check：caller 对 asset 是否有指定 action 权限。 */
+/** acl/check: whether the caller has the specified action permission on the asset. */
 export async function checkAssetPermission(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -332,8 +332,8 @@ export async function checkAssetReadPermission(
 }
 
 /**
- * 知识资源读门控：meta asset 存在时走 acl/check；
- * code-graph 构建中无 meta 时，仅允许 KS owner 读 get（窄例外）。
+ * Knowledge resource read gate: when the meta asset exists, go through acl/check;
+ * when a code-graph is being built and has no meta yet, only the KS owner is allowed to read get (a narrow exception).
  */
 export async function requireKnowledgeRead(
   deps: PanelDeps,
@@ -374,20 +374,20 @@ export async function requireKnowledgeRead(
 }
 
 /**
- * wiki「内容贡献」写门控：同 team 成员即可，**不要求 owner / admin**。
+ * wiki "content contribution" write gate: any member of the same team is enough, **owner / admin not required**.
  *
- * 背景：wiki 创建时 visibility='team'（见 ensureKnowledgeAsset），是团队共享资产；
- * 但 permission-checker 的角色默认里 MEMBER_ACTIONS 只有 'read'，
- * write 仅授予 owner / admin —— 于是"A 建的 wiki，同 team 的 B 能看却不能导入"。
+ * Background: a wiki is created with visibility='team' (see ensureKnowledgeAsset) and is a team-shared asset;
+ * but in permission-checker's role defaults MEMBER_ACTIONS only has 'read',
+ * and write is granted only to owner / admin -- so "a wiki created by A can be seen by B in the same team but not imported into".
  *
- * 取舍：导入/抽取/改素材属于**内容贡献**，不是所有权变更，因此放开到 team 成员；
- * 而"删除整个知识库""删除已抽取页面"属于破坏性操作，仍走 requireKnowledgeRead
- * 的 action:'write'（owner / admin），避免误删他人成果。
+ * Trade-off: importing/extracting/changing materials is a **content contribution**, not an ownership change, so it is opened to team members;
+ * whereas "delete the entire knowledge base" and "delete extracted pages" are destructive operations and still go through requireKnowledgeRead
+ * with action:'write' (owner / admin), to avoid accidentally deleting others' work.
  *
- * 实现上直接复用 requireKnowledgeRead(action:'read')：它已包含 team 成员校验
- * （见其上 isTeamMember 分支），因此这里只需确认 asset 存在且成员校验通过，
- * 无需重复实现 ACL 查询。不改 permission-checker 的全局常量，故不影响
- * skill / code-graph 等其他资产类型的权限模型。
+ * Implementation reuses requireKnowledgeRead(action:'read') directly: it already includes the team-member check
+ * (see the isTeamMember branch above it), so here we only need to confirm the asset exists and the member check passes,
+ * with no need to reimplement the ACL query. It does not change permission-checker's global constants, so the
+ * permission model of other asset types such as skill / code-graph is unaffected.
  */
 export async function requireWikiWritable(
   deps: PanelDeps,
@@ -414,9 +414,9 @@ export interface KnowledgeAssetListItem {
   summary?: string | null;
   page_count?: number | null;
   last_sync_at?: string | null;
-  /** wiki 专用：null=手工上传，'iwiki' 等=外部来源；决定详情页 UI 切换。 */
+  /** wiki only: null=manual upload, 'iwiki' etc.=external source; decides the detail page UI switch. */
   source_type?: string | null;
-  /** wiki 专用：外部来源 URL。 */
+  /** wiki only: external source URL. */
   source_url?: string | null;
   repo_name?: string;
   repo_url?: string;
@@ -544,9 +544,9 @@ export async function joinKnowledgeAssetsWithKs(
   });
 }
 
-// ── KS-only items（meta 未注册，如创建中/失败的 code-graph）──────────
+// ── KS-only items (not registered in meta, e.g. code-graph being created / failed) ──────────
 
-/** 从 KS 侧查列表，构造 meta 未注册的 KnowledgeAssetListItem。 */
+/** Query the list from the KS side and build KnowledgeAssetListItem entries that are not registered in meta. */
 async function fetchKsOnlyItems(
   kc: ReturnType<PanelDeps['knowledgeClientFactory']>,
   teamId: string,
@@ -606,11 +606,11 @@ async function fetchKsOnlyItems(
 }
 
 /**
- * 合并 meta 资产列表与 KS 侧列表：meta 为主，KS 补充 meta 未注册的项。
- * 用于 team-assets / my-assets 接口，确保"创建中/失败"的资源也能展示。
+ * Merge the meta asset list with the KS-side list: meta is primary, KS supplements items not registered in meta.
+ * Used by the team-assets / my-assets endpoints, ensuring resources "being created / failed" can also be shown.
  *
- * 权限说明：meta 侧已由 asset/list-accessible 做权限校验；
- * KS 侧返回的是 team 级别数据，调用方已通过 requireTeamMember 校验 team 归属。
+ * Permission note: the meta side is already permission-checked by asset/list-accessible;
+ * the KS side returns team-level data, and the caller has already verified team membership via requireTeamMember.
  */
 export async function mergeWithKsOnlyItems(
   deps: PanelDeps,

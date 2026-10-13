@@ -13,7 +13,7 @@
  * `getById(service_id, wiki_id)` so a foreign tenant's resource is never exposed (R1).
  * service_id / wiki_id are validated as safe path segments before use (R5).
  *
- * 细粒度 ingest progress 不在 KS 暴露：由 Panel 收 ingest_progress 回调并在 wiki/get 聚合。
+ * Fine-grained ingest progress is not exposed by KS: Panel receives the ingest_progress callback and aggregates it in wiki/get.
  */
 
 import { Hono } from "hono";
@@ -74,14 +74,14 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
     const wikiId = body.wiki_id;
     if (!isValidIdSegment(wikiId)) return c.json(wrapError(400, "wiki_id is required"), 400);
     const requesterUserId = typeof body.user_id === "string" && body.user_id ? body.user_id : undefined;
-    // 设计 2026-09-21 §3.3：可选 on_busy，默认 'reject' 保持原并发拒绝语义；
-    // 'replace' 由 Panel 复合端点专用（取消旧任务 + 排队新任务）。
+    // Design 2026-09-21 §3.3: optional on_busy; defaults to 'reject', keeping the original concurrency-rejection semantics;
+    // 'replace' is dedicated to Panel's composite endpoint (cancel the old task + queue the new one).
     const onBusy = body.on_busy === "replace" ? "replace" : "reject";
 
     const row = wikiService.getById(serviceId, wikiId);
     if (!row) return c.json(wrapError(404, "wiki not found"), 404);
 
-    // 空 wiki 禁止 ingest：无源文件时拒绝（避免静默成功 pageCount=0）
+    // Empty wikis may not ingest: reject when there are no source files (avoid silently succeeding with pageCount=0)
     const sources = wikiService.rawLs(serviceId, row.team_id, wikiId);
     if (!sources || sources.length === 0) {
       return c.json(wrapError(400, "wiki has no source files, upload before ingest"), 400);
@@ -90,10 +90,10 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
     const result = wikiService.ingest(serviceId, row.team_id, wikiId, requesterUserId, { onBusy });
     if (result.kind === "not_found") return c.json(wrapError(404, "wiki not found"), 404);
     if (result.kind === "busy") {
-      // 并发拒绝：干净最小的 409 响应体（调用方用 code 判断，不 parse message）。
+      // Concurrency rejection: a clean, minimal 409 response body (callers use code to decide, not parse message).
       return c.json({ code: 409, message: "busy", data: { status: result.status, step: result.step } }, 409);
     }
-    // ok = 直接入队；queued = 已有在途任务，按 replace 取消旧任务后排队新任务。
+    // ok = enqueued directly; queued = a task is already in flight, the old task is cancelled per replace and the new task queued.
     return c.json(
       wrapOk({
         wiki_id: result.row.wiki_id,
@@ -129,8 +129,8 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
       }
       const ok = wikiService.delete(serviceId, row.team_id, id);
       if (ok) {
-        // wiki engine manager 注册清理仍由路由负责（wikiMgr 未注入 service）；
-        // 连接/元数据/磁盘四类清理已在 service.cleanupResources 内完成。
+        // wiki engine manager registration cleanup is still done by the route (wikiMgr is not injected into the service);
+        // the cleanup of connections/metadata/disk are already done in service.cleanupResources.
         try { wikiMgr.remove(id); } catch (err) { console.warn(`[wiki] wikiMgr.remove(${id}) failed:`, err); }
         result.deleted_ids.push(id);
       } else {
@@ -171,8 +171,8 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
     const name = body.name;
     if (typeof name !== "string" || !name) return c.json(wrapError(400, "name is required"), 400);
 
-    // 外部来源（iWiki 等）：source_type 决定详情页 UI 走「上传文件」还是「从外部拉取」。
-    // 二者必须成对出现：有 URL 无类型 → 前端无法判断来源；有类型无 URL → 导入无从下手。
+    // External sources (iWiki etc.): source_type decides whether the detail page UI goes with "upload files" or "fetch from external".
+    // The two must appear together: URL without type → the frontend can't tell the source; type without URL → the import has nowhere to start.
     const sourceType =
       typeof body.source_type === "string" && body.source_type ? body.source_type : undefined;
     const sourceUrl =
@@ -285,7 +285,7 @@ export function createWikiRoutes(deps: WikiRouteDeps): Hono {
       return c.json(wrapError(400, "files is required (non-empty array)"), 400);
     }
 
-    // 上传大小限制（防御纵深，Panel 侧已有同样校验）
+    // Upload size limit (defense in depth; Panel side already has the same validation)
     const MAX_FILE_SIZE = 512 * 1024;
     const MAX_FILES = 10;
     const MAX_TOTAL = 5 * 1024 * 1024;

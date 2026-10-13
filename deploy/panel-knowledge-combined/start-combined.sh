@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 先确保 config 目录存在，避免用户 bind-mount 文件时父目录缺失被当成目录挂载。
+# First make sure the config directory exists, so that when a user bind-mounts a file, a missing parent directory is not mounted as a directory.
 mkdir -p /app/panel/config "${KNOWLEDGE_DATA_DIR:-/data/knowledge}" "$(dirname "${KNOWLEDGE_DB_PATH:-/data/knowledge/knowledge.db}")"
 
-# 用户可通过挂载 /app/panel/config/metadata-instances.json 提供多实例配置；
-# 此时 REMOTE_INSTANCE_* env 不再必需，脚本也不会覆盖该文件。
+# Users can provide a multi-instance config by mounting /app/panel/config/metadata-instances.json;
+# in that case the REMOTE_INSTANCE_* env vars are no longer required, and the script will not overwrite that file.
 INSTANCES_FILE="/app/panel/config/metadata-instances.json"
 USER_PROVIDED_INSTANCES=0
 if [[ -f "$INSTANCES_FILE" ]]; then
@@ -23,18 +23,18 @@ KNOWLEDGE_PORT="${KNOWLEDGE_PORT:-8424}"
 INSTANCE_ID="${REMOTE_INSTANCE_ID:-default}"
 INSTANCE_NAME="${REMOTE_INSTANCE_NAME:-$INSTANCE_ID}"
 KS_INTERNAL_URL="http://127.0.0.1:${KNOWLEDGE_PORT}"
-# service_url 需包含 API prefix（/v3），context_proxy 会拼成 {service_url}/tools/list。
+# service_url must include the API prefix (/v3); context_proxy joins it into {service_url}/tools/list.
 KS_PUBLIC_URL="${KNOWLEDGE_PUBLIC_BASE_URL:-${KS_INTERNAL_URL}/v3}"
 PROXY_BASE_URL="${KNOWLEDGE_LLM_PROXY_BASE_URL:-}"
 
-# 仅当用户未提供 instances 文件时，才用 REMOTE_INSTANCE_* env 生成单实例配置。
-# REMOTE_INSTANCE_PROXY_URL 为可选项：
-#   - 未设置 → 不写 proxy_endpoint 字段，Panel UI "客户端接入地址"卡片仍按老行为
-#     回落到 gateway_endpoint（线上部署 gateway 前置 proxy 时两者合一，无需改动）
-#   - 已设置 → 写入 proxy_endpoint；此时 UI 卡片显示的接入地址会切到 proxy，
-#     但 Panel 后端 → Kernel 的转发地址仍走 gateway_endpoint（不受影响）
+# Only when the user has not provided an instances file, generate a single-instance config from the REMOTE_INSTANCE_* env vars.
+# REMOTE_INSTANCE_PROXY_URL is optional:
+#   - not set → the proxy_endpoint field is not written, and the Panel UI "client access address" card keeps the old behavior,
+#     falling back to gateway_endpoint (in production deployments where the gateway fronts the proxy the two coincide; no change needed)
+#   - set → proxy_endpoint is written; the access address shown on the UI card switches to the proxy,
+#     but the Panel backend → Kernel forwarding address still uses gateway_endpoint (unaffected)
 if [[ "$USER_PROVIDED_INSTANCES" -ne 1 ]]; then
-# 只有非空时才拼一行 proxy_endpoint 到 dict 字面量里；空则完全不出现，保持老行为。
+# Only when non-empty is a proxy_endpoint line added to the dict literal; when empty it does not appear at all, preserving the old behavior.
 PROXY_ENDPOINT_LINE=""
 if [[ -n "${REMOTE_INSTANCE_PROXY_URL:-}" ]]; then
   PROXY_ENDPOINT_LINE="    'proxy_endpoint': '${REMOTE_INSTANCE_PROXY_URL}',"
@@ -67,20 +67,20 @@ export TDAI_AGENT_TEMPLATE_DIR="${TDAI_AGENT_TEMPLATE_DIR:-/data/knowledge/agent
 export KNOWLEDGE_PUBLIC_BASE_URL="${KS_PUBLIC_URL}"
 export TMC_CALLBACK_URL="${TMC_CALLBACK_URL:-http://127.0.0.1:${PANEL_PORT}}"
 
-# 日志落文件（持久化到 /data/knowledge/logs/，容器重启不丢）+ stdout（docker logs 可见）。
-# Panel 和 KS 各自一个文件，避免混在一起难排查。
+# Logs go to files (persisted under /data/knowledge/logs/, not lost on container restart) + stdout (visible via docker logs).
+# Panel and KS each get their own file, to avoid mixing them together and making troubleshooting hard.
 LOG_DIR="${LOG_DIR:-/data/knowledge/logs}"
 mkdir -p "$LOG_DIR"
 PANEL_LOG="$LOG_DIR/panel.log"
 KNOWLEDGE_LOG="$LOG_DIR/knowledge.log"
-# 每次启动轮转一次（保留上一份 .prev），避免单文件无限增长。
+# Rotate once on every start (keep the previous one as .prev), to avoid unbounded growth of a single file.
 [[ -f "$PANEL_LOG" ]] && mv "$PANEL_LOG" "$PANEL_LOG.prev"
 [[ -f "$KNOWLEDGE_LOG" ]] && mv "$KNOWLEDGE_LOG" "$KNOWLEDGE_LOG.prev"
 echo "[start-combined] panel log → $PANEL_LOG" ; echo "[start-combined] knowledge log → $KNOWLEDGE_LOG"
 
-# Knowledge LLM 路由（对齐 MemoryKnowledge/src/config.ts 读的变量名）。
-#   LLM_MODE=proxy (默认)：wiki ingest 走 context_proxy（依赖 panel 推 llm_binding）。
-#   LLM_MODE=custom：直连 OpenAI 兼容端点，需 LLM_API_KEY / LLM_BASE_URL。
+# Knowledge LLM routing (aligned with the variable names read by MemoryKnowledge/src/config.ts).
+#   LLM_MODE=proxy (default): wiki ingest goes through context_proxy (depends on panel pushing llm_binding).
+#   LLM_MODE=custom: connect directly to an OpenAI-compatible endpoint; requires LLM_API_KEY / LLM_BASE_URL.
 export LLM_MODE="${LLM_MODE:-proxy}"
 export LLM_PROVIDER="${LLM_PROVIDER:-custom}"
 export LLM_API_KEY="${LLM_API_KEY:-}"
@@ -89,9 +89,9 @@ export LLM_MODEL="${LLM_MODEL:-Memory-Model}"
 export LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-32768}"
 export LLM_TIMEOUT_MS="${LLM_TIMEOUT_MS:-1200000}"
 
-# Panel 启动时为每个 instance 推一份 mode=proxy 的 llm_binding 给 knowledge。
-# LLM_MODE=proxy 时强制同步（proxy 模式必须有 binding 才能工作）；
-# LLM_MODE=custom 时由用户自行决定 KNOWLEDGE_LLM_BINDING_SYNC（默认仍为 1）。
+# On startup the Panel pushes a mode=proxy llm_binding for each instance to knowledge.
+# When LLM_MODE=proxy sync is forced (proxy mode needs a binding to work);
+# When LLM_MODE=custom the user decides KNOWLEDGE_LLM_BINDING_SYNC (still defaults to 1).
 SYNC_ENV="${KNOWLEDGE_LLM_BINDING_SYNC:-1}"
 if [[ "${LLM_MODE}" == "proxy" ]]; then
   SYNC_ENV=1
@@ -104,8 +104,8 @@ PORT="${KNOWLEDGE_PORT}" LOG_LEVEL="${LOG_LEVEL:-info}" \
   | tee -a "$KNOWLEDGE_LOG" &
 KNOWLEDGE_PID=$!
 
-# 等 KS 就绪再起 panel：panel 启动时会调 KS /v3/internal/llm-binding/status
-# 检查 binding 是否存在（ensureKnowledgeLlmBindings），KS 没起来会 fetch failed。
+# Wait for KS to be ready before starting panel: on startup the panel calls KS /v3/internal/llm-binding/status
+# to check whether the binding exists (ensureKnowledgeLlmBindings); if KS is not up, fetch fails.
 for i in $(seq 1 120); do
   if curl -fsS "http://127.0.0.1:${KNOWLEDGE_PORT}/health" >/dev/null 2>&1; then
     echo "knowledge service ready on :${KNOWLEDGE_PORT}"

@@ -36,8 +36,8 @@ export function main(): void {
     );
   }
 
-  // API 调用审计初始化（建表 + schema 自愈 + 启动定时刷盘）。非阻塞，失败只 warn。
-  // 建完表后异步跑 user_id 回填，用 telemetry_meta 表版本号防重跑。
+  // API call audit initialization (create tables + schema self-healing + start periodic flush). Non-blocking; on failure only warns.
+  // After tables are created, run the user_id backfill asynchronously, using the telemetry_meta table version number to prevent re-runs.
   void (async () => {
     await deps.apiCallTelemetry.initialize();
     await deps.apiCallTelemetry.runBackfillIfNeeded(deps.userIdResolver);

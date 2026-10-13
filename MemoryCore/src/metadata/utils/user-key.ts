@@ -1,13 +1,13 @@
 /**
- * user_key 脱敏与有效性判断（多 key 模型）。
+ * user_key sanitization and validity checks (multi-key model).
  */
 
-/** user_key 固定前缀，用于识别归属与密钥扫描。 */
+/** Fixed user_key prefix, used to identify ownership and for secret scanning. */
 export const USER_KEY_PREFIX = "sk-mem-";
 
 /**
- * 通用敏感串脱敏：前 8 字符 + 省略号，不暴露完整 secret。
- * 用于 api-trace 对 password / token / authorization 等泛化密钥的日志脱敏。
+ * Generic sensitive-string sanitization: first 8 characters + ellipsis, never exposing the full secret.
+ * Used by api-trace to sanitize logs of generic secrets such as password / token / authorization.
  */
 export function maskKeyValue(keyValue: string): string {
   if (!keyValue) return "";
@@ -16,8 +16,8 @@ export function maskKeyValue(keyValue: string): string {
 }
 
 /**
- * user_key 列表/详情展示脱敏：保留 `sk-mem-` 前缀 + `****` + 末 4 位。
- * 例如 `sk-mem-<32 chars>...e5fG` → `sk-mem-****e5fG`。
+ * user_key sanitization for list/detail display: keep the `sk-mem-` prefix + `****` + last 4 characters.
+ * For example `sk-mem-<32 chars>...e5fG` → `sk-mem-****e5fG`.
  */
 export function maskUserKey(keyValue: string): string {
   if (!keyValue) return "";
@@ -27,7 +27,7 @@ export function maskUserKey(keyValue: string): string {
   return `${prefix}****${tail}`;
 }
 
-/** active key 是否已过期（expires_at 为 ISO 字符串）。 */
+/** Whether an active key has expired (expires_at is an ISO string). */
 export function isUserKeyExpired(expiresAt: string | null | undefined, now = Date.now()): boolean {
   if (!expiresAt) return false;
   const t = Date.parse(expiresAt);

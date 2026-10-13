@@ -1,11 +1,11 @@
 /**
- * useCallDetail — trace 明细分页与过滤。
+ * useCallDetail -- trace detail pagination and filtering.
  *
- * 走内核 `tool-calls/list` 的全量分页（非抽样）。内核支持的过滤维度：
- * user_id（精确）、bridge_source（精确）、executed_endpoint（LIKE 模糊）。
+ * Uses the kernel `tool-calls/list` full pagination (not sampled). Filter dimensions supported by the kernel:
+ * user_id (exact), bridge_source (exact), executed_endpoint (LIKE fuzzy).
  *
- * wiki / codegraph 同属 knowledge-service，无法只靠 bridge_source 区分，
- * 故由调用方在选中这两类时改用端点关键字（tools/call/）+ 面板侧类别提示。
+ * wiki / codegraph both belong to knowledge-service and cannot be distinguished by bridge_source alone,
+ * so when the caller selects these two categories it switches to an endpoint keyword (tools/call/) + a panel-side category hint.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -35,7 +35,7 @@ export function useCallDetail(params: {
 
   const reqSeqRef = useRef(0);
 
-  // 过滤条件变化时回到第一页，避免停留在越界 offset 上显示空列表
+  // Return to the first page when filters change, to avoid staying on an out-of-range offset showing an empty list
   useEffect(() => {
     setOffset(0);
   }, [days, spaceId, userId, bridgeSource, endpointFilter]);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Skill 授权链路端到端验证
-# 需要环境：team-memory-control 后端跑在 127.0.0.1:8123（PANEL_MODE=stateless）
+# Skill authorization chain end-to-end verification
+# Requires environment: the team-memory-control backend running at 127.0.0.1:8123 (PANEL_MODE=stateless)
 set -euo pipefail
 
 BASE="${CONTROL:-http://127.0.0.1:8123}"
@@ -36,14 +36,14 @@ print(v)"; }
 jcode() { echo "$1" | python3 -c "import sys,json; print(json.load(sys.stdin).get('code'))"; }
 
 # ============================
-info "① auth/verify → 获取 admin 用户身份"
+info "① auth/verify → get the admin user identity"
 R=$(call_meta auth/verify "$ADMIN_KEY" "{\"user_key\":\"$ADMIN_KEY\"}")
 [[ $(jcode "$R") == "0" ]] || fail "auth/verify" "$R"
 ADMIN_ID=$(jget "$R" data.user.user_id)
 pass "admin user_id=$ADMIN_ID"
 
 # ============================
-info "② team/list → 找一个 admin 是 owner 的 team"
+info "② team/list → find a team where admin is the owner"
 R=$(call_meta team/list "$ADMIN_KEY" "{\"user_id\":\"$ADMIN_ID\",\"limit\":50,\"offset\":0}")
 TEAM_ID=$(echo "$R" | python3 -c "
 import sys,json
@@ -53,14 +53,14 @@ print(own[0]['team_id'] if own else d[0]['team_id'])")
 pass "team_id=$TEAM_ID"
 
 # ============================
-info "③ 再造一个普通成员 memberA，加入 team"
+info "③ create another regular member memberA and add them to the team"
 MEMBER_USERNAME="memberA-$(date +%s)"
 R=$(call_meta user/create "$ADMIN_KEY" "{\"auth_provider\":\"local\",\"external_id\":\"$MEMBER_USERNAME\",\"username\":\"$MEMBER_USERNAME\"}")
 [[ $(jcode "$R") == "0" ]] || fail "user/create" "$R"
 MEMBER_ID=$(jget "$R" data.user_id)
 pass "member user_id=$MEMBER_ID"
 
-# 给 member 造一个 user_key（member 自己登录用）
+# Create a user_key for the member (for the member's own login)
 R=$(call_meta user-key/create "$ADMIN_KEY" "{\"user_id\":\"$MEMBER_ID\",\"name\":\"e2e-test\"}")
 [[ $(jcode "$R") == "0" ]] || fail "user-key/create" "$R"
 MEMBER_KEY=$(jget "$R" data.key_value)
@@ -68,17 +68,17 @@ pass "member user_key=$MEMBER_KEY"
 
 R=$(call_meta team-member/add "$ADMIN_KEY" "{\"team_id\":\"$TEAM_ID\",\"user_id\":\"$MEMBER_ID\",\"role\":\"member\"}")
 [[ $(jcode "$R") == "0" ]] || fail "team-member/add" "$R"
-pass "member 已加入 team"
+pass "member has joined the team"
 
 # ============================
-info "④ agent/create（admin 建一个 agent）"
+info "④ agent/create (admin creates an agent)"
 R=$(call_meta agent/create "$ADMIN_KEY" "{\"team_id\":\"$TEAM_ID\",\"owner_user_id\":\"$ADMIN_ID\",\"name\":\"e2e-agent-$(date +%s)\",\"visibility\":\"team\"}")
 [[ $(jcode "$R") == "0" ]] || fail "agent/create" "$R"
 AGENT_ID=$(jget "$R" data.agent_id)
 pass "agent_id=$AGENT_ID"
 
 # ============================
-info "⑤ skill/create（数据面）→ 验证是否自动登记为 asset"
+info "⑤ skill/create (data plane) → verify it is automatically registered as an asset"
 SKILL_NAME="e2e-skill-$(date +%s)"
 SKILL_CONTENT=$(cat <<EOF
 ---
@@ -104,67 +104,67 @@ SKILL_ID=$(jget "$R" data.skill_id)
 pass "skill_id=$SKILL_ID (== asset_id)"
 
 # ============================
-info "⑥ 验证 asset 已自动登记（钩子 onSkillCreated）"
+info "⑥ verify the asset was automatically registered (hook onSkillCreated)"
 R=$(call_meta asset/get "$ADMIN_KEY" "{\"asset_id\":\"$SKILL_ID\"}")
 CODE=$(jcode "$R")
 if [[ $CODE != "0" ]]; then
-  fail "asset/get 找不到自动登记的 asset" "$R"
+  fail "asset/get cannot find the automatically registered asset" "$R"
 fi
 VIS=$(jget "$R" data.visibility)
 OWNER=$(jget "$R" data.owner_user_id)
-pass "asset 已自动登记, visibility=$VIS, owner=$OWNER"
-[[ $VIS == "team" ]] || fail "默认 visibility 应该是 team" "$VIS"
+pass "asset automatically registered, visibility=$VIS, owner=$OWNER"
+[[ $VIS == "team" ]] || fail "default visibility should be team" "$VIS"
 
 # ============================
-info "⑦ asset/list-accessible: admin 视角 & member 视角（默认 team 可见）"
+info "⑦ asset/list-accessible: admin view & member view (team-visible by default)"
 R=$(call_meta asset/list-accessible "$ADMIN_KEY" "{\"user_id\":\"$ADMIN_ID\",\"team_id\":\"$TEAM_ID\",\"asset_type\":\"skill\",\"action\":\"read\",\"limit\":100}")
 COUNT_ADMIN=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for i in d['data']['items'] if i['asset_id']=='$SKILL_ID'))")
-[[ $COUNT_ADMIN == "1" ]] || fail "admin 应该能看到刚建的 skill" "$R"
-pass "admin 可见 ($COUNT_ADMIN/1)"
+[[ $COUNT_ADMIN == "1" ]] || fail "admin should be able to see the skill just created" "$R"
+pass "admin can see it ($COUNT_ADMIN/1)"
 
 R=$(call_meta asset/list-accessible "$MEMBER_KEY" "{\"user_id\":\"$MEMBER_ID\",\"team_id\":\"$TEAM_ID\",\"asset_type\":\"skill\",\"action\":\"read\",\"limit\":100}")
 COUNT_MEMBER=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for i in d['data']['items'] if i['asset_id']=='$SKILL_ID'))")
-[[ $COUNT_MEMBER == "1" ]] || fail "member 默认 team 可见 应该能看到" "$R"
-pass "member 可见（visibility=team 默认共享）"
+[[ $COUNT_MEMBER == "1" ]] || fail "member should be able to see it with default team visibility" "$R"
+pass "member can see it (visibility=team shared by default)"
 
 # ============================
-info "⑧ asset/update → 切私密（visibility=private）"
+info "⑧ asset/update → switch to private (visibility=private)"
 R=$(call_meta asset/update "$ADMIN_KEY" "{\"asset_id\":\"$SKILL_ID\",\"visibility\":\"private\"}")
-[[ $(jcode "$R") == "0" ]] || fail "asset/update 切私密" "$R"
-pass "已切私密"
+[[ $(jcode "$R") == "0" ]] || fail "asset/update switch to private" "$R"
+pass "switched to private"
 
-info "⑨ 私密后 member 应该看不到"
+info "⑨ after going private, member should not see it"
 R=$(call_meta asset/list-accessible "$MEMBER_KEY" "{\"user_id\":\"$MEMBER_ID\",\"team_id\":\"$TEAM_ID\",\"asset_type\":\"skill\",\"action\":\"read\",\"limit\":100}")
 COUNT_MEMBER_PRIVATE=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for i in d['data']['items'] if i['asset_id']=='$SKILL_ID'))")
-[[ $COUNT_MEMBER_PRIVATE == "0" ]] || fail "私密后 member 应该看不到，但看到了 $COUNT_MEMBER_PRIVATE 条" "$R"
-pass "member 看不到私密 skill ✓（可见性判定生效）"
+[[ $COUNT_MEMBER_PRIVATE == "0" ]] || fail "after going private, member should not see it, but saw $COUNT_MEMBER_PRIVATE" "$R"
+pass "member cannot see the private skill ✓ (visibility check in effect)"
 
 # ============================
-info "⑩ acl/grant → 精细授权给 member（授 read）"
+info "⑩ acl/grant → fine-grained grant to member (grant read)"
 R=$(call_meta acl/grant "$ADMIN_KEY" "{\"asset_id\":\"$SKILL_ID\",\"subject_type\":\"user\",\"subject_id\":\"$MEMBER_ID\",\"permission\":\"read\",\"effect\":\"allow\",\"granted_by\":\"$ADMIN_ID\"}")
 [[ $(jcode "$R") == "0" ]] || fail "acl/grant" "$R"
 ACL_ID=$(jget "$R" data.id)
 pass "acl_id=$ACL_ID"
 
-info "⑪ 授权后 member 应该又能看到（尽管仍是 private）"
+info "⑪ after the grant, member should be able to see it again (even though it is still private)"
 R=$(call_meta asset/list-accessible "$MEMBER_KEY" "{\"user_id\":\"$MEMBER_ID\",\"team_id\":\"$TEAM_ID\",\"asset_type\":\"skill\",\"action\":\"read\",\"limit\":100}")
 COUNT_AFTER_GRANT=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for i in d['data']['items'] if i['asset_id']=='$SKILL_ID'))")
 if [[ $COUNT_AFTER_GRANT == "1" ]]; then
-  pass "member 通过 ACL 又能看到 ✓"
+  pass "member can see it again via ACL ✓"
 else
-  echo -e "  ${YELLOW}⚠${NC} acl/grant 后 member 仍看不到（可能是 private 视角下角色默认权限比 ACL 优先，或另有规则），返回 $COUNT_AFTER_GRANT 条"
-  echo "    这一点需要跟内核 permission-checker 对齐；不阻塞授权 UI 落地"
+  echo -e "  ${YELLOW}⚠${NC} member still cannot see it after acl/grant (perhaps the role's default permission takes priority over ACL in the private view, or another rule applies), returned $COUNT_AFTER_GRANT"
+  echo "    This needs to be aligned with the kernel permission-checker; it does not block the authorization UI from landing"
 fi
 
 # ============================
-info "⑫ acl/list → 列 skill 上的 ACL"
+info "⑫ acl/list → list the ACL on the skill"
 R=$(call_meta acl/list "$ADMIN_KEY" "{\"asset_id\":\"$SKILL_ID\",\"limit\":20,\"offset\":0}")
 [[ $(jcode "$R") == "0" ]] || fail "acl/list" "$R"
 ACL_TOTAL=$(jget "$R" data.total)
-pass "acl 记录数=$ACL_TOTAL"
+pass "acl record count=$ACL_TOTAL"
 
 # ============================
-info "⑬ acl/check → 显式检查 member 对 skill 的 read 权限"
+info "⑬ acl/check → explicitly check member's read permission on the skill"
 R=$(call_meta acl/check "$MEMBER_KEY" "{\"user_id\":\"$MEMBER_ID\",\"asset_id\":\"$SKILL_ID\",\"action\":\"read\"}")
 [[ $(jcode "$R") == "0" ]] || fail "acl/check" "$R"
 ALLOWED=$(jget "$R" data.allowed)
@@ -172,35 +172,35 @@ REASON=$(jget "$R" data.reason)
 pass "check allowed=$ALLOWED, reason=$REASON"
 
 # ============================
-info "⑭ acl/revoke → 撤销授权"
+info "⑭ acl/revoke → revoke the grant"
 R=$(call_meta acl/revoke "$ADMIN_KEY" "{\"id\":\"$ACL_ID\"}")
 [[ $(jcode "$R") == "0" ]] || fail "acl/revoke" "$R"
-pass "已撤销"
+pass "revoked"
 
 R=$(call_meta acl/check "$MEMBER_KEY" "{\"user_id\":\"$MEMBER_ID\",\"asset_id\":\"$SKILL_ID\",\"action\":\"read\"}")
 ALLOWED2=$(jget "$R" data.allowed)
-pass "撤销后 acl/check allowed=$ALLOWED2"
+pass "after revoke, acl/check allowed=$ALLOWED2"
 
 # ============================
-info "⑮ agent-fixed-asset/list-with-detail → 预期 501 NOT_IN_SCOPE（stateless 模式挡着）"
+info "⑮ agent-fixed-asset/list-with-detail → expect 501 NOT_IN_SCOPE (blocked by stateless mode)"
 R=$(call_meta agent-fixed-asset/list-with-detail "$ADMIN_KEY" "{\"agent_id\":\"$AGENT_ID\",\"limit\":100,\"offset\":0}")
 STATUS=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('code', 'no-code'))")
 if [[ $STATUS == "501" ]] || echo "$R" | grep -q "NOT_IN_SCOPE"; then
-  pass "预期挡住：$R"
+  pass "blocked as expected: $R"
 else
-  echo -e "  ${YELLOW}⚠${NC} agent-fixed-asset/list-with-detail 竟然通了？response: $R"
+  echo -e "  ${YELLOW}⚠${NC} agent-fixed-asset/list-with-detail went through unexpectedly? response: $R"
 fi
 
 # ============================
-info "⑯ 内容面 skill/list → 验证固定资产 Tab 现用的接口"
+info "⑯ content plane skill/list → verify the endpoint currently used by the fixed-assets tab"
 R=$(call_skill list "$ADMIN_KEY" "{\"user_id\":\"$ADMIN_ID\",\"team_id\":\"$TEAM_ID\",\"filters\":{\"owner_agent_id\":\"$AGENT_ID\",\"status\":[\"active\"]},\"pagination\":{\"limit\":50,\"offset\":0}}")
 [[ $(jcode "$R") == "0" ]] || fail "skill/list by owner_agent_id" "$R"
 COUNT_SKILL=$(echo "$R" | python3 -c "import sys,json; d=json.load(sys.stdin); print(sum(1 for i in d['data']['items'] if i['skill_id']=='$SKILL_ID'))")
-[[ $COUNT_SKILL == "1" ]] || fail "skill/list?owner_agent_id 应能找到刚建的 skill" "$R"
-pass "内容面按 agent_id 过滤生效 ($COUNT_SKILL/1)"
+[[ $COUNT_SKILL == "1" ]] || fail "skill/list?owner_agent_id should find the skill just created" "$R"
+pass "content-plane filtering by agent_id works ($COUNT_SKILL/1)"
 
 # ============================
-info "清理：撤销、删 skill、删 member、删 agent"
+info "Cleanup: revoke, delete skill, delete member, delete agent"
 call_skill delete "$ADMIN_KEY" "{\"user_id\":\"$ADMIN_ID\",\"team_id\":\"$TEAM_ID\",\"agent_id\":\"$AGENT_ID\",\"skill_id\":\"$SKILL_ID\",\"expected_version\":1}" > /dev/null || true
 call_meta agent/archive "$ADMIN_KEY" "{\"agent_id\":\"$AGENT_ID\"}" > /dev/null || true
 call_meta team-member/remove "$ADMIN_KEY" "{\"team_id\":\"$TEAM_ID\",\"user_id\":\"$MEMBER_ID\"}" > /dev/null || true
@@ -208,4 +208,4 @@ call_meta user-key/revoke "$ADMIN_KEY" "{\"key_value\":\"$MEMBER_KEY\"}" > /dev/
 call_meta user/delete "$ADMIN_KEY" "{\"user_id\":\"$MEMBER_ID\"}" > /dev/null || true
 
 echo
-echo -e "${GREEN}=== 全部关键路径验证完成 ===${NC}"
+echo -e "${GREEN}=== All key-path verifications complete ===${NC}"

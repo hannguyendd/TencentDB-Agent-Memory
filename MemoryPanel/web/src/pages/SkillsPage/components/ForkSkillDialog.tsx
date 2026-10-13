@@ -1,17 +1,17 @@
 /**
- * ForkSkillDialog — "复制一份 skill 给某个 agent，且该副本可被该 agent 编辑"。
+ * ForkSkillDialog -- "copy a skill to an agent, with the copy editable by that agent".
  *
- * 与「授权（asset visibility=team + acl/grant）」的区别：
- *   - 授权 → 通过\"我的资产分配\"tab 切共享或 acl/grant，不复制内容，其他人
- *     拿到的是对同一份 skill 的读/使用权限；
- *   - fork（本对话框）→ 拉源 skill 的 SKILL.md，**沿用原名 + 目标 agent 为 owner**
- *     调用 skill-api.createSkill 落一份独立副本，之后该 agent 可写。
+ * Difference from "authorization (asset visibility=team + acl/grant)":
+ *   - Authorization -> switch to shared or acl/grant via the "My asset allocation" tab, no content is copied, and others
+ *     get read/use permission on the same skill;
+ *   - fork (this dialog) -> pull the source skill's SKILL.md, **keep the original name + target agent as owner**,
+ *     and call skill-api.createSkill to create an independent copy, which that agent can then write to.
  *
- * 命名约定：副本**沿用源 skill 原名**，不加后缀。skill 唯一约束基于
- * (team_id, owner_agent_id, name)：同一 team 允许多个同名副本（分属不同 agent），
- * 但目标 agent 下若已存在同名 skill，后端会拒绝（42201），此处提前拦截并提示。
+ * Naming convention: the copy **keeps the source skill's original name**, with no suffix. The skill uniqueness constraint is based on
+ * (team_id, owner_agent_id, name): the same team allows multiple copies with the same name (belonging to different agents),
+ * but if a skill with the same name already exists under the target agent, the backend rejects it (42201); here it is intercepted early with a notice.
  *
- * 实现：走「getSkill(源) → readSkillFile(附件们) → createSkill(新)」三步。
+ * Implementation: three steps "getSkill(source) -> readSkillFile(attachments) -> createSkill(new)".
  */
 
 import { useState } from 'react';
@@ -29,27 +29,27 @@ import {
 } from '@/lib/api/skill-api';
 
 /**
- * 改写 SKILL.md frontmatter 里的 name 字段，保证 DB 记录名与文件内容一致。
- * 仅替换第一个 `--- ... ---` frontmatter 块内的 `name:` 行；无 frontmatter 则原样返回。
+ * Rewrite the name field in the SKILL.md frontmatter, ensuring the DB record name matches the file content.
+ * Only replaces the `name:` line inside the first `--- ... ---` frontmatter block; returns as-is if there is no frontmatter.
  */
 function rewriteFrontmatterName(content: string, newName: string): string {
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!fmMatch) return content;
   const fmBody = fmMatch[1];
-  if (!/^\s*name\s*:/m.test(fmBody)) return content; // 无 name 字段，不强行插入
+  if (!/^\s*name\s*:/m.test(fmBody)) return content; // No name field, don't force-insert one
   const newFmBody = fmBody.replace(/^(\s*name\s*:\s*).*/m, `$1${newName}`);
   return content.replace(fmBody, newFmBody);
 }
 
 export default function ForkSkillDialog(props: {
-  /** 要 fork 的源 skill 名 */
+  /** Name of the source skill to fork */
   skillName: string;
-  /** v3 API 需要的 skill_id */
+  /** skill_id required by the v3 API */
   skillId: string;
   agents: Array<{ id: string; name: string }>;
-  /** 当前 team ID（v3 API 必传） */
+  /** Current team ID (required by the v3 API) */
   teamId: string;
-  /** 当前用户 ID（v3 API 必传） */
+  /** Current user ID (required by the v3 API) */
   userId: string;
   onClose: () => void;
   onForked: (newSkill: SkillSummary) => void;
@@ -60,8 +60,8 @@ export default function ForkSkillDialog(props: {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // 副本名默认沿用源 skill 原名，用户可编辑。唯一约束靠 owner_agent_id 区分，
-  // 同一 agent 下不允许重名（后端 42201），下方 submit 会提前拦截。
+  // The copy name defaults to the source skill's original name and is editable by the user. Uniqueness is distinguished by owner_agent_id,
+  // and duplicate names under the same agent are not allowed (backend 42201); the submit below intercepts early.
   const [newName, setNewName] = useState(props.skillName);
 
   async function submit(): Promise<void> {
@@ -72,7 +72,7 @@ export default function ForkSkillDialog(props: {
     setError(null);
     setSubmitting(true);
     try {
-      // Step 1: 拉源 skill 详情（含 content + manifest）。
+      // Step 1: pull the source skill details (including content + manifest).
       const full = await getSkill({
         skill_id: props.skillId,
         team_id: props.teamId,
@@ -80,7 +80,7 @@ export default function ForkSkillDialog(props: {
         include_manifest: true,
       });
 
-      // Step 2: 防御性检查 —— 目标 agent 下已存在同名 skill 则提前拦截，避免后端 42201。
+      // Step 2: defensive check -- if a skill with the same name already exists under the target agent, intercept early to avoid the backend 42201.
       const existing = await listSkills({
         team_id: props.teamId,
         filters: { owner_agent_id: agentId, status: ['active'] },
@@ -92,7 +92,7 @@ export default function ForkSkillDialog(props: {
         );
       }
 
-      // Step 3: 复制附属资源文件（逐个 readSkillFile；单个失败跳过，不阻断主流程）。
+      // Step 3: copy the attached resource files (readSkillFile one by one; a single failure is skipped without blocking the main flow).
       const resources: SkillResourcePayload[] = [];
       for (const entry of full.manifest ?? []) {
         try {
@@ -109,12 +109,12 @@ export default function ForkSkillDialog(props: {
             is_executable: entry.is_executable || undefined,
           });
         } catch {
-          /* 单个资源读取失败则跳过，不阻断 fork 主流程 */
+          /* A single resource read failure is skipped and does not block the main fork flow */
         }
       }
 
-      // Step 4: 以（可编辑的）副本名 + 目标 agent 为 owner 创建 skill（v3 API）。
-      // 若用户改了名，同步改写 SKILL.md frontmatter 的 name 字段，保持 DB 与文件一致。
+      // Step 4: create the skill with the (editable) copy name + target agent as owner (v3 API).
+      // If the user changed the name, also rewrite the name field of the SKILL.md frontmatter to keep the DB and file consistent.
       const trimmedName = newName.trim();
       const finalContent = trimmedName !== props.skillName
         ? rewriteFrontmatterName(full.content, trimmedName)

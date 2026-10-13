@@ -1,23 +1,23 @@
-# 测试文件
+# Test files
 *.test.ts
 *.test.js
 *.spec.ts
 *.spec.js
 __tests__/
 
-# 开发文档与辅助
+# Development docs and helpers
 docs/
 benchmark-runs/
 workspace/
 
-# 环境与配置
+# Environment and config
 .env
 .env.*
 .gitignore
 .codebuddy/
 .coding-ci.yaml
 
-# 运行时产物
+# Runtime artifacts
 node_modules/
 *.tgz
 *.pyc

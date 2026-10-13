@@ -72,9 +72,9 @@ export async function resolveFixedAssetCtxs(
 
   let result: FixedAssetCtx[] = [selfCtx];
   try {
-    // 只关心 chat_memory 绑定（下方循环 `item.asset_type !== "chat_memory"` 一律跳过），
-    // 让 core 在 SQL 层过滤：无关类型（skill / wiki / code_graph）不再占分页额度，
-    // 避免 skill 特别多的 agent（实际线上 519 skill）把 chat_memory 挤出翻页硬上限。
+    // Only chat_memory bindings matter (the loop below `item.asset_type !== "chat_memory"` skips everything else),
+    // so let core filter at the SQL layer: irrelevant types (skill / wiki / code_graph) no longer take up pagination quota,
+    // preventing an agent with very many skills (519 skills in production) from pushing chat_memory beyond the hard page limit.
     const detail = await client.getAgentFixedAssets(identity.agentId, { assetTypes: ["chat_memory"] });
     const selfAgent = detail.agent as { agent_id?: string; team_id?: string; owner_user_id?: string };
     const selfTeamId = selfAgent?.team_id || identity.teamId;
@@ -98,7 +98,7 @@ export async function resolveFixedAssetCtxs(
           isSelf: false,
         });
       } catch {
-        // 绑定的来源 agent 已删除/不可见时跳过，避免用 chat_memory asset_id 当 agent_id 查询导致空召回。
+        // Skip when the binding's source agent has been deleted/is invisible, to avoid querying with a chat_memory asset_id as agent_id and getting an empty recall.
       }
     }
 

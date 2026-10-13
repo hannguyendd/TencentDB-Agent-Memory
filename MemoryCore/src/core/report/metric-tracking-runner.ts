@@ -1,33 +1,33 @@
 /**
- * MetricTrackingRunner / MetricTrackingRunnerFactory — LLMRunner 装饰器，
- * 在 LLM 调用完成后非侵入式上报 credit 消耗到 Kafka。
+ * MetricTrackingRunner / MetricTrackingRunnerFactory — LLMRunner decorator,
+ * non-intrusively reports credit consumption to Kafka after an LLM call completes.
  *
- * 设计原则（与 MetricTrackingStore 完全同构）：
- *   1. 先执行原方法，拿到结果
- *   2. 原方法成功后，try-catch 做上报（静默失败）
- *   3. 无论上报成功失败，都返回原方法的结果
- *   4. 原方法抛异常时直接 re-throw，不执行任何上报
- *   5. 不改变 LLMRunner / LLMRunnerFactory 接口签名
+ * Design principles (fully isomorphic with MetricTrackingStore):
+ *   1. Run the original method first and get the result
+ *   2. After the original method succeeds, report inside try-catch (silent failure)
+ *   3. Whether reporting succeeds or fails, always return the original method's result
+ *   4. If the original method throws, re-throw directly without any reporting
+ *   5. Does not change the LLMRunner / LLMRunnerFactory interface signatures
  *
- * taskId → 指标名映射：
+ * taskId → metric name mapping:
  *   - "l1-extraction"        → "l1_extraction_credit_rate"
  *   - "l1-conflict-detection" → "l1_dedup_credit_rate"
  *   - "scene-extract-*"      → "l2_extraction_credit_rate"
  *   - "persona-generation"   → "l3_generation_credit_rate"
  *
- * Token Usage 获取策略：
- *   - 优先从 inner runner 的 lastUsage side-channel 读取精确值（区分 input/output）
- *   - 如果不可用（OpenClaw 路径），基于字符长度估算
+ * Token usage acquisition strategy:
+ *   - Prefer reading exact values (distinguishing input/output) from the inner runner's lastUsage side-channel
+ *   - If unavailable (OpenClaw path), estimate from character length
  *
- * Credit 计算（Producer 侧完成，Consumer 侧只做 ÷窗口周期得速率）：
- *   公式：Credit = (input_tokens/10000 × INPUT_RATE + output_tokens/10000 × OUTPUT_RATE) × multiplier
- *   1 Credit = 10000 个标准 Input Tokens（以 M2.7 为锚点）
- *   基础费率：
+ * Credit calculation (done on the Producer side; the Consumer side only divides by the window period to get a rate):
+ *   Formula: Credit = (input_tokens/10000 × INPUT_RATE + output_tokens/10000 × OUTPUT_RATE) × multiplier
+ *   1 Credit = 10000 standard Input Tokens (anchored on M2.7)
+ *   Base rates:
  *     - INPUT_RATE  = 1.0 Credit / 10k tokens
- *     - CACHE_RATE  = 0.2 Credit / 10k tokens（一期暂不区分 cache，全按 input 计）
+ *     - CACHE_RATE  = 0.2 Credit / 10k tokens (phase 1 does not distinguish cache; everything is counted as input)
  *     - OUTPUT_RATE = 4.0 Credit / 10k tokens
- *   模型系数：M2.7 = 1.0，旗舰型 = 15.0，极速型 = 0.8（一期默认 1.0）
- *   降级策略：无法区分 input/output 时，全按 input 费率（1.0）保守估算
+ *   Model coefficients: M2.7 = 1.0, flagship = 15.0, high-speed = 0.8 (phase 1 default 1.0)
+ *   Degradation strategy: when input/output cannot be distinguished, conservatively estimate everything at the input rate (1.0)
  */
 
 import type {
@@ -39,24 +39,24 @@ import type {
 import { metricProducer } from "./kafka-metric-producer.js";
 
 // ============================
-// taskId → 指标名映射
+// taskId → metric name mapping
 // ============================
 
-/** LLM Runner 的 token usage 信息（side-channel） */
+/** Token usage info of the LLM Runner (side-channel) */
 export interface LLMUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
 }
 
-/** 带 lastUsage side-channel 的 LLMRunner（可选扩展） */
+/** LLMRunner with a lastUsage side-channel (optional extension) */
 export interface LLMRunnerWithUsage extends LLMRunner {
   lastUsage?: LLMUsage;
 }
 
 /**
- * 根据 taskId 映射到 Kafka 指标名。
- * 返回 undefined 表示该 taskId 不需要上报 credit。
+ * Map a taskId to a Kafka metric name.
+ * Returns undefined if the taskId does not need credit reporting.
  */
 export function taskIdToMetricName(taskId: string): string | undefined {
   if (taskId === "l1-extraction") return "l1_extraction_credit_rate";
@@ -67,10 +67,10 @@ export function taskIdToMetricName(taskId: string): string | undefined {
 }
 
 /**
- * 根据 taskId 映射到评测 token 指标前缀。
- * 返回 undefined 表示该 taskId 不需要按环节上报 token。
+ * Map a taskId to an eval token metric prefix.
+ * Returns undefined if the taskId does not need per-stage token reporting.
  *
- * 产出指标名举例：
+ * Example output metric names:
  *   l1_extraction_input_tokens / l1_extraction_output_tokens
  *   l1_dedup_input_tokens / l1_dedup_output_tokens
  *   l2_extraction_input_tokens / l2_extraction_output_tokens
@@ -85,31 +85,31 @@ export function taskIdToTokenMetricPrefix(taskId: string): string | undefined {
 }
 
 // ============================
-// Credit 计算常量与函数
+// Credit calculation constants and functions
 // ============================
 
-/** 1 Credit 对应的 token 基数（10000 tokens = 1 Credit） */
+/** Token base per 1 Credit (10000 tokens = 1 Credit) */
 export const TOKENS_PER_CREDIT = 10000;
-/** 基础费率：标准输入 1.0 Credit / 10k tokens（M2.7 锚点） */
+/** Base rate: standard input 1.0 Credit / 10k tokens (M2.7 anchor) */
 export const INPUT_RATE = 1.0;
-/** 基础费率：缓存输入 0.2 Credit / 10k tokens（一期暂不区分 cache，全按 input 计） */
+/** Base rate: cached input 0.2 Credit / 10k tokens (phase 1 does not distinguish cache; everything is counted as input) */
 export const CACHE_RATE = 0.2;
-/** 基础费率：模型输出 4.0 Credit / 10k tokens */
+/** Base rate: model output 4.0 Credit / 10k tokens */
 export const OUTPUT_RATE = 4.0;
-/** 默认模型系数（M2.7 标准型） */
+/** Default model coefficient (M2.7 standard) */
 export const DEFAULT_MULTIPLIER = 1.0;
 
 /**
- * 将 Credit 值四舍五入到 5 位小数。
- * 所有上报统一使用此函数，保证精度一致。
+ * Round a Credit value to 5 decimal places.
+ * All reporting uses this function uniformly to keep precision consistent.
  */
 export function roundCredit(value: number): number {
   return Math.round(value * 100000) / 100000;
 }
 
 /**
- * 根据 taskId 映射到记忆层级（用于用量上报）。
- * 返回 undefined 表示该 taskId 不需要上报。
+ * Map a taskId to a memory level (for usage reporting).
+ * Returns undefined if the taskId does not need reporting.
  */
 export function taskIdToLevel(taskId: string): "L1" | "L2" | "L3" | undefined {
   if (taskId === "l1-extraction" || taskId === "l1-conflict-detection") return "L1";
@@ -118,7 +118,7 @@ export function taskIdToLevel(taskId: string): "L1" | "L2" | "L3" | undefined {
   return undefined;
 }
 
-/** onCreditConsumed 回调参数 */
+/** onCreditConsumed callback parameters */
 export interface CreditConsumedEvent {
   instanceId: string;
   credit: number;
@@ -126,16 +126,16 @@ export interface CreditConsumedEvent {
   taskId: string;
 }
 
-/** onCreditConsumed 回调类型 */
+/** onCreditConsumed callback type */
 export type OnCreditConsumed = (event: CreditConsumedEvent) => void;
 
 /**
- * 根据精确的 input/output token 数计算 Credit 值。
- * 公式：Credit = (input/10000 × INPUT_RATE + output/10000 × OUTPUT_RATE) × multiplier
+ * Compute the Credit value from exact input/output token counts.
+ * Formula: Credit = (input/10000 × INPUT_RATE + output/10000 × OUTPUT_RATE) × multiplier
  *
- * 1 Credit = 10000 个标准 Input Tokens。
- * 一期简化：不区分 cache tokens，全按 input 费率计算。
- * 后续 LLM SDK 支持返回 cache hit 数后再精细化。
+ * 1 Credit = 10000 standard Input Tokens.
+ * Phase 1 simplification: does not distinguish cache tokens; everything is computed at the input rate.
+ * To be refined once the LLM SDK supports returning cache-hit counts.
  */
 export function computeCredit(
   inputTokens: number,
@@ -146,11 +146,11 @@ export function computeCredit(
 }
 
 /**
- * 基于字符长度粗略估算 token 数量，然后计算 Credit。
- * 英文约 4 字符/token，中文约 2 字符/token，取折中值 3 字符/token。
+ * Roughly estimate the token count from character length, then compute the Credit.
+ * English is about 4 chars/token, Chinese about 2 chars/token; a compromise of 3 chars/token is used.
  *
- * 降级策略：无法区分 input/output 时，全按 input 费率（1.0）保守估算。
- * 公式：Credit = estimatedTotalTokens / 10000 × INPUT_RATE × multiplier
+ * Degradation strategy: when input/output cannot be distinguished, conservatively estimate everything at the input rate (1.0).
+ * Formula: Credit = estimatedTotalTokens / 10000 × INPUT_RATE × multiplier
  */
 export function estimateCreditFromChars(
   inputCharLength: number,
@@ -162,19 +162,19 @@ export function estimateCreditFromChars(
 }
 
 // ============================
-// MetricTrackingRunner（装饰器）
+// MetricTrackingRunner (decorator)
 // ============================
 
 /**
- * 包装 LLMRunner，在 run() 完成后异步上报 credit 消耗到 Kafka。
+ * Wraps an LLMRunner and asynchronously reports credit consumption to Kafka after run() completes.
  *
- * 上报的 value 是 **Credit 值**（已完成 Token → Credit 转换），
- * Consumer 侧只需 ÷ 窗口周期得速率，不需要再做 Token → Credit 换算。
+ * The reported value is the **Credit value** (Token → Credit conversion already done),
+ * so the Consumer side only needs to divide by the window period to get a rate, with no further Token → Credit conversion.
  *
- * 安全保证：
- *   - 上报失败静默忽略，绝不影响 run() 的返回值
- *   - 原方法抛异常时不上报，异常正常传播
- *   - 不改变 run() 的签名和返回值
+ * Safety guarantees:
+ *   - Reporting failures are silently ignored and never affect run()'s return value
+ *   - No reporting when the original method throws; the exception propagates normally
+ *   - Does not change run()'s signature or return value
  */
 export class MetricTrackingRunner implements LLMRunner {
   private readonly inner: LLMRunner;
@@ -198,21 +198,21 @@ export class MetricTrackingRunner implements LLMRunner {
   }
 
   async run(params: LLMRunParams): Promise<string> {
-    // 0. 注入 instanceId（如果调用方没传，从 getInstanceId 回调获取）
+    // 0. Inject instanceId (if the caller did not pass one, obtain it from the getInstanceId callback)
     const enrichedParams = params.instanceId
       ? params
       : { ...params, instanceId: this.getInstanceId() };
 
-    // 1. 先执行原方法，拿到结果（异常直接 re-throw）
+    // 1. Run the original method first and get the result (exceptions are re-thrown directly)
     const text = await this.inner.run(enrichedParams);
 
-    // 2. 原方法成功后，try-catch 做上报（静默失败）
+    // 2. After the original method succeeds, report inside try-catch (silent failure)
     try {
       const metricName = taskIdToMetricName(params.taskId);
       if (metricName) {
         const instanceId = enrichedParams.instanceId ?? this.getInstanceId();
         if (instanceId) {
-          // 优先从 inner runner 的 lastUsage side-channel 读取精确 token 数
+          // Prefer reading the exact token count from the inner runner's lastUsage side-channel
           const innerWithUsage = this.inner as LLMRunnerWithUsage;
           let creditValue: number;
           let inputTokens: number;
@@ -223,7 +223,7 @@ export class MetricTrackingRunner implements LLMRunner {
             outputTokens = innerWithUsage.lastUsage.completionTokens;
             creditValue = computeCredit(inputTokens, outputTokens, this.multiplier);
           } else {
-            // 无精确 token 数时，基于字符长度估算
+            // When there is no exact token count, estimate from character length
             const inputChars = (params.prompt?.length ?? 0) + (params.systemPrompt?.length ?? 0);
             const outputChars = text.length;
             inputTokens = Math.ceil(inputChars / 3);
@@ -231,14 +231,14 @@ export class MetricTrackingRunner implements LLMRunner {
             creditValue = estimateCreditFromChars(inputChars, outputChars, this.multiplier);
           }
 
-          // 统一 round 到 5 位小数（所有上报使用相同数据）
+          // Uniformly round to 5 decimal places (all reporting uses the same data)
           const roundedCredit = roundCredit(creditValue);
 
           // Accumulate credit for caller to read
           this.accumulatedCredit += roundedCredit;
 
           if (roundedCredit > 0) {
-            // 上报聚合指标（5 位小数，静默失败）
+            // Report the aggregate metric (5 decimal places, silent failure)
             try {
               metricProducer.send({
                 metric: metricName,
@@ -247,10 +247,10 @@ export class MetricTrackingRunner implements LLMRunner {
                 source: "core",
               });
             } catch {
-              // 指标发送失败静默忽略
+              // Metric send failures are silently ignored
             }
 
-            // 上报用量回调（同样 5 位小数，静默失败）
+            // Report the usage callback (also 5 decimal places, silent failure)
             if (this.onCreditConsumed) {
               const level = taskIdToLevel(params.taskId);
               if (level) {
@@ -262,14 +262,14 @@ export class MetricTrackingRunner implements LLMRunner {
                     taskId: params.taskId,
                   });
                 } catch {
-                  // 静默失败，绝不影响业务
+                  // Silent failure; never affects the business
                 }
               }
             }
           }
 
-          // 上报原始 Token 指标（用于聚合侧计算 TPM）
-          // 只有 > 0 的指标才上报，静默失败
+          // Report raw Token metrics (for the aggregation side to compute TPM)
+          // Only metrics > 0 are reported; silent failure
           try {
             if (inputTokens > 0) {
               metricProducer.send({
@@ -288,10 +288,10 @@ export class MetricTrackingRunner implements LLMRunner {
               });
             }
           } catch {
-            // Token 指标上报失败静默忽略，绝不影响业务
+            // Token metric report failures are silently ignored; never affect the business
           }
 
-          // 上报按环节区分的 Token 指标（评测用，带 traceId）
+          // Report per-stage Token metrics (for evaluation, with traceId)
           try {
             const tokenPrefix = taskIdToTokenMetricPrefix(params.taskId);
             if (tokenPrefix && inputTokens > 0) {
@@ -311,31 +311,31 @@ export class MetricTrackingRunner implements LLMRunner {
               });
             }
           } catch {
-            // 静默失败
+            // silent failure
           }
         }
       }
     } catch {
-      // 静默失败，绝不影响业务
+      // Silent failure; never affects the business
     }
 
-    // 3. 无论上报成功失败，都返回原方法的结果
+    // 3. Whether reporting succeeds or fails, return the original method's result
     return text;
   }
 }
 
 // ============================
-// MetricTrackingRunnerFactory（装饰器）
+// MetricTrackingRunnerFactory (decorator)
 // ============================
 
 /**
- * 包装 LLMRunnerFactory，创建出的 Runner 自带 credit 上报能力。
+ * Wraps an LLMRunnerFactory so that the Runners it creates come with credit reporting built in.
  *
- * 注入点：在 tdai-core.ts 的 wirePipelineRunners() 中包装 factory。
- * 这是唯一的"改动"——属于可观测性代码的注入点，不是业务逻辑的修改。
+ * Injection point: wrap the factory in wirePipelineRunners() in tdai-core.ts.
+ * This is the only "change" — it is the injection point of observability code, not a modification of business logic.
  *
- * @param multiplier 模型系数（默认 1.0 = M2.7 标准型）。
- *   后续可从配置中读取，支持多模型动态切换。
+ * @param multiplier model coefficient (default 1.0 = M2.7 standard).
+ *   Can later be read from configuration to support dynamic multi-model switching.
  */
 export class MetricTrackingRunnerFactory implements LLMRunnerFactory {
   private readonly inner: LLMRunnerFactory;

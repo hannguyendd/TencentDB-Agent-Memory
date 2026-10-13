@@ -1,11 +1,11 @@
 /**
- * Auto-Sync Admin Routes — 调度器状态查询 + 手动触发。
+ * Auto-Sync Admin Routes — scheduler status query + manual trigger.
  *
  * Endpoints:
- *   GET  /auto-sync/status   → 当前调度器状态（running/activeSyncs/scanning）+ 配置
- *   POST /auto-sync/trigger  → 手动触发一轮全量扫描（fire-and-forget，立即返回）
+ *   GET  /auto-sync/status   → current scheduler state (running/activeSyncs/scanning) + config
+ *   POST /auto-sync/trigger  → manually trigger one full scan (fire-and-forget, returns immediately)
  *
- * 路由挂载时无 prefix，由 server.ts 统一加 /v3。
+ * Routes are mounted without a prefix; server.ts adds /v3 uniformly.
  */
 
 import { Hono } from "hono";
@@ -21,7 +21,7 @@ export function createAutoSyncRoutes(deps: AutoSyncRouteDeps) {
   const app = new Hono();
   const { scheduler, config } = deps;
 
-  // GET /auto-sync/status — 查看调度器运行状态 + 配置
+  // GET /auto-sync/status — view scheduler run state + config
   app.get("/auto-sync/status", (c) => {
     const status = scheduler.getStatus();
     return c.json(wrapOk({
@@ -34,7 +34,7 @@ export function createAutoSyncRoutes(deps: AutoSyncRouteDeps) {
     }));
   });
 
-  // POST /auto-sync/trigger — 手动触发一轮扫描（fire-and-forget）
+  // POST /auto-sync/trigger — manually trigger one scan (fire-and-forget)
   app.post("/auto-sync/trigger", (c) => {
     if (!config.enabled) {
       return c.json(wrapOk({ triggered: false, reason: "auto-sync is disabled by KNOWLEDGE_AUTO_SYNC_ENABLED" }));

@@ -1,30 +1,30 @@
 /**
- * L2 Scene Extraction Metric Reporter — L2 场景提取指标上报。
+ * L2 Scene Extraction Metric Reporter — reports L2 scene extraction metrics.
  *
- * 在 L2 场景提取完成后非侵入式上报以下指标到 Kafka：
- *   - l2_extraction_latency_ms  : L2 场景提取端到端总耗时（毫秒）
- *   - l2_llm_duration_ms       : L2 LLM 调用耗时（毫秒）
- *   - l2_scene_count_before    : 提取前场景数量
- *   - l2_scene_count_after     : 提取后场景数量
- *   - l2_scenes_created        : 本次新增场景数
- *   - l2_scenes_updated        : 本次更新场景数
- *   - l2_scenes_deleted        : 本次删除场景数
+ * After L2 scene extraction completes, non-intrusively reports the following metrics to Kafka:
+ *   - l2_extraction_latency_ms  : total end-to-end L2 scene extraction time (ms)
+ *   - l2_llm_duration_ms       : L2 LLM call duration (ms)
+ *   - l2_scene_count_before    : scene count before extraction
+ *   - l2_scene_count_after     : scene count after extraction
+ *   - l2_scenes_created        : number of scenes created in this run
+ *   - l2_scenes_updated        : number of scenes updated in this run
+ *   - l2_scenes_deleted        : number of scenes deleted in this run
  *
- * Trace 关联说明：
- *   所有指标通过 metricProducer.send() 自动注入当前 active span 的 traceId。
- *   L2 执行在 TracedTaskExecutor.executeL2() → withSpan("core.l2.extraction") 中，
- *   其子 span 包含 Vercel AI SDK 自动产生的 ai.generateText / gen_ai.chat span，
- *   携带 gen_ai.request.model 属性。通过 traceId 可反查到：
- *     - 用了什么模型
- *     - LLM 请求/响应详情
- *     - 整个 L2 提取链路的每个环节耗时
+ * Trace correlation notes:
+ *   All metrics automatically inject the traceId of the current active span via metricProducer.send().
+ *   L2 runs inside TracedTaskExecutor.executeL2() → withSpan("core.l2.extraction"),
+ *   whose child spans include the ai.generateText / gen_ai.chat spans automatically produced by the Vercel AI SDK,
+ *   carrying the gen_ai.request.model attribute. Via the traceId you can look up:
+ *     - which model was used
+ *     - LLM request/response details
+ *     - the time of each step in the entire L2 extraction chain
  *
- * 设计原则：
- *   1. 提取完成后，try-catch 做上报（静默失败）
- *   2. 无论上报成功失败，不影响提取结果
- *   3. 提取失败（hasError=true）时不上报
- *   4. 无 instanceId 时不上报
- *   5. llmDurationMs 为 null 表示无 LLM 调用计时，不上报 l2_llm_duration_ms
+ * Design principles:
+ *   1. After extraction completes, report inside try-catch (silent failure)
+ *   2. Whether reporting succeeds or fails, the extraction result is unaffected
+ *   3. Do not report when extraction fails (hasError=true)
+ *   4. Do not report when there is no instanceId
+ *   5. llmDurationMs being null means there is no LLM call timing; do not report l2_llm_duration_ms
  */
 
 import { metricProducer } from "./kafka-metric-producer.js";
@@ -34,23 +34,23 @@ import { metricProducer } from "./kafka-metric-producer.js";
 // ============================
 
 export interface L2LatencyMetricInput {
-  /** 实例 ID（Kafka key） */
+  /** Instance ID (Kafka key) */
   instanceId: string;
-  /** L2 场景提取端到端总耗时（毫秒） */
+  /** Total end-to-end L2 scene extraction time (ms) */
   extractionLatencyMs: number;
-  /** LLM 调用耗时（毫秒）。null 表示无 LLM 调用计时 */
+  /** LLM call duration (ms). null means there is no LLM call timing */
   llmDurationMs: number | null;
-  /** 提取前场景数量 */
+  /** Scene count before extraction */
   sceneCountBefore: number;
-  /** 提取后场景数量 */
+  /** Scene count after extraction */
   sceneCountAfter: number;
-  /** 本次新增场景数 */
+  /** Number of scenes created in this run */
   scenesCreated: number;
-  /** 本次更新场景数 */
+  /** Number of scenes updated in this run */
   scenesUpdated: number;
-  /** 本次删除场景数 */
+  /** Number of scenes deleted in this run */
   scenesDeleted: number;
-  /** 是否提取失败 */
+  /** Whether extraction failed */
   hasError: boolean;
 }
 
@@ -59,19 +59,19 @@ export interface L2LatencyMetricInput {
 // ============================
 
 /**
- * 上报 L2 场景提取指标到 Kafka。
+ * Reports L2 scene extraction metrics to Kafka.
  *
- * 静默安全：任何异常都 try-catch 吞掉，绝不向外抛。
+ * Silent-safe: any exception is swallowed by try-catch and never thrown outward.
  */
 export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
   try {
-    // Guard: 失败时不上报
+    // Guard: do not report on failure
     if (input.hasError) return;
 
-    // Guard: 无 instanceId 不上报
+    // Guard: do not report without instanceId
     if (!input.instanceId) return;
 
-    // 1. 上报 l2_extraction_latency_ms
+    // 1. report l2_extraction_latency_ms
     try {
       metricProducer.send({
         metric: "l2_extraction_latency_ms",
@@ -80,10 +80,10 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 2. 上报 l2_llm_duration_ms（仅有 LLM 计时时）
+    // 2. report l2_llm_duration_ms (only when LLM timing is available)
     if (input.llmDurationMs !== null) {
       try {
         metricProducer.send({
@@ -93,11 +93,11 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
           source: "core",
         });
       } catch {
-        // 静默失败
+        // silent failure
       }
     }
 
-    // 3. 上报 l2_scene_count_before
+    // 3. report l2_scene_count_before
     try {
       metricProducer.send({
         metric: "l2_scene_count_before",
@@ -106,10 +106,10 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 4. 上报 l2_scene_count_after
+    // 4. report l2_scene_count_after
     try {
       metricProducer.send({
         metric: "l2_scene_count_after",
@@ -118,10 +118,10 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 5. 上报 l2_scenes_created
+    // 5. report l2_scenes_created
     try {
       metricProducer.send({
         metric: "l2_scenes_created",
@@ -130,10 +130,10 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 6. 上报 l2_scenes_updated
+    // 6. report l2_scenes_updated
     try {
       metricProducer.send({
         metric: "l2_scenes_updated",
@@ -142,10 +142,10 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 7. 上报 l2_scenes_deleted
+    // 7. report l2_scenes_deleted
     try {
       metricProducer.send({
         metric: "l2_scenes_deleted",
@@ -154,9 +154,9 @@ export function reportL2LatencyMetrics(input: L2LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
   } catch {
-    // 最外层 catch — 绝不向外抛
+    // outermost catch — never throw outward
   }
 }

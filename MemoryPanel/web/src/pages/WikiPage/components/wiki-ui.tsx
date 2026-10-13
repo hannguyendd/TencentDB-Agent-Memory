@@ -1,6 +1,6 @@
 /**
- * wiki-ui —— Wiki 资产页的小型展示组件。
- * 从 WikiSourcesPanel.tsx 拆出：状态徽章 / Owner 标签 / 懒加载知识图谱容器。
+ * wiki-ui -- small display components of the Wiki asset page.
+ * Split out of WikiSourcesPanel.tsx: status badge / Owner label / lazy-loaded knowledge graph container.
  */
 import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -18,10 +18,10 @@ export function WikiStatusBadge({ status }: { status: WikiDetail['status'] }) {
 }
 
 /**
- * Owner 展示 —— 复用通用 OwnerLabel（显示用户名而非 user_id）。
- * useUserDisplayName 内部有全局缓存 + 只在首次 miss 时发 usersApi.get，
- * 同一 user_id 多行共享同一份缓存，扩展性 O(distinct user 数)，不是 O(行数)。
- * 抽子组件是因为 Rules of Hooks —— 不能在 .map 里循环调 hook。
+ * Owner display -- reuses the generic OwnerLabel (shows the username rather than user_id).
+ * useUserDisplayName internally has a global cache + only calls usersApi.get on the first miss,
+ * and multiple rows with the same user_id share one cache, so scalability is O(distinct users), not O(rows).
+ * Extracting a sub-component is because of the Rules of Hooks -- hooks cannot be called in a loop inside .map.
  */
 export function WikiOwnerLabel({ userId, currentUserId }: { userId: string; currentUserId: string }) {
   const { t } = useTranslation();
@@ -66,5 +66,5 @@ export function KnowledgeGraphEmbed({
   );
 }
 
-// 导出类型供外层复用，避免 import 类型路径散落
+// Export types for reuse by the outer layer, avoiding scattered import type paths
 export type { WikiPage };

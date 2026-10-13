@@ -1,11 +1,11 @@
 /**
- * SyncTarget —— 自动同步目标的判别联合。
+ * SyncTarget — discriminated union of auto-sync targets.
  *
- * wiki 与 codegraph 共用同一个 AutoSyncScheduler。用判别联合而非继承/泛型：
- * 加新目标加一个成员，编译器强制所有 switch 分支处理它。
+ * Wiki and codegraph share the same AutoSyncScheduler. A discriminated union is used rather than inheritance/generics:
+ * adding a new target adds one member, and the compiler forces every switch branch to handle it.
  *
- * key 带 kind 前缀（`code-graph:<id>` / `wiki:<id>`），天然不冲突 ——
- * 即使两类资源的 id 恰好相同也不会互相去重。
+ * The key carries a kind prefix (`code-graph:<id>` / `wiki:<id>`), so collisions are naturally avoided —
+ * even if two kinds of resources happen to have the same id they will not dedupe each other.
  */
 
 import type { CodeGraphRow, WikiRow } from "./types.js";
@@ -16,7 +16,7 @@ export type SyncTarget =
   | { kind: "code-graph"; key: string; serviceId: string; teamId: string; id: string; row: CodeGraphRow }
   | { kind: "wiki"; key: string; serviceId: string; teamId: string; id: string; row: WikiRow };
 
-/** 同步目标唯一键（带 kind 前缀，跨类型不冲突）。 */
+/** Unique sync target key (with kind prefix, no collisions across types). */
 export function targetKey(kind: SyncTargetKind, id: string): string {
   return `${kind}:${id}`;
 }

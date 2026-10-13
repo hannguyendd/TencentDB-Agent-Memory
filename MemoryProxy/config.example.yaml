@@ -201,7 +201,7 @@ costGuard:
   #     # grep cfq.analyze_fallback.misconfigured to confirm. A non-empty value written here is used as-is.
   #     #
   #     # Other fields use the code defaults when omitted: batchSize 8, timeoutMs 30000,
-  #     # maxOutputTokens 128000、awaitPendingMs 8000、circuitBreaker 300/50/1800。
+  #     # maxOutputTokens 128000, awaitPendingMs 8000, circuitBreaker 300/50/1800.
   #     analyzeModelFallback:
   #       enabled: true
   #       batchSize: 8
@@ -327,7 +327,7 @@ storage:
   # - When Shark is unavailable the COS backend fails to assemble, and the process does not start in degraded mode
   # See docs/design/2026-07-12-cos-shark-sts-credential-plan.md
   #
-  # Key layout：
+  # Key layout:
   #   proxy_cache/{ttl|nottl}/{spaceId}/{userId}/{agentSource}/{sessionId}/...
   # ttl/nottl must come before spaceId -- lifecycle rules do not support wildcards in the middle of a path.
   #
@@ -339,7 +339,7 @@ storage:
 
     # [opt] Overrides the endpoint domain of the COS SDK. **Highest priority**.
     # When unset (empty / undefined), it is decided automatically by a 4-level priority, aligned with core
-    # `tdai-memory-openclaw-plugin/src/gateway/server.ts::initSharedCosClient`：
+    # `tdai-memory-openclaw-plugin/src/gateway/server.ts::initSharedCosClient`:
     #   1. This field is non-empty                                  -> use it
     #   2. Shark CosUrl is already a VPC internal address (cloud vendor intranet domain) -> use it
     #   3. Shark CosUrl is public -> automatically rewritten to the VPC intranet domain (built from cred.region)
@@ -410,10 +410,10 @@ langfuse:
 
 # ── ClickHouse usage reporting ──────────────────────────────────────────────────────
 # Records each user's token consumption per turn, supporting queries by model / user / session.
-# 表结构含：timestamp / model_id / key_id(用户) / session_key + turn_seq(turn) /
+# Table schema: timestamp / model_id / key_id (user) / session_key + turn_seq (turn) /
 #           user_input / prompt_tokens / completion_tokens / total_tokens /
-#           cache_hit_tokens / cache_write_tokens。
-# 4xx/5xx 失败请求不写入。
+#           cache_hit_tokens / cache_write_tokens.
+# Failed 4xx/5xx requests are not written.
 clickhouse:
   enabled: false           # Whether to enable ClickHouse usage reporting
   url: "http://clickhouse.example.com:8123"   # ClickHouse HTTP endpoint
@@ -444,7 +444,7 @@ auth:
 # x-tdai-user-key check; this is a shared secret for ops/system services.
 #
 # Behavior (semantics aligned with core gateway's server.apiKey, see openclaw-plugin
-# gateway/server.ts:1076-1089）：
+# gateway/server.ts:1076-1089):
 #   - apiKey empty (default)     = auth disabled, ops endpoints publicly accessible; no warning at startup
 #                                 (production relies on network isolation + apigw as a safety net, same as core's current
 #                                 production, where `TDAI_GATEWAY_API_KEY` is also not enabled)
@@ -598,277 +598,277 @@ injection:
   #                             agent to review "which cloud asset tools were called this turn and whether each
   #                             was useful". Normal requests without the marker are completely unaffected.
   #   markerOptIn=false: AssetReflectionInjector is not registered, and the top-level gate any
-  #                       带 `/analyse/` 段的请求直接 404,零性能开销。适合确认
-  #                       不需要资产反思能力的部署显式关掉。
-  # tag 列表由本节点上实际 register 的资产 injector 决定（skill / tdai-memory /
-  # knowledge）,一个都没启用时 injector 恒不 emit。
+  #                       requests carrying an `/analyse/` segment get a direct 404, with zero performance overhead. Suitable for
+  #                       deployments that do not need the asset-reflection capability to turn it off explicitly.
+  # The tag list is determined by the asset injectors actually registered on this node (skill / tdai-memory /
+  # knowledge); if none are enabled, the injector never emits.
   assetReflection:
     markerOptIn: true
 
 
-# ── 提取（写侧：把每轮对话/工具调用回流到内核） ─────────────────────────────
-# 与 injection 对偶：injection 决定"往 prompt 塞什么"，extraction 决定"往内核回写什么"。
+# ── Extraction (write side: feed each turn's conversation/tool calls back into the kernel) ──────
+# The counterpart of injection: injection decides "what to stuff into the prompt", extraction decides "what to write back to the kernel".
 #
-# extractors 白名单说明（不在列表里 = 不写回）：
-#   skill        — 每轮真人对话结束时调 /v3/skill/conversation/add, core 侧按阈值归档
-#                   （依赖 skill.endpoint + skill.serviceToken）
-#   tdai-memory  — 每轮把 user_query + assistant reply 写入 L0 短期记忆
-#                   （依赖 tdai.enabled + tdai.memory.writeL0）
+# extractors whitelist notes (not in the list = not written back):
+#   skill        — at the end of each real-person turn, call /v3/skill/conversation/add; the core side archives by threshold
+#                   (depends on skill.endpoint + skill.serviceToken)
+#   tdai-memory  — each turn writes user_query + assistant reply into L0 short-term memory
+#                   (depends on tdai.enabled + tdai.memory.writeL0)
 #
-# 缺省行为（不写这段）：enabled=true, extractors=["skill","tdai-memory"] — 与历史等价。
-# 想"只注入不提取"：extraction.enabled: false 即可，一刀切。
+# Default behavior (if this section is omitted): enabled=true, extractors=["skill","tdai-memory"] — equivalent to history.
+# To "inject only, no extraction": just set extraction.enabled: false, a one-shot switch.
 extraction:
   enabled: true
   extractors: ["skill", "tdai-memory"]
 
 
-# ── 会话初始化（session init） ──────────────────────────────────────────────
-# 用户首次对话时拦截请求，弹出交互式表单引导选择 team → agent → task，
-# 选择完成后从内核拉取 agent/task 详情并注入到 system prompt。
+# ── Session init ──────────────────────────────────────────────
+# On the user's first conversation, intercept the request and pop up an interactive form to guide choosing team → agent → task;
+# after the choice, pull agent/task details from the kernel and inject them into the system prompt.
 #
-# 流程：
-#   1. 弹 asset_confirm 对话框：询问用户是否要关联团队资产
-#   2. 选择 team（仅多 team 时弹出）
-#   3. 选择 agent（支持分页）
-#   4. 选择 task（可选，支持分页/跳过）
-#   5. 注册会话 → 注入 agent/task 上下文到 system prompt
+# Flow:
+#   1. Pop up the asset_confirm dialog: ask whether to associate team assets
+#   2. Select team (shown only when there are multiple teams)
+#   3. Select agent (pagination supported)
+#   4. Select task (optional, pagination/skip supported)
+#   5. Register the session → inject agent/task context into the system prompt
 #
-# 状态存储：默认 Redis（redis.enabled=true）；启用 storage.enabled=true 后走
-# ProxyStorage（COS/SQLite/FS）。都不启用则回落 SQLite 单实例本地存储。
-# team/agent/task 列表来自内核 MetadataClient（复用 skill 段配置）。
-# 用户身份由 auth/verify 一跳确定；未通过鉴权/无法识别用户 → 直接 bypass session init。
+# State storage: Redis by default (redis.enabled=true); with storage.enabled=true it goes to
+# ProxyStorage (COS/SQLite/FS). If neither is enabled, it falls back to single-instance local SQLite storage.
+# The team/agent/task lists come from the kernel MetadataClient (reusing the skill section config).
+# User identity is determined in one hop by auth/verify; if auth fails / the user cannot be identified → bypass session init directly.
 sessionInit:
-  enabled: true             # 是否启用会话初始化
-  maxRetries: 3             # 表单解析失败最大重试次数，超出后 bypass（跳过 session init）
-  # skipAssetConfirm: true  # 跳过"是否关联团队资产"前置对话框，默认视为选"是"直接进入 team/agent/task 选择
-  # 历史注释: 曾经有 keepInitArtifacts 开关用来在 session_init 完成后剥离
-  # 假表单对话；已删除。现在**永远保留**用户的所有真实对话（含 session_init
-  # form 交互），不做任何删除。
-  # <session_context> 注入开关：session init 完成后，每一轮请求都会把 agent/task
-  # 信息以 <session_context> 块追加到 system prompt。下面两个开关可分别静默。
-  # 两个都关 = 完全不注入 <session_context>。默认都为 true，行为与历史一致。
-  # 关闭时每个 session 只 warn 一次（避免长会话刷屏）。
-  injectAgentContext: true  # false = 不注入 [Agent] 段（id/name/description/prompt）
-  injectTaskContext: true   # false = 不注入 [Task] 段（id/name/description/goal）
-  # header 自动预选：首轮请求头已带身份字段时，去列表里校验存在性，命中则跳过对应选择步骤。
+  enabled: true             # whether to enable session init
+  maxRetries: 3             # max retries when form parsing fails; beyond that, bypass (skip session init)
+  # skipAssetConfirm: true  # skip the "associate team assets?" preliminary dialog; treated as "yes" by default and goes straight to team/agent/task selection
+  # Historical note: there used to be a keepInitArtifacts switch for stripping
+  # the fake form dialog after session_init completed; it has been removed. Now the user's real conversation is **always kept** (including session_init
+  # form interactions), and nothing is deleted.
+  # <session_context> injection switches: after session init completes, every request appends the agent/task
+  # info to the system prompt as a <session_context> block. The two switches below can silence them separately.
+  # Turning both off = no <session_context> injection at all. Both default to true, consistent with history.
+  # When off, each session warns only once (to avoid flooding the log in long sessions).
+  injectAgentContext: true  # false = do not inject the [Agent] section (id/name/description/prompt)
+  injectTaskContext: true   # false = do not inject the [Task] section (id/name/description/goal)
+  # header auto-preselect: when the first request's headers already carry identity fields, validate their existence against the list; on a hit, skip the corresponding selection step.
   headerAutoSelect:
-    enabled: true            # 是否启用 header 预选
-    teamHeader: "x-team-id"  # 携带 team_id 的请求头名
-    agentHeader: "x-agent-id" # 携带 agent_id 的请求头名
-    taskHeader: "x-task-id"  # 携带 task_id 的请求头名（可选）
-    onMismatch: "form"       # header 值查不到时：form=回退交互表单（默认）| bypass=跳过 session init
+    enabled: true            # whether to enable header preselect
+    teamHeader: "x-team-id"  # name of the header carrying team_id
+    agentHeader: "x-agent-id" # name of the header carrying agent_id
+    taskHeader: "x-task-id"  # name of the header carrying task_id (optional)
+    onMismatch: "form"       # when the header value is not found: form=fall back to the interactive form (default) | bypass=skip session init
 
-  # ── DEBUG：本地开发/e2e 短路 ────────────────────────────────────────────────
-  # 打开 debugForceIdentity 后，agentSource=workbuddy 和 agentSource=codebuddy
-  # 的会话会**直接**注册为固定三元组，绕过所有表单/header 匹配逻辑；
-  # 生产环境务必保持注释状态。
+  # ── DEBUG: local development / e2e short-circuit ────────────────────────────────────────────────
+  # With debugForceIdentity on, sessions with agentSource=workbuddy and agentSource=codebuddy
+  # are registered **directly** as a fixed triple, bypassing all form/header matching logic;
+  # keep it commented out in production.
   # debugForceIdentity:
   #   team_id: team-xxxxxxxxxx
   #   agent_id: agt-xxxxxxxxxx
   #   task_id: task-xxxxxxxxxx
-  # WorkBuddy 客户端的 auth/verify 没有真人身份 → 用下面这条把 userId 硬绑定到
-  # 一个真实的 kernel user_id（配合 upstream.agents.workbuddy.apiKey 中的
-  # x-tdai-user-key 用同一个 user 名下的 key）。生产环境保持注释。
+  # The WorkBuddy client's auth/verify has no real-person identity → use the entry below to hard-bind userId to
+  # a real kernel user_id (use a key under the same user in the x-tdai-user-key of
+  # upstream.agents.workbuddy.apiKey). Keep it commented out in production.
   # debugForceUserId: usr-xxxxxxxxxx
-  # 调试模式下输出详细诊断日志（请求 tools schema、system prompt 摘要等）。
-  # 仅本地/E2E 联调使用，生产环境务必保持 false 或不配置。默认关闭。
+  # In debug mode, output detailed diagnostic logs (request tools schema, system prompt summary, etc.).
+  # For local/E2E integration only; in production keep it false or unset. Off by default.
   # debugVerboseLogging: false
 
 
-# ── TDAI Memory Gateway（core / openclaw-plugin） ────────────────────────────
-# proxy 通过与同机部署的内核 gateway（监听 8420）交互实现记忆读写。
-# 四级记忆：
-#   L0 — 短期对话记忆（最近 N 轮对话自动写入）
-#   L1 — 会话级关键信息提取（从对话中提取可复用的结构化记忆）
-#   L2 — Agent Profile（agent 的长效人格/规则/知识）
-#   L3 — Team/Global 记忆（跨 agent 共享的组织级知识）
+# ── TDAI Memory Gateway (core / openclaw-plugin) ────────────────────────────
+# The proxy reads and writes memory by interacting with the kernel gateway deployed on the same machine (listening on 8420).
+# Four memory levels:
+#   L0 — short-term conversation memory (the most recent N turns are written automatically)
+#   L1 — session-level key-information extraction (extract reusable structured memory from the conversation)
+#   L2 — Agent Profile (the agent's long-lived persona/rules/knowledge)
+#   L3 — Team/Global memory (organization-level knowledge shared across agents)
 #
-# 注入行为：
-#   inject=true 时，L2+L3 作为系统级上下文注入 system prompt；
-#   L0/L1 不直接注入 prompt（会破坏 KV cache），改为暴露只读工具供 LLM 主动查询。
+# Injection behavior:
+#   When inject=true, L2+L3 are injected into the system prompt as system-level context;
+#   L0/L1 are not injected into the prompt directly (it would break the KV cache); instead, read-only tools are exposed for the LLM to query actively.
 tdai:
-  enabled: true             # 是否启用 TDAI Memory
-  endpoint: "http://127.0.0.1:8420"   # 内核 gateway 地址（通常与 skill.endpoint 相同）
-  apiKey: "local"           # Authorization: Bearer 值（通常与 skill.serviceToken 相同）
-  serviceId: "default"      # x-tdai-service-id header 值
+  enabled: true             # whether to enable TDAI Memory
+  endpoint: "http://127.0.0.1:8420"   # kernel gateway address (usually the same as skill.endpoint)
+  apiKey: "local"           # Authorization: Bearer value (usually the same as skill.serviceToken)
+  serviceId: "default"      # x-tdai-service-id header value
   memory:
-    enabled: true           # Memory 子模块总开关
-    inject: true            # 上下文注入总开关（false = 所有 L0~L3 注入全关）
-    writeL0: true           # 是否写入 L0（短期对话记忆）
-    recallL1: true          # 是否启用 L1 召回（从对话中检索相关记忆）
-    injectL2L3: true        # 是否注入 L2（Agent Profile）+ L3（Team/Global 记忆）到 system prompt
-    l1Limit: 5              # L1 召回最大条数
-    l2Limit: 3              # L2/L3 注入最大条数
-    timeoutMs: 5000         # 单次内核调用超时（毫秒）
+    enabled: true           # master switch of the Memory submodule
+    inject: true            # master switch of context injection (false = all L0~L3 injection off)
+    writeL0: true           # whether to write L0 (short-term conversation memory)
+    recallL1: true          # whether to enable L1 recall (retrieve relevant memory from the conversation)
+    injectL2L3: true        # whether to inject L2 (Agent Profile) + L3 (Team/Global memory) into the system prompt
+    l1Limit: 5              # max number of L1 recalls
+    l2Limit: 3              # max number of L2/L3 injections
+    timeoutMs: 5000         # timeout of a single kernel call (milliseconds)
 
 
-# ── Skill / 内核 gateway 数据面 ──────────────────────────────────────────────
-# proxy 通过此配置与内核 gateway 通信，用于三项能力：
-#   1. <cloud_skills> RAG 注入：GET /v3/skill/search 检索相关 skill
-#   2. Skill 归档触发：每轮真人对话结束调 /v3/skill/conversation/add,
-#      core 侧按 tool_call ≥ 10 或 bytes ≥ 40KB 阈值归档并异步抽取。
-#   3. knowledge injector 拉取 team 知识资源列表
-# 同一个 serviceToken 也会被 /skill-bridge 反代在转发 LLM curl 时注入，
-# 避免 token 出现在 LLM 可见的 prompt 中。
-# sessionInit 的 team/agent/task 列表也通过此内核获取（MetadataClient）。
+# ── Skill / kernel gateway data plane ──────────────────────────────────────────────
+# The proxy talks to the kernel gateway through this config, for three capabilities:
+#   1. <cloud_skills> RAG injection: GET /v3/skill/search retrieves relevant skills
+#   2. Skill archive trigger: call /v3/skill/conversation/add at the end of each real-person turn,
+#      and the core side archives by threshold of tool_call >= 10 or bytes >= 40KB and extracts asynchronously.
+#   3. the knowledge injector pulls the team's knowledge resource list
+# The same serviceToken is also injected by the /skill-bridge reverse proxy when forwarding LLM curl,
+# so the token never appears in the prompt visible to the LLM.
+# The sessionInit team/agent/task lists are also fetched through this kernel (MetadataClient).
 #
-# 段名兼容：也可写作 `coreSkill:`（旧名，仍被读取）；两者同时存在时 `skill:` 优先。
+# Section-name compatibility: it can also be written as `coreSkill:` (old name, still read); when both exist, `skill:` takes precedence.
 skill:
-  endpoint: "http://127.0.0.1:8420"   # 内核 gateway 地址（通常与 tdai.endpoint 相同）
-  serviceToken: "local"               # 鉴权凭据 → Authorization: Bearer <serviceToken>
-                                       #   与内核约定的服务白名单一致；本地开发用 "local"
-  serviceId: "context-proxy"          # 租户/服务标识 → x-tdai-service-id
-                                       #   请求路径带 /proxy/<spaceId>/ 时会被 spaceId 覆盖
-  timeoutMs: 1500                     # 单次调用超时（毫秒）。RAG 在 session_init 热路径上，不宜太大
+  endpoint: "http://127.0.0.1:8420"   # kernel gateway address (usually the same as tdai.endpoint)
+  serviceToken: "local"               # credential → Authorization: Bearer <serviceToken>
+                                       #   must match the service whitelist agreed with the kernel; use "local" for local development
+  serviceId: "context-proxy"          # tenant/service identifier → x-tdai-service-id
+                                       #   overridden by spaceId when the request path carries /proxy/<spaceId>/
+  timeoutMs: 1500                     # timeout of a single call (milliseconds). RAG is on the session_init hot path, so it should not be too large
 
 
-# ── Instance-upstream 配置缓存（自定义模型分流的每实例配置） ─────────────────
-# proxy 每次 handler 会走 skill.endpoint + /v3/internal/meta/instance-upstream/list
-# 拉本 spaceId 的模型分组配置（default / custom / extraction 三类行），
-# 结果按 spaceId 缓存在进程内。数据接口复用 skill: 段的 endpoint / serviceToken /
-# timeoutMs，但语义与 skill 无关，独立成段以便未来扩展别的旋钮。
+# ── Instance-upstream config cache (per-instance config for custom model routing) ─────────────────
+# On each handler run, the proxy pulls skill.endpoint + /v3/internal/meta/instance-upstream/list
+# to fetch the model-group config of this spaceId (three kinds of rows: default / custom / extraction),
+# and the result is cached in-process by spaceId. The data API reuses the endpoint / serviceToken /
+# timeoutMs of the skill: section, but the semantics are unrelated to skill, so it is its own section to allow other knobs in the future.
 #
-# 缓存内部固定语义（写死不走 yaml）：
-#   - hard expiry（不 refresh-on-access）+ stale-if-error 兜底
-#   - 最多 256 个实例，LRU 按写入顺序淘汰
-#   - 首次拿不到 → 返空 → 走"零行 fallback = official"，业务侧行为 = v1
+# Fixed internal cache semantics (hardcoded, not via yaml):
+#   - hard expiry (no refresh-on-access) + stale-if-error fallback
+#   - at most 256 instances, LRU eviction by write order
+#   - if nothing can be fetched the first time → return empty → go to "zero-row fallback = official", business-side behavior = v1
 instanceUpstream:
-  # 缓存 TTL（秒）。默认 30。决定"Panel 改完自定义模型 → proxy 生效"的最长延迟。
-  #   非法值（0 / 负数 / NaN / 小数）一律回退默认 30s + warn 一行。
-  #   调优参考：
-  #     - 用户改完要 ≤1min 生效 → 保默认 30s
-  #     - core QPS 压力大、接受 N 秒生效 → 60~300 合理
-  #     - 别 <5s：会把 core /v3/internal/meta/instance-upstream/list 打热点
+  # Cache TTL (seconds). Default 30. Determines the longest delay for "Panel changes a custom model → proxy takes effect".
+  #   Invalid values (0 / negative / NaN / fractional) all fall back to the default 30s + one warn line.
+  #   Tuning reference:
+  #     - if a user's change must take effect within <=1min → keep the default 30s
+  #     - if core QPS pressure is high and N seconds of delay is acceptable → 60~300 is reasonable
+  #     - do not go <5s: it would make core /v3/internal/meta/instance-upstream/list a hotspot
   cacheTtlSec: 30
 
 
-# ── Knowledge tools 注入（独立 gateway 配置） ───────────────────────────────
-# proxy 通过此配置访问内核 gateway 拉取 team 知识资源（code-graph / wiki），
-# 渲染 <knowledge_tools> 块注入 system prompt，LLM 据此调 KS 的 tools/list|call。
+# ── Knowledge tools injection (standalone gateway config) ───────────────────────────────
+# The proxy accesses the kernel gateway through this config to pull the team's knowledge resources (code-graph / wiki),
+# renders the <knowledge_tools> block into the system prompt, and the LLM calls KS tools/list|call accordingly.
 #
-# 与 skill 段独立：endpoint 可以不同（例如 skill 走内核直连 IP，
-# knowledge 走 API Gateway 域名）。
+# Independent of the skill section: the endpoint may differ (e.g. skill goes to the kernel direct IP,
+# knowledge goes to the API Gateway domain).
 #
-# 关闭方式：enabled=false（默认），injector 不注册，无注入。
+# How to turn off: enabled=false (default); the injector is not registered, so nothing is injected.
 knowledge:
-  enabled: false                        # 默认关闭，跟 tdai.enabled 行为一致
-  endpoint: "http://127.0.0.1:8420"     # 内核 gateway 地址
+  enabled: false                        # off by default, consistent with tdai.enabled behavior
+  endpoint: "http://127.0.0.1:8420"     # kernel gateway address
   serviceToken: "local"               # Authorization: Bearer
-  serviceId: "context-proxy"          # x-tdai-service-id（被请求路径 spaceId 覆盖）
-  timeoutMs: 1500                     # 单次调用超时（毫秒）
+  serviceId: "context-proxy"          # x-tdai-service-id (overridden by the request-path spaceId)
+  timeoutMs: 1500                     # timeout of a single call (milliseconds)
 
 
-# ── Skill 运行时 ──────────────────────────────────────────────────────────
+# ── Skill runtime ──────────────────────────────────────────────────────────
 #
-# skill 抽取链路: proxy 每轮真人对话结束 (agent 给出无 tool_use 的最终回复)
-# 时, 同步调用 POST /v3/skill/conversation/add, 把本轮 conversation 切片
-# 交给 core。core 自己维护 buffer, 累计到 tool_call ≥ 10 或 bytes ≥ 40KB
-# 时归档并触发后台 Worker 抽取 skill。proxy 不需要额外配置。
+# skill extraction chain: at the end of each real-person turn (the agent gives a final reply without tool_use),
+# the proxy synchronously calls POST /v3/skill/conversation/add, handing this turn's conversation slice
+# to core. core maintains its own buffer, and once it accumulates tool_call >= 10 or bytes >= 40KB,
+# it archives and triggers a background Worker to extract skills. The proxy needs no extra configuration.
 #
-# 历史配置项 (已删除): extractToolCallThreshold / maxBucketCount /
-# conversationAddEnabled — 属于 proxy 侧老链路 SkillExtractTrigger, 已下线。
+# Historical config items (removed): extractToolCallThreshold / maxBucketCount /
+# conversationAddEnabled — they belonged to the proxy-side old chain SkillExtractTrigger, now retired.
 skillRuntime:
-  allowLlmWrite: false           # 是否允许主模型创建/修改 skill（默认 false）
-                                 #   false: <skill_tools> 只注入只读工具（search/list/view/files_read）
-                                 #          /skill-bridge 拒绝写操作返回 403
-                                 #   true:  <skill_tools> 注入全部工具（含写操作 create/update/delete 等）
-                                 #          /skill-bridge 放行写操作
+  allowLlmWrite: false           # whether the main model may create/modify skills (default false)
+                                 #   false: <skill_tools> injects only read-only tools (search/list/view/files_read)
+                                 #          /skill-bridge rejects write operations with 403
+                                 #   true:  <skill_tools> injects all tools (including write operations create/update/delete, etc.)
+                                 #          /skill-bridge lets write operations through
 
 
-# ── mem: 特殊命令 ──────────────────────────────────────────────────────────
-# 用户在对话框输入 mem:sync / mem:create-skill / mem:help 等命令时，
-# Proxy 在 session init 之后拦截，执行对应操作并直接返回伪造 LLM 响应，
-# 不注入系统提示词（不破坏 KV cache），不转发给上游模型（零 token 消耗）。
-# L0 写入 / skill extract 等记录层照常执行，对话时间线不断层。
+# ── mem: special commands ──────────────────────────────────────────────────────────
+# When the user types commands such as mem:sync / mem:create-skill / mem:help in the chat box,
+# the Proxy intercepts after session init, executes the operation, and returns a forged LLM response directly,
+# without injecting a system prompt (does not break the KV cache) and without forwarding to the upstream model (zero token consumption).
+# Record layers such as L0 writes / skill extract run as usual, so the conversation timeline has no gap.
 #
-# 该拦截**默认恒定启用**（无 enabled 开关，无命令白名单），未知命令由内置
-# KNOWN_COMMANDS 兜底返回提示。可选子字段 taskDraft 仅用于配置 mem:create-task /
-# mem:update-task 使用的 LLM 草稿生成器（未配置时该两个命令返回 "未配置" 错误，
-# 其它命令不受影响）。
+# This interception is **always enabled by default** (no enabled switch, no command whitelist); unknown commands fall back to a hint from the built-in
+# KNOWN_COMMANDS. The optional sub-field taskDraft is used only to configure the LLM draft generator used by mem:create-task /
+# mem:update-task (when unconfigured, those two commands return a "not configured" error,
+# other commands are unaffected).
 # memCommand:
 #   taskDraft:
 #     enabled: true
 #     model: "..."
 #     url: "..."
-#     apiKey: "..."   # 也可用 TDAI_TASK_DRAFT_API_KEY 环境变量覆盖
+#     apiKey: "..."   # can also be overridden by the TDAI_TASK_DRAFT_API_KEY environment variable
 #     timeoutMs: 20000
 
-# ── CC 请求分流 ────────────────────────────────────────────────────────────
-# 识别 CC 客户端（Claude Code CLI）后台自发的辅助请求，走差异化处理路径：
-#   - main (主对话/tool-loop):    走全套 (session-init + injection + L0 + skill + credit)
-#   - fork (SUGGESTION/RECAP/…): 复用 MAIN cache — 跳过 session-init form / mem 拦截 /
-#                                L0 / skill；injection 走 readOnly（不 self-heal cache）；credit 上报
-#   - sidequery (TITLE/probe/…): 独立小请求 — 跳过 session-init / mem 拦截 / injection /
-#                                L0 / skill；credit 上报
+# ── CC request routing ────────────────────────────────────────────────────────────
+# Recognize auxiliary requests that the CC client (Claude Code CLI) fires spontaneously in the background, and take a differentiated handling path:
+#   - main (main conversation/tool-loop):    full pipeline (session-init + injection + L0 + skill + credit)
+#   - fork (SUGGESTION/RECAP/…): reuse MAIN cache — skip session-init form / mem interception /
+#                                L0 / skill; injection is readOnly (no cache self-heal); credit is reported
+#   - sidequery (TITLE/probe/…): standalone small request — skip session-init / mem interception / injection /
+#                                L0 / skill; credit is reported
 #
-# 判定信号（源码硬约束 + 抓包实证）:
-#   1) cache_control marker 在 messages[n-2] → fork
-#   2) cache_control marker 在 messages[n-1] 或其它位置 → main
-#   3) 无 marker + tools=[] + thinking.disabled → sidequery
-#   4) 其它 → main（3P provider 关 caching 时的保底）
+# Classification signals (source-code hard constraints + packet-capture evidence):
+#   1) cache_control marker at messages[n-2] → fork
+#   2) cache_control marker at messages[n-1] or elsewhere → main
+#   3) no marker + tools=[] + thinking.disabled → sidequery
+#   4) otherwise → main (fallback when a 3P provider has caching off)
 #
-# 关闭时所有请求视为 main，走完全等价老链路。
-# 详见 docs/design/2026-07-30-cc-request-routing-plan.md
+# When off, all requests are treated as main, taking the fully equivalent old path.
+# See docs/design/2026-07-30-cc-request-routing-plan.md for details
 ccRequestRouting:
-  enabled: true                    # 默认开启。关闭时所有请求强制 main，title-gen 并发会撞 session-init state 导致 bypass。
+  enabled: true                    # on by default. When off, all requests are forced to main, and title-gen concurrency would collide with session-init state and cause bypass.
 
 
-# ── Per-Agent 上游路由 ─────────────────────────────────────────────────────
-# 见文件顶部 `upstream.agents` 一段。
+# ── Per-Agent upstream routing ─────────────────────────────────────────────────────
+# See the `upstream.agents` section at the top of the file.
 
 
-# ── 本地 JSONL Trace 归档 ─────────────────────────────────────────────────────
-# 启用后，每个 trace + span 以 JSONL 行追加写入本地文件（按日期分文件），
-# 文件名格式：<hostname>-<YYYY-MM-DD>.jsonl
-# 可配合 crontab 脚本定时压缩上传到 COS/S3 归档存储。
+# ── Local JSONL trace archive ─────────────────────────────────────────────────────
+# When enabled, each trace + span is appended as a JSONL line to a local file (one file per date),
+# file name format: <hostname>-<YYYY-MM-DD>.jsonl
+# It can be combined with a crontab script to periodically compress and upload to COS/S3 archive storage.
 #
-# 此归档链路独立于 Opik / Langfuse 远程上报：即使远程上报关闭，本地归档仍可独立工作。
-# 默认关闭，对性能无影响。
+# This archive chain is independent of Opik / Langfuse remote reporting: even if remote reporting is off, the local archive still works independently.
+# Off by default, with no performance impact.
 traceArchive:
-  enabled: false                   # true = 启用本地 JSONL trace 归档；false = 关闭（默认）
-  dir: "logs/traces"               # 归档目录（相对于项目根目录或绝对路径）
+  enabled: false                   # true = enable local JSONL trace archive; false = off (default)
+  dir: "logs/traces"               # archive directory (relative to the project root or an absolute path)
 
 
-# ── Pipeline 重构灰度切换 (2026-09-28, addendum) ─────────────────────────────
-# blueprint-review §2 采纳: 按 agent 粒度灰度, 每步只 flip 一个 key。
+# ── Pipeline refactor gradual switch (2026-09-28, addendum) ─────────────────────────────
+# blueprint-review §2 adopted: gradual rollout per agent, flip only one key per step.
 #
-# 未定义 pipeline 字段 → 全部走老 handler.ts / anthropicHandler.ts /
+# Pipeline field undefined → everything goes through the old handler.ts / anthropicHandler.ts /
 # codexHandler.ts / workbuddyHandler.ts / directHandler.ts / auxiliaryHandler.ts,
-# 与重构前 100% 等价 (向后兼容红线)。
+# 100% equivalent to before the refactor (backward-compatibility red line).
 #
-# 迁移顺序 (v2 §4 Phase 4.1-4.5, 风险递增):
-#   1. direct        Phase 4.1 - 最简单最低风险
-#   2. utility       Phase 4.1 - 同批
-#   3. codex         Phase 4.2 - codex/wb 起步 stageGates=minimal, 与老 handler 等价
+# Migration order (v2 §4 Phase 4.1-4.5, increasing risk):
+#   1. direct        Phase 4.1 - simplest and lowest risk
+#   2. utility       Phase 4.1 - same batch
+#   3. codex         Phase 4.2 - codex/wb start with stageGates=minimal, equivalent to the old handler
 #   4. workbuddy     Phase 4.3
-#   5. codebuddy/dsh/opencode/pi  Phase 4.4 (handler.ts 承载, stageGates=full)
-#   6. claude-code   Phase 4.5 - 最复杂的 anthropic 协议
+#   5. codebuddy/dsh/opencode/pi  Phase 4.4 (hosted in handler.ts, stageGates=full)
+#   6. claude-code   Phase 4.5 - the most complex anthropic protocol
 #
-# 回滚: 改回 false 或删除该行即可, 秒级生效。
+# Rollback: change back to false or delete that line, takes effect within seconds.
 #
-# ⚠️ Phase 4.4/4.5 完全实现前, flip 到 true 时新 pipeline 会抛
-# PipelineNotImplementedError, pick() 自动 fallback 到老 handler 并记一次 warn ——
-# 生产不会挂线, 但 warn 一直响, 请勿提前 flip。
+# ⚠️ Before Phase 4.4/4.5 are fully implemented, when flipped to true the new pipeline throws
+# PipelineNotImplementedError, and pick() automatically falls back to the old handler and logs one warn ——
+# production will not go down, but the warn keeps firing, so do not flip early.
 pipeline:
   migrated:
-    # Phase 4 已完整完成 (2026-09-28): 全部 6 个老 handler (handler.ts /
+    # Phase 4 is fully complete (2026-09-28): the full implementations of all 6 old handlers (handler.ts /
     # anthropicHandler.ts / codexHandler.ts / workbuddyHandler.ts /
-    # directHandler.ts / auxiliaryHandler.ts) 的完整实现都已迁移到
-    # pipeline/runners/, 老 handler.ts 等文件已退化为 5-20 行 re-export shim。
+    # directHandler.ts / auxiliaryHandler.ts) have all been migrated to
+    # pipeline/runners/, and the old handler.ts etc. files have degraded into 5-20-line re-export shims.
     #
-    # 因此: pipeline.migrated.<agent>=true 或 false 效果完全等价 (两个都会
-    # 最终调到 pipeline/runners/ 里的完整实现) —— 只是多/少一层浅层 shim 转发。
+    # Therefore: pipeline.migrated.<agent>=true or false is fully equivalent (both
+    # end up calling the full implementation in pipeline/runners/) — just one more/less thin shim forwarding layer.
     #
-    # 保留本配置字段是为 Phase 6 清理路径:
-    #   1. 清 server.ts pickHandler 层, 直接指向 entrypoints/*
-    #   2. 删本 pipeline 段
-    #   3. 删 6 个 shim 文件
-    # 逐步来, 每步独立可回滚。
+    # This config field is kept for the Phase 6 cleanup path:
+    #   1. clean up the server.ts pickHandler layer, pointing directly at entrypoints/*
+    #   2. delete this pipeline section
+    #   3. delete the 6 shim files
+    # Proceed step by step, each step independently rollback-able.
     #
-    # 唯一副作用差异: 迁移过程中顺手修的 latent leak (addendum §2.4) —
-    # direct/utility 的 SKIP_REQUEST_HEADERS 从 HOP_BY_HOP 版本升到
-    # WITH_INTERNAL, 防 x-tdai-user-key 透传上游。
-    # 默认 false, 走老 shim; 客户端确认无 x-tdai-user-key 依赖后可 flip。
+    # Only side-effect difference: a latent leak fixed along the way during migration (addendum §2.4) —
+    # SKIP_REQUEST_HEADERS of direct/utility was upgraded from the HOP_BY_HOP version to
+    # WITH_INTERNAL, preventing x-tdai-user-key from being passed through to the upstream.
+    # Default false, goes through the old shim; can be flipped once the client is confirmed to have no x-tdai-user-key dependency.
     direct: false
     utility: false
     codex: false

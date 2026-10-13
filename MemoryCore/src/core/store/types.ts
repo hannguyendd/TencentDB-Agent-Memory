@@ -407,7 +407,7 @@ export type TeamStatus = "active" | "archived";
 export type UserStatus = "active" | "inactive";
 export type AgentStatus = "active" | "inactive";
 export type AgentVisibility = "team" | "restricted";
-/** 大类，不含具体来源（来源读 metadata_json.external.provider）。 */
+/** Broad category, excluding the concrete source (read the source from metadata_json.external.provider). */
 export type TaskSourceType = "manual" | "external" | "other";
 
 export interface TeamEntity {
@@ -470,25 +470,25 @@ export interface BatchDeleteResult {
 }
 
 /**
- * 按隔离维度清空某个 memory 下的全部内容（不删除资产本身）。
+ * Clear all content under a memory by isolation dimension (does not delete the asset itself).
  *
- * 语义约定（见 `/v3/chat-memory/clear`）：
- *   - 至少要给 teamId + agentId，否则实现必须直接拒绝（避免误删全库）；
- *   - 不带 sessionId：清空该 (team, agent) 下所有 session 的数据；
- *   - 只删内容行（L0/L1 + 向量 / FTS 附属行），不动 meta_* 资产表。
+ * Semantic conventions (see `/v3/chat-memory/clear`):
+ *   - at least teamId + agentId must be given, otherwise the implementation must reject directly (to avoid wiping the whole database by mistake);
+ *   - without sessionId: clear the data of all sessions under that (team, agent);
+ *   - delete only content rows (L0/L1 + vector / FTS auxiliary rows), do not touch the meta_* asset tables.
  */
 export interface MemoryContentClearFilter {
   teamId: string;
   agentId: string;
-  /** 可选：进一步收窄到单个 user。缺省表示该 agent 下所有 user。 */
+  /** Optional: narrow further to a single user. Omitted means all users under that agent. */
   userId?: string;
 }
 
-/** 清空结果：各层实际删除行数。 */
+/** Clear result: the number of rows actually deleted per layer. */
 export interface MemoryContentClearResult {
   l0Deleted: number;
   l1Deleted: number;
-  /** L2/L3 profile 行数（VDB / sqlite profiles 表）。 */
+  /** Number of L2/L3 profile rows (VDB / sqlite profiles table). */
   profilesDeleted: number;
 }
 
@@ -501,7 +501,7 @@ export interface KnowledgeEntity {
   name: string;
   summary: string | null;
   team_id: string;
-  /** 预留：agent 绑定维度（当前写 ""，绑定权威在 meta_assets）。 */
+  /** Reserved: agent binding dimension (currently written as ""; the binding authority is in meta_assets). */
   agent_id?: string;
   user_id: string | null;
   repo_url?: string;
@@ -536,44 +536,44 @@ export interface KnowledgeListResult {
 export type MaybePromise<T> = T | Promise<T>;
 
 // ============================
-// Memory Audit (修改审计)
+// Memory Audit (modification audit)
 // ============================
 
 /**
- * 一次记忆修改事件。原始 L0/L1/L2/L3 表完全不动；这里只追加一行审计。
+ * One memory modification event. The original L0/L1/L2/L3 tables are left completely untouched; only one audit row is appended here.
  *
- * 设计要点（per user 决策）：
- *   - 不存历史 content / 旧值，只记"什么时间、由谁、改了哪条"
- *   - team/agent/user/task 来自外部请求 IdFields（不是 record 原值）
- *   - version = 修改后该记录的新版本号（与原表 version 字段一致）
- *   - L0 不进 audit（不可变流水）；L1/L2/L3 update + delete 各记一条
+ * Design notes (per user decision):
+ *   - does not store historical content / old values, only records "when, by whom, which one was changed"
+ *   - team/agent/user/task come from the external request IdFields (not the record's original values)
+ *   - version = the new version number of the record after modification (consistent with the original table's version field)
+ *   - L0 does not enter audit (immutable stream); L1/L2/L3 each record one entry for update + delete
  */
 export interface AuditEntry {
-  /** 自动生成主键，建议 audit-{uuid}。 */
+  /** Auto-generated primary key, audit-{uuid} recommended. */
   audit_id: string;
   /**
-   * 被修改的记录主键：
+   * Primary key of the modified record:
    *   - L1 → MemoryRecord.id (msg-xxx / mem-xxx)
-   *   - L2 → 文件路径 (scene_blocks/xxx.md)
-   *   - L3 → "core"（全实例只一份）或 path
+   *   - L2 → file path (scene_blocks/xxx.md)
+   *   - L3 → "core" (only one for the whole instance) or path
    */
   record_id: string;
   layer: "L1" | "L2" | "L3";
   action: "update" | "delete";
-  /** 外部请求 IdFields 副本，来源是调用方传入的 body / header（resolveIsolation 后）。 */
+  /** Copy of the external request IdFields, sourced from the body / header passed by the caller (after resolveIsolation). */
   team_id?: string;
   agent_id?: string;
   user_id?: string;
   task_id?: string;
-  /** 修改后该记录的新版本号。delete 用 0 或上一版本号 + 1。 */
+  /** New version number of the record after modification. For delete use 0 or the previous version number + 1. */
   version: number;
-  /** 修改时间（毫秒）。 */
+  /** Modification time (ms). */
   updated_at_ms: number;
-  /** Gateway request_id，便于 trace。 */
+  /** Gateway request_id, for easy tracing. */
   request_id?: string;
 }
 
-/** queryAudit 过滤条件，全部可选。 */
+/** queryAudit filter conditions, all optional. */
 export interface AuditQueryFilter {
   record_id?: string;
   layer?: "L1" | "L2" | "L3";
@@ -582,11 +582,11 @@ export interface AuditQueryFilter {
   agent_id?: string;
   user_id?: string;
   task_id?: string;
-  /** 只返 updated_at_ms ≥ since_ms 的事件。 */
+  /** Return only events with updated_at_ms ≥ since_ms. */
   since_ms?: number;
-  /** 只返 updated_at_ms ≤ until_ms 的事件。 */
+  /** Return only events with updated_at_ms ≤ until_ms. */
   until_ms?: number;
-  limit?: number;   // 默认 100，上限 1000
+  limit?: number;   // default 100, max 1000
   offset?: number;
 }
 
@@ -673,14 +673,14 @@ export interface IMemoryStore extends MemoryPromptStore, MemoryGenerationRefStor
 
   pullProfiles?(): Promise<ProfileRecord[]>;
   /**
-   * 按 profile stable id 批量查询（轻量，仅查指定 id）。
-   * 当 store 支持时，调用方应优先使用此接口而非 pullProfiles() 全量拉取。
-   * 不支持的 store 返回 undefined → 调用方 fallback 到 pullProfiles()。
+   * Batch query by profile stable id (lightweight, queries only the given ids).
+   * When the store supports it, callers should prefer this interface over a full pull with pullProfiles().
+   * A store that does not support it returns undefined → the caller falls back to pullProfiles().
    */
   queryProfilesByIds?(ids: string[]): Promise<ProfileRecord[]>;
   /**
-   * 按 scope / type / filename 前缀查询 profile 行（返回行，而非 count）。
-   * 支持行视图文件系统的 `listObjects`，避免退化成全量 `pullProfiles()`。
+   * Query profile rows by scope / type / filename prefix (returns rows, not a count).
+   * Supports `listObjects` on the row-view file system, avoiding degradation into a full pullProfiles().
    */
   queryProfiles?(filter?: ProfileFilter): Promise<ProfileRecord[]>;
   countProfiles?(filter?: ProfileFilter): Promise<number>;
@@ -722,12 +722,12 @@ export interface IMemoryStore extends MemoryPromptStore, MemoryGenerationRefStor
   deleteL0BySession?(sessionId: string, filter?: IsolationFilter): MaybePromise<number>;
 
   /**
-   * 清空某个 (team, agent) 下的全部记忆内容：L0 + L1 + L2/L3 profile 行，
-   * 连同它们的向量 / FTS 附属数据。**不触碰** meta_* 资产表 —— 资产 ID、
-   * 归属、绑定、ACL、可见性、名称全部保留。
+   * Clear all memory content under a (team, agent): L0 + L1 + L2/L3 profile rows,
+   * together with their vector / FTS auxiliary data. **Does not touch** the meta_* asset tables — asset IDs,
+   * ownership, bindings, ACLs, visibility, and names are all preserved.
    *
-   * 用于 `/v3/chat-memory/clear`。幂等：已清空的 memory 再次调用返回全 0。
-   * 实现必须校验 filter.teamId / filter.agentId 非空，否则抛错拒绝执行。
+   * Used by `/v3/chat-memory/clear`. Idempotent: calling it again on an already-cleared memory returns all 0s.
+   * The implementation must verify that filter.teamId / filter.agentId are non-empty, otherwise throw and refuse to execute.
    */
   clearMemoryContent?(filter: MemoryContentClearFilter): MaybePromise<MemoryContentClearResult>;
 
@@ -759,7 +759,7 @@ export interface IMemoryStore extends MemoryPromptStore, MemoryGenerationRefStor
   deleteKnowledge?(knowledgeIds: string[], teamId?: string): MaybePromise<BatchDeleteResult>;
   listKnowledge?(input: { team_id: string; type?: KnowledgeType; knowledge_ids?: string[]; limit?: number; offset?: number }): MaybePromise<KnowledgeListResult>;
 
-  // ── Memory Audit（修改审计；optional 让 store 可以选择不实现）──
+  // ── Memory Audit (modification audit; optional so a store may choose not to implement it) ──
   appendAudit?(entry: AuditEntry): MaybePromise<void>;
   queryAudit?(filter: AuditQueryFilter): MaybePromise<AuditEntry[]>;
 }

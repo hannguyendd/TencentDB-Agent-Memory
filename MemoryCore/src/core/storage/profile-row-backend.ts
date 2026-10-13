@@ -137,9 +137,9 @@ export class ProfileRowStorageBackend implements IStorageBackend {
   }
 
   /**
-   * 场景索引派生（P2-D2）：本 scope L2 行的实时投影，替代
-   * `.metadata/scene_index.json`。`scene-index.ts` 的
-   * readSceneIndex/syncSceneIndex 通过结构化探测发现本方法。
+   * Scene-index derivation (P2-D2): a live projection of this scope's L2 rows, replacing
+   * `.metadata/scene_index.json`. `scene-index.ts`'s
+   * readSceneIndex/syncSceneIndex discover this method via structural probing.
    */
   async deriveSceneIndex(): Promise<SceneIndexEntry[]> {
     return deriveSceneIndexFromProfiles(this.store, this.isolation);

@@ -1,26 +1,26 @@
 # Memory Hub
 
-**Memory Hub** 是一个合并镜像：一个容器内同时运行两个服务——Team Memory Control（Panel）和 Knowledge Service（KS）。
+**Memory Hub** is a combined image: a single container runs two services at once -- Team Memory Control (Panel) and Knowledge Service (KS).
 
-- **Panel**：管理团队 / Agent / Knowledge 资源的控制台
-- **KS**：Wiki / Code Graph 知识服务，供 Agent 通过 tools 调用
+- **Panel**: a console for managing team / Agent / Knowledge resources
+- **KS**: a Wiki / Code Graph knowledge service that Agents call via tools
 
-镜像发布在 Docker Hub：[`agentmemory/memory-hub`](https://hub.docker.com/r/agentmemory/memory-hub)（推荐拉取 `latest`）。
+The image is published on Docker Hub: [`agentmemory/memory-hub`](https://hub.docker.com/r/agentmemory/memory-hub) (pulling `latest` is recommended).
 
 ---
 
-## 前置准备
+## Prerequisites
 
-### 1. 实例配置文件
+### 1. Instance config file
 
-在云上购买 Memory 实例后，你会拿到**实例 ID**、**Gateway 地址**和 **API Key**。写入一个 JSON 文件（例如 `metadata-instances.json`）：
+After purchasing a Memory instance in the cloud, you will get an **instance ID**, a **Gateway address**, and an **API Key**. Write them into a JSON file (e.g. `metadata-instances.json`):
 
 ```json
 {
   "instances": [
     {
       "id": "mem-xxxxxxxx",
-      "name": "我的 Memory 实例",
+      "name": "My Memory instance",
       "gateway_endpoint": "<your-gateway>.ap-shanghai",
       "api_key": "your-gateway-api-key"
     }
@@ -28,31 +28,31 @@
 }
 ```
 
-`gateway_endpoint` 填控制台给你的 Gateway 地址（上例仅为上海地域示例，按实际地址填写）。多实例就往 `instances` 数组里加多个对象。
+Set `gateway_endpoint` to the Gateway address given by the console (the example above is only for the Shanghai region; fill in your actual address). For multiple instances, add more objects to the `instances` array.
 
-### 2. KS 外部可达地址
+### 2. KS externally reachable address
 
-KS 需要对外暴露一个地址，让 Agent（以及云上 Gateway）能访问 KS 的 tools 接口。这个地址**必须是外部能访问的**（不能用 `127.0.0.1` / `localhost`），且**必须含** `/v3`。
+KS needs to expose an address so that Agents (and the cloud Gateway) can reach KS's tools endpoint. This address **must be externally reachable** (`127.0.0.1` / `localhost` cannot be used) and **must contain** `/v3`.
 
-例如宿主机公网/内网 IP 为 `10.2.3.4`、端口映射 `8424`，则：
+For example, if the host's public/internal IP is `10.2.3.4` and port `8424` is mapped:
 
 `http://10.2.3.4:8424/v3`
 
-### 3. LLM Proxy 地址
+### 3. LLM Proxy address
 
-KS 的 Wiki ingest / 总结等能力会调用大模型，默认走 Memory 提供的 LLM 转发能力。
+KS's Wiki ingest / summarization and other capabilities call a large model, going through the LLM forwarding provided by Memory by default.
 
-`KNOWLEDGE_LLM_PROXY_BASE_URL` 与上面的 `gateway_endpoint` **是同一个地址**：从 Memory 控制台拿到的 Gateway 地址。例如上海地域：
+`KNOWLEDGE_LLM_PROXY_BASE_URL` is **the same address** as the `gateway_endpoint` above: the Gateway address obtained from the Memory console. For example, for the Shanghai region:
 
 `<your-gateway>.ap-shanghai`
 
-（其它地域按控制台实际地址填写。）
+(For other regions, fill in the actual address from the console.)
 
-若要改用自有 LLM 端点，见下方 [Custom 模式](#custom-模式直连-llm不走-proxy)。
+To use your own LLM endpoint instead, see [Custom mode](#custom-mode-connect-directly-to-llm-bypassing-proxy) below.
 
 ---
 
-## 快速启动
+## Quick start
 
 ```bash
 docker run -d --name memory-hub \
@@ -64,131 +64,131 @@ docker run -d --name memory-hub \
   agentmemory/memory-hub:latest
 ```
 
-> 将 `/path/to/metadata-instances.json`、`10.2.3.4`（KS 外部地址）以及 `KNOWLEDGE_LLM_PROXY_BASE_URL`（与 `gateway_endpoint` 相同，按控制台实际 Gateway 地址填写）换成你的实际值。
+> Replace `/path/to/metadata-instances.json`, `10.2.3.4` (the KS external address), and `KNOWLEDGE_LLM_PROXY_BASE_URL` (same as `gateway_endpoint`; fill in the actual Gateway address from the console) with your actual values.
 
-### 必填项（只有这 3 项）
+### Required settings (only these 3)
 
-| 配置 | 方式 | 说明 |
+| Setting | How | Description |
 | --- | --- | --- |
-| 实例配置 | 挂载 `metadata-instances.json` | 云上 Memory 实例的 ID、Gateway 地址、API Key |
-| KS 外部地址 | `KNOWLEDGE_PUBLIC_BASE_URL` | 外部能访问到 KS 的地址，**必须含** `/v3` |
-| LLM Proxy 地址 | `KNOWLEDGE_LLM_PROXY_BASE_URL` | 与 `gateway_endpoint` 相同，填 Memory 控制台的 Gateway 地址 |
+| Instance config | Mount `metadata-instances.json` | Cloud Memory instance ID, Gateway address, API Key |
+| KS external address | `KNOWLEDGE_PUBLIC_BASE_URL` | An address from which KS is externally reachable; **must contain** `/v3` |
+| LLM Proxy address | `KNOWLEDGE_LLM_PROXY_BASE_URL` | Same as `gateway_endpoint`; fill in the Gateway address from the Memory console |
 
-以上 3 项必须由用户提供，其余配置均有镜像内置默认值，按需调整即可。
+These 3 items must be provided by the user; all other settings have built-in defaults in the image and can be adjusted as needed.
 
 ---
 
-## 可选配置
+## Optional settings
 
-以下配置都有镜像内置默认值，不传也能正常工作。按需覆盖即可。
+All settings below have built-in defaults in the image and work without being passed. Override them as needed.
 
-### LLM 配置
+### LLM settings
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `LLM_PROTOCOL` | `openai` | LLM 协议：`openai` 走 `/chat/completions`，`anthropic` 走 `/messages` |
-| `LLM_MODEL` | `Memory-Model` | 模型 ID，透传到 proxy/TokenHub |
-| `LLM_MODE` | `proxy` | `proxy`：走 Memory Gateway LLM 转发；`custom`：直连 BYO 端点 |
-| `LLM_MAX_TOKENS` | `32768` | 单次 LLM 调用最大输出 token |
-| `LLM_TIMEOUT_MS` | `1200000` | LLM 调用超时 ms（20 分钟，reasoning 模型需要较长时间） |
-| `LLM_API_KEY` | 空 | 仅 `LLM_MODE=custom` 时必填 |
-| `LLM_BASE_URL` | 空 | 仅 `LLM_MODE=custom` 时必填，如 `https://api.openai.com/v1` |
+| `LLM_PROTOCOL` | `openai` | LLM protocol: `openai` uses `/chat/completions`, `anthropic` uses `/messages` |
+| `LLM_MODEL` | `Memory-Model` | Model ID, passed through to proxy/TokenHub |
+| `LLM_MODE` | `proxy` | `proxy`: go through the Memory Gateway LLM forwarding; `custom`: connect directly to a BYO endpoint |
+| `LLM_MAX_TOKENS` | `32768` | Max output tokens per LLM call |
+| `LLM_TIMEOUT_MS` | `1200000` | LLM call timeout in ms (20 minutes; reasoning models need a long time) |
+| `LLM_API_KEY` | empty | Required only when `LLM_MODE=custom` |
+| `LLM_BASE_URL` | empty | Required only when `LLM_MODE=custom`, e.g. `https://api.openai.com/v1` |
 
-**协议与模型配套规则**：
+**Protocol and model pairing rules**:
 
-| 协议 | 适用模型 | 端点 |
+| Protocol | Applicable models | Endpoint |
 | --- | --- | --- |
-| `openai`（默认） | `Memory-Model`、`deepseek-v4-pro` | `/chat/completions` |
-| `anthropic` | `ep-pksklwtb`、`claude-sonnet-4-5` 等 | `/messages` |
+| `openai` (default) | `Memory-Model`, `deepseek-v4-pro` | `/chat/completions` |
+| `anthropic` | `ep-pksklwtb`, `claude-sonnet-4-5`, etc. | `/messages` |
 
-切换模型时协议必须配套：
+The protocol must match when switching models:
 
 ```bash
-# 默认（OpenAI 协议 + Memory-Model）
-# 不需要额外配置，镜像默认就是
+# Default (OpenAI protocol + Memory-Model)
+# No extra config needed; this is the image default
 
-# 切换到 Anthropic 模型
+# Switch to an Anthropic model
 -e LLM_PROTOCOL=anthropic -e LLM_MODEL=ep-pksklwtb
 ```
 
-### 网络与存储
+### Network and storage
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `PANEL_PORT` | `8125` | Panel 服务端口 |
-| `KNOWLEDGE_PORT` | `8424` | KS 服务端口 |
-| `KNOWLEDGE_DATA_DIR` | `/data/knowledge` | KS 数据目录（SQLite、git clone、wiki 文件、日志） |
-| `KNOWLEDGE_DB_PATH` | `/data/knowledge/knowledge.db` | KS SQLite 数据库路径 |
-| `TMC_CALLBACK_URL` | `http://127.0.0.1:8125` | KS ingest 完成回调 Panel 的根地址（容器内自动回环，一般不用改） |
-| `KNOWLEDGE_TIMEOUT_MS` | `15000` | Panel 调 KS 的请求超时 |
-| `METADATA_REMOTE_TIMEOUT_MS` | `15000` | Panel 调远端 Gateway 的请求超时 |
-| `REMOTE_INSTANCE_PROXY_URL` | 空 | Panel UI "客户端接入地址"卡片显示的 base URL。开源本地部署 core+proxy 分开跑时填 proxy 的外部地址（如 `http://host.docker.internal:8096`），Panel UI 复制的 CodeBuddy/ClaudeCode 接入地址就会指向 proxy。留空则老行为 —— UI 回落到 `gateway_endpoint`。**Panel 后端 → Kernel 的转发始终走 `REMOTE_INSTANCE_URL`，与此变量无关。**（挂载了 `metadata-instances.json` 时忽略此变量，直接在 JSON 里加 `proxy_endpoint` 字段） |
+| `PANEL_PORT` | `8125` | Panel service port |
+| `KNOWLEDGE_PORT` | `8424` | KS service port |
+| `KNOWLEDGE_DATA_DIR` | `/data/knowledge` | KS data directory (SQLite, git clone, wiki files, logs) |
+| `KNOWLEDGE_DB_PATH` | `/data/knowledge/knowledge.db` | KS SQLite database path |
+| `TMC_CALLBACK_URL` | `http://127.0.0.1:8125` | Root address of the Panel that KS calls back when ingest completes (loopback inside the container automatically; usually no need to change) |
+| `KNOWLEDGE_TIMEOUT_MS` | `15000` | Request timeout for Panel calling KS |
+| `METADATA_REMOTE_TIMEOUT_MS` | `15000` | Request timeout for Panel calling the remote Gateway |
+| `REMOTE_INSTANCE_PROXY_URL` | empty | Base URL shown on the Panel UI "client access address" card. When running core+proxy separately in an open-source local deployment, set it to the proxy's external address (e.g. `http://host.docker.internal:8096`), and the CodeBuddy/ClaudeCode access address copied from the Panel UI will point to the proxy. If left empty, the old behavior applies -- the UI falls back to `gateway_endpoint`. **Panel backend → Kernel forwarding always goes through `REMOTE_INSTANCE_URL`, unrelated to this variable.** (When `metadata-instances.json` is mounted this variable is ignored; add a `proxy_endpoint` field directly in the JSON) |
 
-### TLS 证书
+### TLS certificates
 
-公网正式证书一般无需额外配置。当 LLM Proxy 或 Gateway 使用 HTTPS 且证书不被容器信任时（如自签名证书、内部 CA），有两种方式解决：
+Public official certificates generally need no extra configuration. When the LLM Proxy or Gateway uses HTTPS and the certificate is not trusted by the container (e.g. self-signed certificates, internal CA), there are two ways to resolve it:
 
-**方式 A：跳过 TLS 验证（快速测试用，不推荐生产）**
+**Option A: skip TLS verification (for quick testing; not recommended for production)**
 
 ```bash
 -e NODE_TLS_REJECT_UNAUTHORIZED=0
 ```
 
-**方式 B：挂载 CA 证书（推荐）**
+**Option B: mount a CA certificate (recommended)**
 
 ```bash
 -v /path/to/your-ca.pem:/usr/local/share/ca-certificates/extra-ca.crt:ro \
 -e NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/extra-ca.crt
 ```
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `NODE_TLS_REJECT_UNAUTHORIZED` | 未设置 | 设为 `0` 跳过 TLS 证书验证（仅测试用） |
-| `NODE_EXTRA_CA_CERTS` | 未设置 | 附加 CA 证书路径，Node.js 原生支持，AI SDK 的 fetch 也会读取 |
+| `NODE_TLS_REJECT_UNAUTHORIZED` | unset | Set to `0` to skip TLS certificate verification (testing only) |
+| `NODE_EXTRA_CA_CERTS` | unset | Path to additional CA certificates; natively supported by Node.js, and the AI SDK's fetch also reads it |
 
-### 日志
+### Logging
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `LOG_LEVEL` | `info` | 日志级别（`debug` / `info` / `warn` / `error`） |
-| `LOG_FORMAT` | `json` | 日志格式（`json` / `text`） |
-| `LOG_DIR` | `/data/knowledge/logs` | 日志文件目录 |
+| `LOG_LEVEL` | `info` | Log level (`debug` / `info` / `warn` / `error`) |
+| `LOG_FORMAT` | `json` | Log format (`json` / `text`) |
+| `LOG_DIR` | `/data/knowledge/logs` | Log file directory |
 
-日志落文件到 `${LOG_DIR}/panel.log` 和 `${LOG_DIR}/knowledge.log`，每次启动轮转一份 `.prev`，同时输出到 stdout（`docker logs` 可见）。
+Logs are written to files at `${LOG_DIR}/panel.log` and `${LOG_DIR}/knowledge.log`, rotated to a `.prev` copy on each start, and also output to stdout (visible via `docker logs`).
 
-### 可观测性（Langfuse）
+### Observability (Langfuse)
 
-三个都配置后，KS 的 LLM 调用会自动上报 trace 到 Langfuse。
+Once all three are configured, KS's LLM calls automatically report traces to Langfuse.
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `LANGFUSE_BASE_URL` | 空 | Langfuse 服务地址 |
-| `LANGFUSE_PUBLIC_KEY` | 空 | Langfuse public key |
-| `LANGFUSE_SECRET_KEY` | 空 | Langfuse secret key |
+| `LANGFUSE_BASE_URL` | empty | Langfuse service address |
+| `LANGFUSE_PUBLIC_KEY` | empty | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | empty | Langfuse secret key |
 
-### LLM Binding 同步
+### LLM Binding sync
 
-| 环境变量 | 默认值 | 说明 |
+| Environment variable | Default | Description |
 | --- | --- | --- |
-| `KNOWLEDGE_LLM_BINDING_SYNC` | `1` | Panel 启动时是否为实例同步 KS llm_binding。`LLM_MODE=proxy` 时强制为 `1`；`custom` 模式下设 `0` 让 KS 走全局配置 |
+| `KNOWLEDGE_LLM_BINDING_SYNC` | `1` | Whether the Panel syncs the KS llm_binding for instances on startup. Forced to `1` when `LLM_MODE=proxy`; in `custom` mode set `0` to make KS use the global config |
 
 ---
 
-## 访问地址
+## Access addresses
 
-| 服务 | 地址 |
+| Service | Address |
 | --- | --- |
 | Panel UI | `http://localhost:8125/` |
 | Panel API | `http://localhost:8125/api/v1/` |
 | KS Health | `http://localhost:8424/health` |
 | KS API | `http://localhost:8424/v3/` |
-| KS Swagger 文档 | `http://localhost:8424/docs` |
+| KS Swagger docs | `http://localhost:8424/docs` |
 
 ---
 
-## Custom 模式（直连 LLM，不走 Proxy）
+## Custom mode (connect directly to LLM, bypassing Proxy)
 
-若不用 Memory Gateway 的 LLM 转发，可直接指定自有 LLM 端点。此时不需要 `KNOWLEDGE_LLM_PROXY_BASE_URL`。
+If you do not use the Memory Gateway's LLM forwarding, you can specify your own LLM endpoint directly. In that case `KNOWLEDGE_LLM_PROXY_BASE_URL` is not needed.
 
 ```bash
 docker run -d --name memory-hub \
@@ -206,134 +206,134 @@ docker run -d --name memory-hub \
 
 ---
 
-## 数据持久化
+## Data persistence
 
-| 挂载点 | 说明 |
+| Mount point | Description |
 | --- | --- |
-| `/data/knowledge` | KS 数据（SQLite、git clone、wiki 文件、日志） |
+| `/data/knowledge` | KS data (SQLite, git clone, wiki files, logs) |
 
-建议用 named volume：`-v memory-hub:/data/knowledge`（与容器名一致）。
+A named volume is recommended: `-v memory-hub:/data/knowledge` (consistent with the container name).
 
 ---
 
-## 常见问题
+## FAQ
 
-### Q: 容器内访问宿主机服务？
+### Q: How do I reach host services from inside the container?
 
-云上 Gateway（`KNOWLEDGE_LLM_PROXY_BASE_URL`）一般可直接访问，无需改成宿主机地址。若其它服务（如 Langfuse）跑在宿主机上，用 `172.17.0.1`（docker0 网桥）代替 `localhost`：
+The cloud Gateway (`KNOWLEDGE_LLM_PROXY_BASE_URL`) can generally be reached directly, with no need to change it to a host address. If other services (such as Langfuse) run on the host, use `172.17.0.1` (the docker0 bridge) instead of `localhost`:
 
 ```bash
 -e LANGFUSE_BASE_URL=http://172.17.0.1:8400
 ```
 
-或加 `--add-host=host.docker.internal:host-gateway` 用 `host.docker.internal`。
+Or add `--add-host=host.docker.internal:host-gateway` and use `host.docker.internal`.
 
-### Q: wiki ingest 报 timeout？
+### Q: wiki ingest reports a timeout?
 
-reasoning 模型对大文件可能需要超过 20 分钟：
+Reasoning models may need more than 20 minutes for large files:
 
 ```bash
--e LLM_TIMEOUT_MS=1800000  # 30 分钟
+-e LLM_TIMEOUT_MS=1800000  # 30 minutes
 ```
 
-### Q: tools/list 返回 404？
+### Q: tools/list returns 404?
 
-`KNOWLEDGE_PUBLIC_BASE_URL` 必须包含 `/v3` 前缀。正确格式：`http://host:port/v3`。
+`KNOWLEDGE_PUBLIC_BASE_URL` must include the `/v3` prefix. Correct format: `http://host:port/v3`.
 
-### Q: 切换 LLM 协议后报错？
+### Q: Errors after switching the LLM protocol?
 
-确保 `LLM_PROTOCOL` 和 `LLM_MODEL` 配套：
+Make sure `LLM_PROTOCOL` and `LLM_MODEL` are paired:
 
 ```bash
-# OpenAI 模型（默认）
+# OpenAI model (default)
 -e LLM_PROTOCOL=openai -e LLM_MODEL=Memory-Model
 
-# Anthropic 模型
+# Anthropic model
 -e LLM_PROTOCOL=anthropic -e LLM_MODEL=ep-pksklwtb
 ```
 
 ---
 
-## 构建
+## Build
 
-### 前置条件
+### Prerequisites
 
-源码均在本仓库根目录下：
+Sources are all under this repo's root directory:
 
 ```text
 memory-tencentdb/
-├── MemoryPanel/                         # Panel 后端 + web 前端
+├── MemoryPanel/                         # Panel backend + web frontend
 ├── MemoryKnowledge/                     # Knowledge Service
-└── deploy/panel-knowledge-combined/     # 本配方
+└── deploy/panel-knowledge-combined/     # this recipe
 ```
 
-### 本地单架构构建（调试用）
+### Local single-arch build (for debugging)
 
 ```bash
 cd deploy/panel-knowledge-combined
-IMAGE_TAG=1.0.0-beta.1 ./build.sh          # 默认 linux/amd64 → team-memory-panel-knowledge:1.0.0-beta.1
-PLATFORM=linux/arm64 IMAGE_TAG=arm64 ./build.sh   # 本机若是 arm64 可直接编
+IMAGE_TAG=1.0.0-beta.1 ./build.sh          # default linux/amd64 → team-memory-panel-knowledge:1.0.0-beta.1
+PLATFORM=linux/arm64 IMAGE_TAG=arm64 ./build.sh   # if your machine is arm64 you can build directly
 ```
 
-### 发布到 Docker Hub（amd64 + arm64）
+### Publish to Docker Hub (amd64 + arm64)
 
-Tag 约定：
+Tag conventions:
 
-| Tag | 含义 |
+| Tag | Meaning |
 | --- | --- |
-| `1.0.0-beta.N` | 钉死版本（文档/复现用这个） |
-| `beta` | 浮动频道：始终指向当前最新 beta（默认随发布一起推） |
-| `latest` | 正式稳定版再用（默认不推） |
+| `1.0.0-beta.N` | Pinned version (use this for docs/reproduction) |
+| `beta` | Floating channel: always points to the latest beta (pushed along with the release by default) |
+| `latest` | Use only for official stable releases (not pushed by default) |
 
-首发建议推：`agentmemory/memory-hub:1.0.0-beta.1` + `agentmemory/memory-hub:beta`。
+For the first release, it is recommended to push: `agentmemory/memory-hub:1.0.0-beta.1` + `agentmemory/memory-hub:beta`.
 
 ```bash
 cd deploy/panel-knowledge-combined
 
-# 1) 已登录 Docker Hub（需 agentmemory org 推送权限）
+# 1) Logged in to Docker Hub (requires agentmemory org push permission)
 docker login
 
-# 2) 只扫敏感信息 + 准备 context（不构建）
+# 2) Only scan for secrets + prepare the context (no build)
 DRY_RUN=1 VERSION=1.0.0-beta.1 ./publish.sh
 
-# 3) 可选：先本地 load amd64，抽查镜像层里没有 .env / metadata-instances.json
+# 3) Optional: first load amd64 locally and spot-check that the image layers contain no .env / metadata-instances.json
 PUSH=0 VERSION=1.0.0-beta.1 ./publish.sh
 
-# 4) 正式双架构构建并推送（默认同时打 :beta）
+# 4) Official dual-arch build and push (also tags :beta by default)
 VERSION=1.0.0-beta.1 ./publish.sh
 
-# 只要版本 tag、不挪 :beta：
+# Only the version tag, without moving :beta:
 # ALSO_BETA=0 VERSION=1.0.0-beta.1 ./publish.sh
 
-# 正式版再打 latest（beta 阶段不要开）：
+# Tag latest for official releases (do not enable during the beta phase):
 # ALSO_LATEST=1 ALSO_BETA=0 VERSION=1.0.0 ./publish.sh
 ```
 
-`publish.sh` 会依次：
+`publish.sh` will, in order:
 
-1. 对 `MemoryPanel` / `MemoryKnowledge` 跑 `scripts/secret-scan.sh`
-2. `PREPARE_ONLY=1 ./build.sh` 生成 rsync context（已排除 `.env*`、`metadata-instances.json` 等）
-3. 再扫一遍 context
-4. `docker buildx build --platform linux/amd64,linux/arm64 --push` 到 `agentmemory/memory-hub:<VERSION>`（默认再打 `:beta`；本地名 `team-memory-panel-knowledge` 只用于 `PUSH=0`，不会 push）
+1. Run `scripts/secret-scan.sh` on `MemoryPanel` / `MemoryKnowledge`
+2. `PREPARE_ONLY=1 ./build.sh` generates the rsync context (already excluding `.env*`, `metadata-instances.json`, etc.)
+3. Scan the context again
+4. `docker buildx build --platform linux/amd64,linux/arm64 --push` to `agentmemory/memory-hub:<VERSION>` (also tags `:beta` by default; the local name `team-memory-panel-knowledge` is used only for `PUSH=0` and is not pushed)
 
-推送后自检：
+Post-push self-check:
 
 ```bash
 docker buildx imagetools inspect agentmemory/memory-hub:1.0.0-beta.1
 docker buildx imagetools inspect agentmemory/memory-hub:beta
-# 两者应看到 Platform: linux/amd64 与 linux/arm64，且 digest 一致
+# You should see Platform: linux/amd64 and linux/arm64, with identical digests
 docker pull agentmemory/memory-hub:beta
 ```
 
-环境变量速查：
+Quick reference of environment variables:
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `VERSION` | `1.0.0-beta.1` | 版本 tag |
-| `HUB_IMAGE` | `agentmemory/memory-hub` | 仓库名 |
-| `PLATFORMS` | `linux/amd64,linux/arm64` | buildx 目标 |
-| `BUILDER` | `multiarch` | buildx builder 名（不存在则自动 create） |
-| `DRY_RUN` | `0` | `1` = 只扫描 |
-| `PUSH` | `1` | `0` = 本地 `--load` 单架构 |
-| `ALSO_BETA` | `1` | `1` = 额外推浮动 `:beta` |
-| `ALSO_LATEST` | `0` | `1` = 额外推 `:latest` |
+| `VERSION` | `1.0.0-beta.1` | Version tag |
+| `HUB_IMAGE` | `agentmemory/memory-hub` | Repository name |
+| `PLATFORMS` | `linux/amd64,linux/arm64` | buildx targets |
+| `BUILDER` | `multiarch` | buildx builder name (created automatically if missing) |
+| `DRY_RUN` | `0` | `1` = scan only |
+| `PUSH` | `1` | `0` = local `--load` single arch |
+| `ALSO_BETA` | `1` | `1` = also push the floating `:beta` |
+| `ALSO_LATEST` | `0` | `1` = also push `:latest` |

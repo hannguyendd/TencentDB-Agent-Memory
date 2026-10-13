@@ -1,27 +1,27 @@
-# SQLite → 腾讯云向量数据库迁移工具
+# SQLite → Tencent Cloud Vector Database Migration Tool
 
-离线迁移工具，用于将 memory-tdai 的数据从本地 SQLite 存储迁移到腾讯云向量数据库（TCVDB）。
+An offline migration tool for migrating memory-tdai data from local SQLite storage to Tencent Cloud Vector Database (TCVDB).
 
-## 前置条件
+## Prerequisites
 
 - Node.js >= 22.16.0
-- 插件已通过 `openclaw plugins install` 安装
-- 迁移脚本已编译（见下方）
+- The plugin has been installed via `openclaw plugins install`
+- The migration script has been compiled (see below)
 
-## 编译
+## Compile
 
-迁移脚本使用 TypeScript 编写，运行前需要先编译：
+The migration script is written in TypeScript and must be compiled before running:
 
 ```bash
 npm run build:migrate-sqlite-to-vdb
 ```
 
-编译产物输出到 `scripts/migrate-sqlite-to-tcvdb/dist/`，可直接用 Node 运行。
+Build output goes to `scripts/migrate-sqlite-to-tcvdb/dist/` and can be run directly with Node.
 
-## 使用方法
+## Usage
 
 ```bash
-# 预检模式（仅查看源数据，不执行写入）
+# Dry-run mode (only inspect the source data, no writes)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -32,7 +32,7 @@ npm run migrate:sqlite-to-tcvdb -- \
   --tcvdb-embedding-model bge-large-zh \
   --dry-run
 
-# 正式迁移
+# Actual migration
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -44,10 +44,10 @@ npm run migrate:sqlite-to-tcvdb -- \
   --yes
 ```
 
-### 更多示例
+### More examples
 
 ```bash
-# 直接传入 API Key（不通过环境变量）
+# Pass the API Key directly (not via an environment variable)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -60,7 +60,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 指定自定义 SQLite 路径（数据库不在默认 vectors.db 位置时）
+# Specify a custom SQLite path (when the database is not at the default vectors.db location)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --sqlite-path /backup/2026-04/vectors-snapshot.db \
@@ -74,7 +74,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 只迁移 L1 记忆层（跳过 L0 原始消息和 Profile）
+# Migrate only the L1 memory layer (skip L0 raw messages and Profiles)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -88,7 +88,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 只迁移 L0 和 L1（不迁移 Profile）
+# Migrate only L0 and L1 (do not migrate Profiles)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -102,7 +102,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 英文语料场景：使用英文 BM25 分词
+# English corpus scenario: use English BM25 tokenization
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -116,7 +116,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 禁用 BM25 稀疏向量（仅使用密集向量检索）
+# Disable BM25 sparse vectors (use dense vector retrieval only)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -130,7 +130,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 仅迁移数据，不自动更新 openclaw.json 和 manifest（手动管理配置）
+# Migrate data only, without automatically updating openclaw.json and the manifest (manage config manually)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -145,7 +145,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 追加迁移：允许目标库已有数据，跳过非空检查
+# Incremental migration: allow existing data in the target database, skip the non-empty check
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -160,7 +160,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 输出迁移摘要到 JSON 文件（适合 CI/自动化流水线）
+# Write the migration summary to a JSON file (suited for CI/automation pipelines)
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -175,7 +175,7 @@ npm run migrate:sqlite-to-tcvdb -- \
 ```
 
 ```bash
-# 设置自定义超时和别名
+# Set a custom timeout and alias
 npm run migrate:sqlite-to-tcvdb -- \
   --plugin-data-dir ~/.openclaw/memory-tdai \
   --openclaw-config-path ~/.openclaw/openclaw.json \
@@ -184,56 +184,56 @@ npm run migrate:sqlite-to-tcvdb -- \
   --tcvdb-api-key-env TCVDB_API_KEY \
   --tcvdb-database agent_memory_prod \
   --tcvdb-embedding-model bge-large-zh \
-  --tcvdb-alias "生产环境-主库" \
+  --tcvdb-alias "production-primary" \
   --tcvdb-timeout-ms 30000 \
   --yes
 ```
 
-## 参数说明
+## Parameters
 
-| 参数 | 必填 | 默认值 | 说明 |
+| Parameter | Required | Default | Description |
 |---|---|---|---|
-| `--plugin-data-dir` | 是 | — | 插件数据目录路径 |
-| `--openclaw-config-path` | 是 | — | `openclaw.json` 配置文件路径 |
-| `--sqlite-path` | 否 | `<plugin-data-dir>/vectors.db` | SQLite 数据库文件路径（默认取数据目录下的 `vectors.db`） |
-| `--plugin-id` | 否 | `memory-tencentdb` | 写入配置时使用的插件 ID |
-| `--tcvdb-url` | 是 | — | TCVDB 服务地址 |
-| `--tcvdb-username` | 是 | — | TCVDB 用户名 |
-| `--tcvdb-api-key` | * | — | TCVDB API 密钥（明文） |
-| `--tcvdb-api-key-env` | * | — | 包含 API 密钥的环境变量名 |
-| `--tcvdb-database` | 是 | — | TCVDB 数据库名 |
-| `--tcvdb-embedding-model` | 是 | — | Embedding 模型名称 |
-| `--tcvdb-alias` | 否 | `""` | 用户自定义别名 |
-| `--tcvdb-timeout-ms` | 否 | `10000` | 请求超时时间（毫秒） |
-| `--layers` | 否 | `l0,l1,l2,l3` | 要迁移的层（逗号分隔） |
-| `--dry-run` | 否 | `false` | 仅预览，不执行写入 |
-| `--yes` | 否 | `false` | 跳过交互确认 |
-| `--apply-config` | 否 | `true` | 迁移后更新 openclaw.json |
-| `--config-backup` | 否 | `true` | 写入配置前先备份原配置文件 |
-| `--rewrite-manifest` | 否 | `true` | 将 manifest.json 更新为 tcvdb |
-| `--fail-if-target-nonempty` | 否 | `true` | 目标库非空时中止 |
-| `--verify-counts` | 否 | `true` | 迁移后校验记录数 |
-| `--summary-json-path` | 否 | — | 将迁移摘要写入此文件 |
-| `--job-id` | 否 | — | 迁移任务 ID（用于追踪） |
-| `--bm25-enabled` | 否 | `true` | 启用 BM25 稀疏向量 |
-| `--bm25-language` | 否 | `zh` | BM25 语言（`zh` 或 `en`） |
+| `--plugin-data-dir` | Yes | — | Plugin data directory path |
+| `--openclaw-config-path` | Yes | — | Path to the `openclaw.json` config file |
+| `--sqlite-path` | No | `<plugin-data-dir>/vectors.db` | SQLite database file path (defaults to `vectors.db` under the data directory) |
+| `--plugin-id` | No | `memory-tencentdb` | Plugin ID used when writing the config |
+| `--tcvdb-url` | Yes | — | TCVDB service address |
+| `--tcvdb-username` | Yes | — | TCVDB username |
+| `--tcvdb-api-key` | * | — | TCVDB API key (plaintext) |
+| `--tcvdb-api-key-env` | * | — | Name of the environment variable containing the API key |
+| `--tcvdb-database` | Yes | — | TCVDB database name |
+| `--tcvdb-embedding-model` | Yes | — | Embedding model name |
+| `--tcvdb-alias` | No | `""` | User-defined alias |
+| `--tcvdb-timeout-ms` | No | `10000` | Request timeout (milliseconds) |
+| `--layers` | No | `l0,l1,l2,l3` | Layers to migrate (comma-separated) |
+| `--dry-run` | No | `false` | Preview only, no writes |
+| `--yes` | No | `false` | Skip interactive confirmation |
+| `--apply-config` | No | `true` | Update openclaw.json after migration |
+| `--config-backup` | No | `true` | Back up the original config file before writing the config |
+| `--rewrite-manifest` | No | `true` | Update manifest.json to tcvdb |
+| `--fail-if-target-nonempty` | No | `true` | Abort if the target database is non-empty |
+| `--verify-counts` | No | `true` | Verify record counts after migration |
+| `--summary-json-path` | No | — | Write the migration summary to this file |
+| `--job-id` | No | — | Migration job ID (for tracking) |
+| `--bm25-enabled` | No | `true` | Enable BM25 sparse vectors |
+| `--bm25-language` | No | `zh` | BM25 language (`zh` or `en`) |
 
-\* `--tcvdb-api-key` 和 `--tcvdb-api-key-env` 二选一，必须提供其中一个。
+\* One of `--tcvdb-api-key` and `--tcvdb-api-key-env` is required.
 
-## 目录结构
+## Directory structure
 
 ```
 scripts/migrate-sqlite-to-tcvdb/
-├── cli-entry.ts          # CLI 入口
-├── sqlite-to-tcvdb.ts    # 迁移核心逻辑（参数解析、预检、数据迁移）
-├── config-write.ts       # OpenClaw 配置更新（JSON5，自包含）
-├── manifest-write.ts     # Manifest 重写
-├── *.test.ts             # 就近放置的测试文件
-├── tsconfig.json         # 迁移脚本编译配置
-├── dist/                 # 编译产物（已 gitignore）
-└── README.md             # 本文件
+├── cli-entry.ts          # CLI entry point
+├── sqlite-to-tcvdb.ts    # Core migration logic (argument parsing, pre-check, data migration)
+├── config-write.ts       # OpenClaw config update (JSON5, self-contained)
+├── manifest-write.ts     # Manifest rewrite
+├── *.test.ts             # Co-located test files
+├── tsconfig.json         # Migration script compile config
+├── dist/                 # Build output (gitignored)
+└── README.md             # This file
 
-bin/migrate-sqlite-to-tcvdb.mjs     # 极薄 bin 包装 → dist/
+bin/migrate-sqlite-to-tcvdb.mjs     # Very thin bin wrapper → dist/
 ```
 
-迁移脚本通过 `../../src/` 引用存储实现（VectorStore、TcvdbMemoryStore 等），但**不依赖 `openclaw/plugin-sdk`**。配置写回直接使用 `json5`。
+The migration script references the storage implementations (VectorStore, TcvdbMemoryStore, etc.) via `../../src/`, but **does not depend on `openclaw/plugin-sdk`**. Config write-back uses `json5` directly.

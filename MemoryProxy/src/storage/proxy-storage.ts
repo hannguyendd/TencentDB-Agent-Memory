@@ -1,18 +1,18 @@
 /**
- * ProxyStorage — 统一 KV 抽象，代替原本散落在注入层 / Skill 层的 Redis 直调。
+ * ProxyStorage -- a unified KV abstraction replacing the Redis direct calls previously scattered across the injection layer / Skill layer.
  *
- * 见 docs/design/2026-07-09-redis-to-cos-migration-plan.md §3.
+ * See docs/design/2026-07-09-redis-to-cos-migration-plan.md section 3.
  *
- * 语义：
- *   - key 是相对路径字符串，如 "short/inj-sess/abc.json"。禁止绝对路径 / 路径穿越
- *   - putJSON/putText 覆盖写；写成功等价于"续期"（更新 lastModified，只对 ttl bucket 有意义）
- *   - putJSONIfAbsent/putTextIfAbsent CAS：仅当 key 不存在时写入，返回是否写成功
- *   - getJSON/getText 找不到返回 null，不抛
- *   - delPrefix 用于 clearBySession —— 后端各自实现
- *   - listNames 返回 prefix 下所有对象的 basename（不含 prefix）
+ * Semantics:
+ *   - key is a relative path string such as "short/inj-sess/abc.json". Absolute paths / path traversal are forbidden
+ *   - putJSON/putText overwrite; a successful write is equivalent to "renewal" (updates lastModified, meaningful only for the ttl bucket)
+ *   - putJSONIfAbsent/putTextIfAbsent CAS: write only if the key does not exist, returning whether the write succeeded
+ *   - getJSON/getText return null when not found, no throw
+ *   - delPrefix is used by clearBySession -- each backend implements it itself
+ *   - listNames returns the basenames of all objects under the prefix (excluding the prefix)
  *
- * 所有方法 async；覆盖写可 fire-and-forget（`.catch(() => {})`）。
- * putIfAbsent 必须 await（返回值决定后续分支）。
+ * All methods are async; overwrites can be fire-and-forget (`.catch(() => {})`).
+ * putIfAbsent must be awaited (the return value decides the following branch).
  */
 export type ProxyStorageType = "cos" | "sqlite" | "fs" | "memory";
 
@@ -22,7 +22,7 @@ export interface ProxyStorage {
   putJSON(key: string, value: unknown): Promise<void>;
   putText(key: string, value: string): Promise<void>;
 
-  /** 原子 "put if absent"。返回 true 表示本次成功写入；false 表示 key 已存在。 */
+  /** Atomic "put if absent". Returns true if this call wrote successfully; false if the key already exists. */
   putJSONIfAbsent(key: string, value: unknown): Promise<boolean>;
   putTextIfAbsent(key: string, value: string): Promise<boolean>;
 
@@ -36,7 +36,7 @@ export interface ProxyStorage {
   listNames(prefix: string): Promise<string[]>;
 }
 
-/** 判断 key 属于哪档 bucket —— sweeper 与 lifecycle rule 生成器用。 */
+/** Determine which bucket tier a key belongs to -- used by the sweeper and the lifecycle rule generator. */
 export function bucketOf(key: string): "ttl" | "nottl" {
   return key.startsWith("ttl/") ? "ttl" : "nottl";
 }

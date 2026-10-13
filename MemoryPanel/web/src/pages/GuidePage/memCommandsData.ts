@@ -1,47 +1,47 @@
 /**
- * memCommandsData.ts — GuidePage「记忆指令」页的数据源（纯数据，无 UI）。
+ * memCommandsData.ts -- data source of the GuidePage "Memory commands" page (pure data, no UI).
  *
- * 汇总 Agent 会话中支持的全部 `mem:` 命令：命令名、可复制的示例、
- * 说明文案 key（i18n），以及需要多步确认的命令的“回复选项”。
- * 组件（MemCommands.tsx）只负责按此数据渲染，保持数据与视图分离。
+ * Aggregates all `mem:` commands supported in Agent sessions: command name, copyable example,
+ * description text key (i18n), and the "reply options" for commands that need multi-step confirmation.
+ * The component (MemCommands.tsx) only renders from this data, keeping data and view separate.
  *
- * 约定：
- *   - 标准格式为 `mem:<command>`，冒号后不加空格，命令名大小写不敏感。
- *   - 所有文案字段均为 i18n key（见 i18n/*.ts 的 guide.mem.* 段）。
+ * Conventions:
+ *   - The standard format is `mem:<command>`, with no space after the colon, and command names are case-insensitive.
+ *   - All text fields are i18n keys (see the guide.mem.* section of i18n/*.ts).
  *
- * 注：文件名刻意与组件 MemCommands.tsx 区分，避免大小写不敏感文件系统下的解析歧义。
+ * Note: the file name is deliberately distinguished from the component MemCommands.tsx, to avoid resolution ambiguity on case-insensitive file systems.
  */
 
-/** 命令分类：日常高频 / 任务管理（需确认流程） */
+/** Command category: daily high-frequency / task management (requires a confirmation flow) */
 export type MemCommandGroup = 'session' | 'task';
 
-/** 命令下“确认/回复选项”的一行（用于 create-task / update-task 的多步确认） */
+/** One "confirm / reply option" row under a command (for the multi-step confirmation of create-task / update-task) */
 export interface MemCommandOption {
-  /** 用户应回复的命令（可复制），如 `mem:create-task confirm` */
+  /** The command the user should reply with (copyable), e.g. `mem:create-task confirm` */
   reply: string;
-  /** 该回复效果的 i18n key */
+  /** i18n key for the effect of this reply */
   effect: string;
-  /** 是否为推荐项（渲染时高亮） */
+  /** Whether it is a recommended option (highlighted when rendered) */
   recommended?: boolean;
 }
 
 export interface MemCommand {
-  /** 命令标识（同时作为 React key） */
+  /** Command identifier (also used as the React key) */
   id: string;
   group: MemCommandGroup;
-  /** 可复制的命令原文（静态部分），如 `mem:sync`、`mem:create-task` */
+  /** Copyable raw command (static part), e.g. `mem:sync`, `mem:create-task` */
   command: string;
-  /** 命令参数占位符的 i18n key（可空），如「[标题]」；随语言切换，拼在 command 后展示与复制 */
+  /** i18n key for the command argument placeholder (optional), e.g. "[title]"; changes with language, appended after command for display and copying */
   argKey?: string;
-  /** 一句话说明的 i18n key */
+  /** i18n key for the one-line description */
   descKey: string;
-  /** 详细说明段落的 i18n key 列表（可空） */
+  /** List of i18n keys for detailed description paragraphs (optional) */
   detailKeys?: string[];
-  /** 该命令的确认/回复选项（可空，仅 create-task / update-task 有） */
+  /** Confirm / reply options of this command (optional, only create-task / update-task have them) */
   options?: MemCommandOption[];
 }
 
-/** 分组标题 / 副标题 i18n key */
+/** Group title / subtitle i18n key */
 export const MEM_GROUPS: Array<{ id: MemCommandGroup; titleKey: string; subKey: string }> = [
   { id: 'session', titleKey: 'guide.mem.group.session.title', subKey: 'guide.mem.group.session.sub' },
   { id: 'task', titleKey: 'guide.mem.group.task.title', subKey: 'guide.mem.group.task.sub' },
@@ -106,6 +106,6 @@ export const MEM_COMMANDS: MemCommand[] = [
   },
 ];
 
-/** 示例区：一组可整体复制的常用命令示例。
- *  含参数的示例文本随语言切换，见 i18n key `guide.mem.examples.list`（多行字符串）。 */
+/** Examples section: a set of common command examples that can be copied as a whole.
+ *  Example text with parameters changes with language, see the i18n key `guide.mem.examples.list` (multi-line string). */
 export const MEM_EXAMPLES_KEY = 'guide.mem.examples.list';

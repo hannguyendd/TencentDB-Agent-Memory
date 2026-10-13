@@ -1,14 +1,14 @@
 /**
- * /api/v1/knowledge/wiki/* —— Panel Wiki 业务路由（stateless）。
+ * /api/v1/knowledge/wiki/* -- Panel Wiki business routes (stateless).
  *
- * 实现冻结契约 docs/api/knowledge-panel-api.md §2.0 Wiki 最小端点集，透传
- * HttpKnowledgeClient → KS /v3/wiki/*。风格与 chat-memory.ts 一致：
+ * Implements the frozen contract docs/api/knowledge-panel-api.md §2.0 minimal Wiki endpoint set, passing through to
+ * HttpKnowledgeClient -> KS /v3/wiki/*. Style is consistent with chat-memory.ts:
  * validatePanelMetaHeaders → auth/verify(+team-member) → KS → envelope。
  *
- * 门控：
- *   - 带 team_id 的端点（list/create/raw/write）→ 要求 team 成员；
- *   - id-only 端点（get/ingest/delete/graph/page/search/raw/ls）→ 要求有效 caller，
- *     KS 按 x-tdai-service-id + team 逻辑隔离。
+ * Gating:
+ *   - endpoints with team_id (list/create/raw/write) -> require team membership;
+ *   - id-only endpoints (get/ingest/delete/graph/page/search/raw/ls) -> require a valid caller,
+ *     and KS isolates logically by x-tdai-service-id + team.
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -31,12 +31,12 @@ import {
   ASSET_TYPE_WIKI,
 } from './common.js';
 
-// 上传大小限制（W9 raw/write 与 import-and-ingest 共用，避免复合端点绕过 W9 限制）
-const MAX_FILE_SIZE = 512 * 1024;        // 单文件 512KB
-const MAX_FILES_PER_REQUEST = 10;        // 单次最多 10 个文件
-const MAX_TOTAL_SIZE = 5 * 1024 * 1024;  // 单次总大小 5MB
+// Upload size limits (shared by W9 raw/write and import-and-ingest, so the composite endpoint cannot bypass the W9 limits)
+const MAX_FILE_SIZE = 512 * 1024;        // 512KB per file
+const MAX_FILES_PER_REQUEST = 10;        // at most 10 files per request
+const MAX_TOTAL_SIZE = 5 * 1024 * 1024;  // 5MB total per request
 
-/** 校验一批待写文件是否满足大小限制；违规返回错误码，否则返回 null。 */
+/** Check whether a batch of files to write meets the size limits; returns an error code on violation, otherwise null. */
 function checkFileSizes(files: WikiRawWriteFile[]): string | null {
   if (files.length > MAX_FILES_PER_REQUEST) {
     return `TOO_MANY_FILES (max ${MAX_FILES_PER_REQUEST})`;
@@ -58,7 +58,7 @@ function checkFileSizes(files: WikiRawWriteFile[]): string | null {
 export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  // W2 list — @deprecated 面板 UI 已改用 team-assets / my-assets
+  // W2 list -- @deprecated the panel UI now uses team-assets / my-assets
   api.post('/knowledge/wiki/list', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -75,7 +75,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiList(teamId, opts));
   });
 
-  // W1 create — team 门控；KS create → 拿 wiki_id → 幂等登记 meta_asset（asset_id=wiki_id）
+  // W1 create -- team gated; KS create -> get wiki_id -> idempotently register meta_asset (asset_id=wiki_id)
   api.post('/knowledge/wiki/create', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -83,7 +83,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     const name = str(body, 'name');
     const sourceUrl = str(body, 'source_url') ?? undefined;
     const sourceType = str(body, 'source_type') ?? undefined;
-    // 成对校验：只给其一属前端/调用方 bug，早失败好过静默丢掉来源。
+    // Paired validation: giving only one is a frontend/caller bug; failing early beats silently dropping the source.
     if (!!sourceUrl !== !!sourceType) {
       return respondControlError(c, 400, 'SOURCE_TYPE_AND_URL_MUST_BE_PAIRED');
     }
@@ -98,8 +98,8 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     } catch (err) {
       return runKs(c, () => Promise.reject(err));
     }
-    // 登记 meta_asset（权限权威）；asset_id == wiki_id（外键联查约束）
-    // 创建时即注册，前端可立刻看到抽取中的 wiki；callback 回来时不再重复注册。
+    // Register meta_asset (permission authority); asset_id == wiki_id (foreign-key join constraint)
+    // Registered at creation so the frontend can immediately see the wiki being extracted; not registered again when the callback returns.
     const reg = await ensureKnowledgeAsset(deps, ctx, {
       assetId: detail.wiki_id,
       teamId,
@@ -108,14 +108,14 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
       ownerUserId: gate.userId,
       serviceUrl: detail.service_url,
     });
-    if (!reg.ok) return respondEnvelope(c, reg.env); // 用户重试，KS 幂等自愈
+    if (!reg.ok) return respondEnvelope(c, reg.env); // user retries; KS self-heals idempotently
     return respondEnvelope(c, okEnvelope(c, detail));
   });
 
-  // W4 ingest — id-only（team 成员即可）+ 空 wiki 校验
+  // W4 ingest -- id-only (any team member) + empty wiki check
   //
-  // 门控用 requireWikiWritable 而非 action:'write'：wiki 是 team 共享资产，
-  // 抽取属于内容贡献，同 team 任何成员都应能触发（否则"A 建的库 B 能看不能抽"）。
+  // The gate uses requireWikiWritable rather than action:'write': a wiki is a team-shared asset,
+  // extraction is a content contribution, and any member of the same team should be able to trigger it (otherwise "a library created by A can be seen by B but not extracted").
   api.post('/knowledge/wiki/ingest', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -124,19 +124,19 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     const gate = await requireWikiWritable(deps, c, ctx, wikiId);
     if ('error' in gate) return gate.error;
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
-    // 空 wiki 禁止 ingest：先查 raw/ls，无源文件则拒绝
+    // Forbid ingest on an empty wiki: first query raw/ls, and reject if there are no source files
     try {
       const listing = await kc.wikiRawLs(wikiId);
       if (!listing.items || listing.items.length === 0) {
         return respondControlError(c, 400, 'WIKI_EMPTY_NO_SOURCES');
       }
     } catch {
-      // raw/ls 查询失败不阻塞 ingest（KS 侧也有防御）
+      // A raw/ls query failure does not block ingest (KS also has defenses)
     }
     return runKs(c, () => kc.wikiIngest(wikiId));
   });
 
-  // W3 get — id-only（需 read 权限）；聚合 Panel 内存 ingest progress（不新增接口）
+  // W3 get -- id-only (read permission required); aggregates Panel in-memory ingest progress (no new endpoint)
   api.post('/knowledge/wiki/get', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -157,7 +157,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     });
   });
 
-  // W5 delete — 删三处：KS + entity_knowledge 明细 + meta_asset（见 §0.6）
+  // W5 delete -- delete in three places: KS + entity_knowledge detail + meta_asset (see §0.6)
   api.post('/knowledge/wiki/delete', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -213,7 +213,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiPageRead(wikiId, refs));
   });
 
-  // W14 page/rm — id-only + write 权限；KS 需要 team_id，来自 meta_asset.team_id
+  // W14 page/rm -- id-only + write permission; KS needs team_id, taken from meta_asset.team_id
   api.post('/knowledge/wiki/page/rm', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -270,9 +270,9 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiRawRead(wikiId, filenames));
   });
 
-  // W10 raw/rm — id-only + team 成员即可；KS 需要 team_id，来自 meta_asset.team_id
+  // W10 raw/rm -- id-only + any team member; KS needs team_id, taken from meta_asset.team_id
   //
-  // 与 raw/write（requireTeamMember）保持同一口径：能写素材就能删素材。
+  // Keeps the same standard as raw/write (requireTeamMember): whoever can write materials can delete them.
   api.post('/knowledge/wiki/raw/rm', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -288,7 +288,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiRawRm(teamId, wikiId, filenames, gate.userId));
   });
 
-  // W9 raw/write — team 门控 + 上传大小限制
+  // W9 raw/write -- team gate + upload size limits
   api.post('/knowledge/wiki/raw/write', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -298,8 +298,8 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     if (!wikiId) return respondControlError(c, 400, 'MISSING_WIKI_ID');
     const files = Array.isArray(body.files) ? (body.files as WikiRawWriteFile[]) : [];
     if (files.length === 0) return respondControlError(c, 400, 'MISSING_FILES');
-    // 大小校验复用模块级 checkFileSizes，与 import-and-ingest 同源：
-    // 阈值与错误码只有一份定义，避免两处各自维护导致复合端点绕过 W9 限制。
+    // Size validation reuses the module-level checkFileSizes, same source as import-and-ingest:
+    // thresholds and error codes are defined in only one place, avoiding the two being maintained separately and the composite endpoint bypassing the W9 limits.
     const sizeErr = checkFileSizes(files);
     if (sizeErr) return respondControlError(c, 413, sizeErr);
     const gate = await requireTeamMember(deps, c, ctx, teamId);
@@ -308,13 +308,13 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     return runKs(c, () => kc.wikiRawWrite(teamId, wikiId, files, gate.userId));
   });
 
-  // W17 import-and-ingest — 设计 2026-09-21：详情页「添加」+「Ingest」合并后的单一入口。
+  // W17 import-and-ingest -- design 2026-09-21: the single entry point after merging the detail page's "Add" + "Ingest".
   //
-  // 一次调用完成：写 raw（可选）→ 触发 ingest（onBusy:'replace'，KS 侧原子完成
-  // "取消旧任务 + 排队新任务"）。Panel 不做独立 cancel 步骤，也不做有限重试。
+  // One call does: write raw (optional) -> trigger ingest (onBusy:'replace'; KS atomically completes
+  // "cancel the old task + enqueue the new task"). Panel does no separate cancel step and no bounded retry.
   //
-  // mode 与 Modal 三 tab 一一对应：
-  //   files | markdown → wikiRawWrite；external → wikiSourceImport；reingest → 跳过写 raw。
+  // mode maps one-to-one to the Modal's three tabs:
+  //   files | markdown -> wikiRawWrite; external -> wikiSourceImport; reingest -> skip writing raw.
   api.post('/knowledge/wiki/import-and-ingest', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -324,11 +324,11 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     if (!mode || !['files', 'markdown', 'external', 'reingest'].includes(mode)) {
       return respondControlError(c, 400, 'INVALID_MODE');
     }
-    // 门控：team 成员即可（requireWikiWritable）—— 同 team 任何成员都能往共享
-    // wiki 里导入文档，不再要求是该 wiki 的 owner。
+    // Gate: any team member (requireWikiWritable) -- any member of the same team can import documents
+    // into the shared wiki, no longer required to be the wiki's owner.
     const gate = await requireWikiWritable(deps, c, ctx, wikiId);
     if ('error' in gate) return gate.error;
-    // teamId 来自 meta_asset（与 page/rm、raw/rm 同款写法），不信任 body。
+    // teamId comes from meta_asset (same pattern as page/rm, raw/rm); the body is not trusted.
     const teamId = gate.asset?.team_id;
     if (!teamId) return respondControlError(c, 400, 'MISSING_TEAM_ID');
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
@@ -339,11 +339,11 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
     let yieldMs = 0;
 
     try {
-      // ⓪ 无等待让位：KS 的 rawWrite/rawWriteMany 已放行 processing 状态写入
-      //    （设计 2026-09-21「新导入覆盖旧导入」），因此此处不再轮询等待
-      //    旧任务归位。旧任务的取消由后续 ingest(onBusy:'replace') 完成。
-      // ① 写 raw（reingest 模式跳过）
-      // ① 写 raw（reingest 模式跳过）
+      // (0) No wait-and-yield: KS rawWrite/rawWriteMany already allow writes in the processing state
+      //    (design 2026-09-21 "new import overwrites old import"), so there is no longer polling here to wait for
+      //    the old task to settle. Cancelling the old task is done by the subsequent ingest(onBusy:'replace').
+      // (1) Write raw (skipped in reingest mode)
+      // (1) Write raw (skipped in reingest mode)
       if (mode === 'files' || mode === 'markdown') {
         const files = Array.isArray(body.files)
           ? (body.files as WikiRawWriteFile[])
@@ -351,9 +351,9 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
             ? (body.markdown as WikiRawWriteFile[])
             : [];
         if (files.length === 0) return respondControlError(c, 400, 'MISSING_FILES');
-        // 字段校验：KS 要求 { filename, content }，缺 filename 会在 KS 侧报
-        // "filename is required for each file"。在 Panel 层提前拦下并给出明确错误，
-        // 避免这类契约不匹配静默穿透到 KS。
+        // Field validation: KS requires { filename, content }; a missing filename would be reported on the KS side as
+        // "filename is required for each file". Intercept it early at the Panel layer with a clear error,
+        // to avoid this kind of contract mismatch silently passing through to KS.
         const badFile = files.find(
           (f) => !f || typeof f.filename !== 'string' || f.filename.trim() === '' || typeof f.content !== 'string',
         );
@@ -386,7 +386,7 @@ export function registerKnowledgeWikiRoutes(api: Hono, deps: PanelDeps): void {
         rawPersisted = true;
       }
 
-      // ② 触发 ingest：onBusy='replace' 让 KS 原子完成"取消旧任务 + 排队新任务"
+      // (2) Trigger ingest: onBusy='replace' lets KS atomically complete "cancel the old task + enqueue the new task"
       const i0 = Date.now();
       const task = await kc.wikiIngest(wikiId, { onBusy: 'replace' });
       const ingestMs = Date.now() - i0;

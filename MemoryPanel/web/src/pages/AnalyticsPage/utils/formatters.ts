@@ -1,8 +1,8 @@
 /**
- * 可观测页数值格式化 —— 页面与各展示组件共用。
+ * Observability page number formatting -- shared by the page and display components.
  *
- * 统一以 '—' 表示「无数据」，与 Panel 其他页面保持一致；
- * 非有限数（NaN / Infinity）同样按无数据处理，避免把 CH 异常值直接呈现给用户。
+ * '—' uniformly means "no data", consistent with other Panel pages;
+ * non-finite numbers (NaN / Infinity) are also treated as no data, so abnormal CH values are not shown directly to users.
  */
 
 const PLACEHOLDER = '—';
@@ -11,34 +11,34 @@ function isBlank(v: number | null | undefined): boolean {
   return v === null || v === undefined || !Number.isFinite(v);
 }
 
-/** 整数（千分位）。 */
+/** Integer (thousands separators). */
 export function fmtInt(v: number | null | undefined): string {
   return isBlank(v) ? PLACEHOLDER : Math.round(v as number).toLocaleString();
 }
 
-/** 百分比数值（不含 % 号，供 MetricsBoard 的 unit 承载单位）。 */
+/** Percentage value (without the % sign; MetricsBoard's unit carries the unit). */
 export function fmtPctValue(v: number | null | undefined): string {
   return isBlank(v) ? PLACEHOLDER : (v as number).toFixed(2);
 }
 
-/** 百分比（含 % 号），用于表格 / 条形图等行内展示。 */
+/** Percentage (with the % sign), for inline display in tables / bar charts, etc. */
 export function fmtPct(v: number | null | undefined): string {
   return isBlank(v) ? PLACEHOLDER : `${(v as number).toFixed(2)}%`;
 }
 
-/** 小数（默认 2 位）。 */
+/** Decimal (2 places by default). */
 export function fmtNum(v: number | null | undefined, digits = 2): string {
   return isBlank(v) ? PLACEHOLDER : (v as number).toFixed(digits);
 }
 
-/** `YYYY-MM-DD` → `MM-DD`（趋势图轴标签用，节省横向空间）。 */
+/** `YYYY-MM-DD` -> `MM-DD` (for trend chart axis labels, saving horizontal space). */
 export function fmtShortDay(day: string): string {
   const m = /^\d{4}-(\d{2}-\d{2})$/.exec(day);
   return m ? m[1] : day;
 }
 
 /**
- * 大数紧凑显示（token 量级常达千万，完整千分位会挤爆卡片）。
+ * Compact display of large numbers (token counts often reach tens of millions; full thousands separators would overflow the card).
  * 1234 → 1.2K；48000000 → 48.0M；1.2e9 → 1.2B
  */
 export function fmtCompact(v: number | null | undefined): string {
@@ -51,7 +51,7 @@ export function fmtCompact(v: number | null | undefined): string {
   return Math.round(n).toLocaleString();
 }
 
-/** credit 金额：保留 2 位小数并加千分位。 */
+/** credit amount: keep 2 decimal places and add thousands separators. */
 export function fmtCredit(v: number | null | undefined): string {
   if (isBlank(v)) return PLACEHOLDER;
   return (v as number).toLocaleString(undefined, {

@@ -1,5 +1,5 @@
 /**
- * TaskDetail —— 工作台任务详情（编辑标题/描述、切换状态、查看参与者、删除）。
+ * TaskDetail -- workbench task detail (edit title/description, switch status, view participants, delete).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -18,11 +18,11 @@ import {
 } from '../utils/workbench-utils';
 
 /**
- * 把 source_url 规整成可安全跳转的绝对地址。
+ * Normalize source_url into an absolute address that is safe to navigate to.
  *
- * **必须做协议白名单**：source_url 是从第三方系统（TAPD）拉回来的外部数据，
- * 直接进 `<a href>` 会让 `javascript:` / `data:` 这类伪协议成为 XSS 入口。
- * 只放行 http / https；解析失败或非白名单一律返回 null（不渲染链接）。
+ * **A protocol allowlist is required**: source_url is external data pulled back from a third-party system (TAPD),
+ * and putting it directly into `<a href>` would make pseudo-protocols such as `javascript:` / `data:` an XSS entry point.
+ * Only http / https are allowed; parse failure or anything off the allowlist returns null (no link rendered).
  */
 function safeExternalUrl(raw: string | undefined | null): string | null {
   if (!raw) return null;
@@ -33,15 +33,15 @@ function safeExternalUrl(raw: string | undefined | null): string | null {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     return url.href;
   } catch {
-    // 相对路径或非法串：不猜协议，直接不跳转。
+    // Relative path or invalid string: don't guess the protocol, just don't navigate.
     return null;
   }
 }
 
 /**
- * 参与者 chip：可见文本显示 display_name（缓存未命中先回退 id），
- * title 保留语义 tooltip + user_id 供排查。
- * 抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 useUserDisplayName）。
+ * Participant chip: the visible text shows display_name (falling back to id on a cache miss),
+ * and title keeps a semantic tooltip + user_id for troubleshooting.
+ * Extracting a sub-component is required by the Rules of Hooks (useUserDisplayName cannot be called in a loop inside .map).
  */
 function UserChip({
   userId,
@@ -77,37 +77,37 @@ export default function TaskDetail({
   task: Task;
   onUpdateStatus: (s: Task['status']) => void;
   onUpdateTask: (patch: Partial<Pick<Task, 'title' | 'description' | 'source_type' | 'source_url' | 'linked_agents'>>) => void;
-  /** 删除当前 task（权限校验与二次确认由外层统一处理） */
+  /** Delete the current task (permission check and second confirmation are handled uniformly by the outer layer) */
   onDelete: () => void;
   canDelete: boolean;
   agents: AgentOption[];
-  /** 当前 task 所属 team — 可能为 null（理论上不会，但 team 被删除场景需兜底） */
+  /** The team the current task belongs to -- may be null (in theory not, but the case of a deleted team needs a fallback) */
   team: Team | null;
   currentUser: string;
-  /** 从 useTeamParticipation 分桶后传下来的当前 task 观测数据 */
+  /** Observation data of the current task passed down after bucketing by useTeamParticipation */
   participation: TaskParticipationView;
 }) {
   const { t } = useTranslation();
   const statusLabels = useStatusLabels();
   const sourceLabelOf = useSourceLabel();
-  // 编辑权限：team 内任意 member 可改 task（含切换 status）。
+  // Edit permission: any member within the team can modify a task (including switching status).
   const canEdit = canEditTask(task, team, currentUser);
 
-  /** 来源系统详情页地址（已过协议白名单）；非法/缺失则为 null，不渲染跳转按钮。 */
+  /** Detail page address of the source system (already passed through the protocol allowlist); null if invalid/missing, and no jump button is rendered. */
   const externalUrl = safeExternalUrl(task.source_url);
   /**
-   * 来源展示名：具体来源从 metadata_json.external.provider 读（source_type 只表大类）。
-   * 未登记的来源回落到原始 provider 串，避免出现空白来源行。
+   * Source display name: the specific source is read from metadata_json.external.provider (source_type only denotes the category).
+   * An unregistered source falls back to the raw provider string, avoiding a blank source row.
    */
   const sourceProvider = readExternalProvider(task);
   const sourceLabel = sourceProvider ? sourceLabelOf(sourceProvider) : task.source_type;
 
-  // —— 编辑态：只在用户点「编辑」后才进入；草稿独立维护，取消即丢弃 —— //
+  // -- Edit state: entered only after the user clicks "Edit"; the draft is maintained independently, and cancel discards it -- //
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(task.title);
   const [draftDesc, setDraftDesc] = useState(task.description);
 
-  // 切换 task / 退出编辑时同步草稿（避免编辑 A 后切换到 B 草稿还停在 A）
+  // Sync the draft on switching task / leaving edit mode (avoiding the draft staying on A after editing A then switching to B)
   useEffect(() => {
     setEditing(false);
     setDraftTitle(task.title);
@@ -141,15 +141,15 @@ export default function TaskDetail({
     setEditing(false);
   }
 
-  // 参与者展示：creator 单列独立；其余进 "参与的 User"。
-  // 数据源统一走 participation-log 观测 —— proxy session init 完成时 append 的
-  // "实际起过 session 的 user"。creator 用自己的 agent 开工也算一次真实参与，
-  // 所以不再过滤 creator（会同时出现在"创建者"和"参与的 User"两处，语义不同）。
+  // Participant display: the creator gets its own separate entry; the rest go into "Participating Users".
+  // The data source uniformly uses participation-log observation -- the "users who actually started a session"
+  // appended when the proxy's session init completes. A creator working with their own agent also counts as real participation,
+  // so the creator is no longer filtered out (it appears in both "Creator" and "Participating Users" with different semantics).
   const participantUsers = participation.users;
 
-  // 「实际参与 Agent」：session 观测到的 agent，映射到 team 的 agent name；
-  // 未在 team agents 列表里的（比如已被删除）保留 agent_id 兜底展示。
-  // 先滤掉导入哨兵（历史参与记录）—— 滤完为空则展示「—」，与非导入 task 一致。
+  // "Agents actually participating": the agents observed in sessions, mapped to the team's agent names;
+  // those not in the team agents list (e.g. already deleted) keep agent_id as a fallback display.
+  // First filter out the import sentinel (historical participation records) -- if empty after filtering, show "—", the same as non-imported tasks.
   const sessionAgents = useMemo(() => {
     const nameById = new Map(agents.map((a) => [a.id, a.name]));
     return visibleAgentIds(participation.agentIds).map((id) => ({
@@ -160,7 +160,7 @@ export default function TaskDetail({
 
   return (
     <div className="_memory-workbench-detail-content">
-      {/* === 工具行：编辑 + 状态切换（标题 / task_id / team 已在抽屉头部展示） === */}
+      {/* === Tool row: edit + status switch (title / task_id / team are already shown in the drawer header) === */}
       <div className="_memory-workbench-detail-toolbar">
         {editing ? (
           <>
@@ -183,8 +183,8 @@ export default function TaskDetail({
               </Button>
             )}
             {/*
-              跳转入口**只保留**下方参与者区的「来源」行 —— 那边带来源名与完整 URL
-              tooltip，信息更足；这里再放一个按钮是同目标重复入口，易点错。
+              The jump entry is **kept only** in the "Source" row of the participants area below -- that one carries the source name and full URL
+              tooltip, with more information; putting another button here would be a duplicate entry to the same target and easy to misclick.
             */}
             <Segment
               value={task.status}
@@ -199,9 +199,9 @@ export default function TaskDetail({
         )}
       </div>
 
-      {/* === 参与者 === */}
+      {/* === Participants === */}
       <div className="_memory-workbench-people">
-        {/* 来源：仅导入产生的 task 有（source_type !== 'manual'），manual 任务整行不显示 */}
+        {/* Source: only tasks produced by import have it (source_type !== 'manual'); manual tasks don't show the row at all */}
         {task.source_type !== 'manual' && (
           <div className="_memory-workbench-people-row">
             <Text theme="weak" className="_memory-workbench-people-label">{t('task.source')}</Text>
@@ -263,7 +263,7 @@ export default function TaskDetail({
         </div>
       </div>
 
-      {/* === 描述 === */}
+      {/* === Description === */}
       <div className="_memory-workbench-block">
         <Text theme="label" className="_memory-workbench-block-label">{t('task.description')}</Text>
         {editing ? (
@@ -283,7 +283,7 @@ export default function TaskDetail({
         {t('task.footer', { created: new Date(task.created_at_ms).toLocaleString(), updated: new Date(task.updated_at_ms).toLocaleString() })}
       </Text>
 
-      {/* === 危险操作 === */}
+      {/* === Dangerous actions === */}
       {canDelete && (
         <div className="_memory-workbench-danger">
           <Button type="error" onClick={onDelete}>

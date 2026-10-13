@@ -1,8 +1,8 @@
 /**
- * TraceDetailList — 抽屉内的调用明细列表（tool-calls/list）。
+ * TraceDetailList -- call detail list inside the drawer (tool-calls/list).
  *
- * 与页面主体的 CallDetailTable 区别：无 Card 外壳与搜索栏，专用于下钻场景，
- * 过滤条件由抽屉的下钻目标决定（成员 / 资产类别），不在此处再开放筛选入口。
+ * Unlike the page body's CallDetailTable: no Card shell or search bar, dedicated to drill-down scenarios;
+ * filters are determined by the drawer's drill-down target (member / asset category), and no filter entry is offered here.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -32,7 +32,7 @@ export function TraceDetailList({
   loading: boolean;
   error: string;
   resolveUserName: (id: string) => string;
-  /** 按成员下钻时该列恒为同一人，隐藏以让出横向空间。 */
+  /** When drilling down by member this column is always the same person; hidden to free up horizontal space. */
   showUser: boolean;
   onOffsetChange: (offset: number) => void;
 }) {

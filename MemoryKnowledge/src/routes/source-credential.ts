@@ -1,15 +1,15 @@
 /**
- * source-credential routes —— 外部知识源的令牌 CRUD（**按资源 id**）。
+ * source-credential routes — token CRUD for external knowledge sources (**by resource id**).
  *
- * 安全边界：
- *   - 只进不出：PUT 接受明文令牌，任何响应都**不回吐** secret（GET 只给元数据）。
- *   - 按资源隔离：主键 (service_id, resource_type, resource_id)，越权 → 404。
- *   - 越权门控：PUT/DELETE 前必须确认该 resource_id 属于请求头 team_id，
- *     否则 A 团队可给 B 团队的资源写凭据。
- *   - 身份来自请求头（x-tdai-service-id / x-tdai-team-id / x-tdai-user-id），
- *     绝不收 body 里的 user_id / team_id。
+ * Security boundary:
+ *   - Write-only: PUT accepts a plaintext token; no response ever **echoes** the secret (GET returns only metadata).
+ *   - Isolated by resource: primary key (service_id, resource_type, resource_id); out-of-scope access → 404.
+ *   - Authorization gate: before PUT/DELETE, must confirm the resource_id belongs to the request header team_id,
+ *     otherwise team A could write credentials for team B's resources.
+ *   - Identity comes from request headers (x-tdai-service-id / x-tdai-team-id / x-tdai-user-id),
+ *     never accept user_id / team_id from the body.
  *
- * 说明：本路由只做凭据存取，**不做**任何拉取 / 建图动作。
+ * Note: this route only stores/retrieves credentials and does **not** perform any fetch / graph-building action.
  */
 
 import { Hono } from "hono";
@@ -28,7 +28,7 @@ const VALID_TYPES: ResourceType[] = ["code-graph", "wiki"];
 
 export interface SourceCredentialRouteDeps {
   credentialStore: ICredentialStore;
-  /** 用于校验 resource_id 属于请求头 team_id（越权门控）。 */
+  /** Used to verify that resource_id belongs to the request header team_id (authorization gate). */
   store: IKnowledgeStore;
 }
 
@@ -48,7 +48,7 @@ function actor(c: { req: { header(name: string): string | undefined } }): Actor 
   return { serviceId: serviceId as string, teamId: teamId as string, userId: userId as string };
 }
 
-/** 解析并校验 resource_type + resource_id；成功后返回 ResourceRef。 */
+/** Parse and validate resource_type + resource_id; return a ResourceRef on success. */
 function parseRef(
   serviceId: string,
   rawType: unknown,
@@ -64,8 +64,8 @@ function parseRef(
 }
 
 /**
- * 团队门控：确认 resource_id 属于 actor.teamId。
- * 不存在或 team 不匹配 → 404（不区分，避免探测存在性）。
+ * Team gate: confirm resource_id belongs to actor.teamId.
+ * Missing or team mismatch → 404 (not distinguished, to avoid probing for existence).
  */
 function ensureTeamOwnership(
   store: IKnowledgeStore,
@@ -86,7 +86,7 @@ export function createSourceCredentialRoutes(deps: SourceCredentialRouteDeps): H
   const app = new Hono();
   const { credentialStore, store } = deps;
 
-  // GET /status?resource_type=xxx&resource_id=yyy —— 元数据（不含 secret）
+  // GET /status?resource_type=xxx&resource_id=yyy — metadata (no secret)
   app.get("/status", async (c) => {
     const who = actor(c);
     if (!who) {
@@ -102,7 +102,7 @@ export function createSourceCredentialRoutes(deps: SourceCredentialRouteDeps): H
     return c.json(wrapOk({ configured: !!status, credential: status }));
   });
 
-  // DELETE /delete?resource_type=xxx&resource_id=yyy —— 删除令牌
+  // DELETE /delete?resource_type=xxx&resource_id=yyy — delete token
   app.delete("/delete", async (c) => {
     const who = actor(c);
     if (!who) {
@@ -119,7 +119,7 @@ export function createSourceCredentialRoutes(deps: SourceCredentialRouteDeps): H
     return c.json(wrapOk({ deleted: true }));
   });
 
-  // PUT /put —— 写入 / 更新令牌。
+  // PUT /put — write / update token.
   // body: { resource_type, resource_id, provider_id, cred_kind, secret, username?, extra? }
   app.put("/put", async (c) => {
     const who = actor(c);
@@ -164,7 +164,7 @@ export function createSourceCredentialRoutes(deps: SourceCredentialRouteDeps): H
       who.userId,
     );
 
-    // 只回元数据，永不回吐 secret。
+    // Return metadata only; never echo the secret.
     const status = credentialStore.status(refOrErr);
     return c.json(wrapOk({ credential: status }));
   });

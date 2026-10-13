@@ -1,18 +1,18 @@
 /**
- * Core 结构化日志门面 — 基于 ILogBackend 抽象
+ * Core structured logging facade — based on the ILogBackend abstraction
  *
- * 提供 info/warn/error 方法，自动关联当前 Trace Context，
- * 日志通过 ILogBackend 后端上报（内部环境：智研 + ClickHouse）。
+ * Provides info/warn/error methods that automatically correlate the current Trace Context;
+ * logs are reported via the ILogBackend backend (internal environment: Zhiyan + ClickHouse).
  *
- * 使用方式：
+ * Usage:
  *   import { obsLogger } from "../core/report/obs-logger.js";
  *   obsLogger.error("core.llm.timeout", { instance_id: "xxx", session_id: "yyy" });
  *
- * 不修改任何业务代码，纯可观测性组件。
- * 所有异常不影响业务启动和服务流程。
- * 同时写入本地日志文件（通过 FileLogger）。
+ * Does not modify any business code; a pure observability component.
+ * No exception affects business startup or service flow.
+ * Also writes to the local log file (via FileLogger).
  *
- * 公开 API 签名保持不变，调用方无需修改。
+ * The public API signature is unchanged; callers need no modification.
  */
 
 import { FileLogger } from "./file-logger.js";
@@ -20,7 +20,7 @@ import { getObservabilityBackend } from "./factory.js";
 
 export type LogAttrs = Record<string, string | number | boolean>;
 
-// 初始化文件写入器（降级策略：初始化失败不影响业务）
+// initialize the file writer (degradation strategy: initialization failure does not affect the business)
 const obsFileLogger = new FileLogger({
   path: process.env.LOG_PATH || "/data/log/",
   filename: "observability.log",
@@ -29,38 +29,38 @@ const obsFileLogger = new FileLogger({
 });
 
 /**
- * 可观测性日志门面。
- * 所有方法都是安全的（不抛异常、不阻塞业务）。
+ * Observability logging facade.
+ * All methods are safe (never throw, never block the business).
  */
 export const obsLogger = {
   /**
-   * INFO 级别日志 — 用于记录正常流程的关键节点。
+   * INFO level log — used to record key points of the normal flow.
    */
   info(eventName: string, attrs: LogAttrs = {}): void {
     try {
       getObservabilityBackend().log.info(eventName, attrs);
-      // 同时写入本地日志文件
+      // also write to the local log file
       obsFileLogger.write("INFO", eventName, attrs as Record<string, unknown>);
     } catch {
-      // 静默失败，不影响业务
+      // silent failure; does not affect the business
     }
   },
 
   /**
-   * WARN 级别日志 — 用于记录可恢复的异常（如重试、降级）。
+   * WARN level log — used to record recoverable anomalies (such as retries and degradation).
    */
   warn(eventName: string, attrs: LogAttrs = {}): void {
     try {
       getObservabilityBackend().log.warn(eventName, attrs);
-      // 同时写入本地日志文件
+      // also write to the local log file
       obsFileLogger.write("WARN", eventName, attrs as Record<string, unknown>);
     } catch {
-      // 静默失败，不影响业务
+      // silent failure; does not affect the business
     }
   },
 
   /**
-   * ERROR 级别日志 — 用于记录不可恢复的错误（如 LLM 超时、VDB 写入失败）。
+   * ERROR level log — used to record unrecoverable errors (such as LLM timeouts and VDB write failures).
    */
   error(eventName: string, attrs: LogAttrs = {}, error?: Error): void {
     try {
@@ -68,10 +68,10 @@ export const obsLogger = {
         attrs = { ...attrs, "error.message": error.message, "error.type": error.name };
       }
       getObservabilityBackend().log.error(eventName, attrs, error);
-      // 同时写入本地日志文件
+      // also write to the local log file
       obsFileLogger.write("ERROR", eventName, attrs as Record<string, unknown>);
     } catch {
-      // 静默失败，不影响业务
+      // silent failure; does not affect the business
     }
   },
 };

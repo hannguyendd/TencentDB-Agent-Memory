@@ -1,68 +1,68 @@
 /**
- * ClickHouse 直写 Exporter — 基于 @clickhouse/client 官方 SDK
+ * ClickHouse direct-write Exporter — based on the official @clickhouse/client SDK
  *
- * 性能最优方案，SDK 直连 ClickHouse HTTP 接口，无需 OTel Collector：
- * - ✅ gzip 压缩（减少 ~80% 网络流量）
- * - ✅ async_insert（ClickHouse 服务端合并小批量，减少 Part 数量）
- * - ✅ Keep-Alive 连接池（减少 TCP 握手开销）
- * - ✅ 内部批量缓冲 + 定时 flush
- * - ✅ 失败静默，不阻塞业务
+ * Best-performing approach: the SDK connects directly to the ClickHouse HTTP interface, no OTel Collector needed:
+ * - ✅ gzip compression (reduces network traffic by ~80%)
+ * - ✅ async_insert (ClickHouse server merges small batches, reducing the number of Parts)
+ * - ✅ Keep-Alive connection pool (reduces TCP handshake overhead)
+ * - ✅ Internal batch buffering + timed flush
+ * - ✅ Failures are silent and never block the business
  *
- * 数据流（无 Collector，直连 ClickHouse）：
- *   SDK TracerProvider ──→ [智研 OTLP Exporter] + [ClickHouse Exporter (本模块)]
- *   SDK LoggerProvider  ──→ [智研 OTLP Exporter] + [ClickHouse Exporter (本模块)]
- *   SDK MeterProvider   ──→ [智研监控宝 Bridge]  + [ClickHouse Exporter (本模块)]
+ * Data flow (no Collector, direct to ClickHouse):
+ *   SDK TracerProvider ──→ [Zhiyan OTLP Exporter] + [ClickHouse Exporter (this module)]
+ *   SDK LoggerProvider  ──→ [Zhiyan OTLP Exporter] + [ClickHouse Exporter (this module)]
+ *   SDK MeterProvider   ──→ [Zhiyan Monitoring Bridge]  + [ClickHouse Exporter (this module)]
  *
- * 使用方式：
+ * Usage:
  *   const chExporter = new ClickHouseDirectExporter({ endpoint: "http://10.0.1.100:8123", ... });
- *   // 由 otel-sdk-init.ts 在初始化 SDK 时注册为额外的 Exporter
+ *   // Registered by otel-sdk-init.ts as an extra Exporter when initializing the SDK
  *
- * 环境变量：
- *   - CLICKHOUSE_HTTP_ENDPOINT : ClickHouse HTTP 接口地址 (默认: http://localhost:8123)
- *   - CLICKHOUSE_USER          : 用户名 (默认: "default")
- *   - CLICKHOUSE_PASSWORD      : 密码
- *   - CLICKHOUSE_DATABASE      : 数据库名 (默认: "tdai_eval")
- *   - CLICKHOUSE_ENABLED       : "true" 启用 (默认: "false")
+ * Environment variables:
+ *   - CLICKHOUSE_HTTP_ENDPOINT : ClickHouse HTTP endpoint (default: http://localhost:8123)
+ *   - CLICKHOUSE_USER          : username (default: "default")
+ *   - CLICKHOUSE_PASSWORD      : password
+ *   - CLICKHOUSE_DATABASE      : database name (default: "tdai_eval")
+ *   - CLICKHOUSE_ENABLED       : "true" to enable (default: "false")
  */
 
 import { createClient, type ClickHouseClient } from "@clickhouse/client";
 
 export interface ClickHouseExporterOptions {
-  /** ClickHouse HTTP 接口地址 (端口 8123). 默认: env CLICKHOUSE_HTTP_ENDPOINT */
+  /** ClickHouse HTTP endpoint (port 8123). Default: env CLICKHOUSE_HTTP_ENDPOINT */
   endpoint?: string;
-  /** 用户名. 默认: env CLICKHOUSE_USER 或 "default" */
+  /** Username. Default: env CLICKHOUSE_USER or "default" */
   username?: string;
-  /** 密码. 默认: env CLICKHOUSE_PASSWORD */
+  /** Password. Default: env CLICKHOUSE_PASSWORD */
   password?: string;
-  /** 数据库名. 默认: env CLICKHOUSE_DATABASE 或 "tdai_eval" */
+  /** Database name. Default: env CLICKHOUSE_DATABASE or "tdai_eval" */
   database?: string;
-  /** Trace 表名. 默认: "otel_traces" */
+  /** Trace table name. Default: "otel_traces" */
   tracesTable?: string;
-  /** Log 表名. 默认: "otel_logs" */
+  /** Log table name. Default: "otel_logs" */
   logsTable?: string;
-  /** Metrics Gauge 表名. 默认: "otel_metrics_gauge" */
+  /** Metrics Gauge table name. Default: "otel_metrics_gauge" */
   metricsGaugeTable?: string;
-  /** Metrics Sum 表名. 默认: "otel_metrics_sum" */
+  /** Metrics Sum table name. Default: "otel_metrics_sum" */
   metricsSumTable?: string;
-  /** Metrics Histogram 表名. 默认: "otel_metrics_histogram" */
+  /** Metrics Histogram table name. Default: "otel_metrics_histogram" */
   metricsHistogramTable?: string;
-  /** 批量发送大小. 默认: 100 */
+  /** Batch send size. Default: 100 */
   batchSize?: number;
-  /** 定时 flush 间隔 ms. 默认: 5000 */
+  /** Timed flush interval in ms. Default: 5000 */
   flushIntervalMs?: number;
-  /** 请求超时 ms. 默认: 30000 */
+  /** Request timeout in ms. Default: 30000 */
   timeoutMs?: number;
-  /** 是否启用 debug 日志 */
+  /** Whether to enable debug logging */
   debug?: boolean;
-  /** 服务名（写入 ServiceName 列） */
+  /** Service name (written to the ServiceName column) */
   serviceName?: string;
-  /** 最大并发 insert 请求数. 默认: 5 */
+  /** Max concurrent insert requests. Default: 5 */
   maxConcurrentInserts?: number;
-  /** 是否启用请求体 gzip 压缩. 默认: true */
+  /** Whether to enable request-body gzip compression. Default: true */
   compression?: boolean;
 }
 
-// ── 内部类型 ──
+// ── Internal types ──
 
 interface TraceRow {
   Timestamp: string;
@@ -144,10 +144,10 @@ interface MetricHistogramRow {
 }
 
 /**
- * ClickHouse 直写 Exporter — 基于 @clickhouse/client 官方 SDK.
+ * ClickHouse direct-write Exporter — based on the official @clickhouse/client SDK.
  *
- * 暴露简单的 exportSpan / exportLog / exportMetric 方法，
- * 由 otel-sdk-init.ts 在创建 OTel 各 Provider 时挂载。
+ * Exposes simple exportSpan / exportLog / exportMetric methods,
+ * mounted by otel-sdk-init.ts when creating the OTel Providers.
  */
 export class ClickHouseDirectExporter {
   private readonly client: ClickHouseClient;
@@ -163,14 +163,14 @@ export class ClickHouseDirectExporter {
   private readonly serviceName: string;
   private readonly maxConcurrentInserts: number;
 
-  // 内部缓冲
+  // internal buffer
   private traceBuffer: TraceRow[] = [];
   private logBuffer: LogRow[] = [];
   private metricGaugeBuffer: MetricGaugeRow[] = [];
   private metricSumBuffer: MetricSumRow[] = [];
   private metricHistogramBuffer: MetricHistogramRow[] = [];
 
-  // 并发控制
+  // concurrency control
   private activeInserts = 0;
 
   private flushTimer: ReturnType<typeof setInterval> | undefined;
@@ -192,24 +192,24 @@ export class ClickHouseDirectExporter {
     const timeoutMs = options.timeoutMs ?? 30_000;
     const compression = options.compression ?? true;
 
-    // 创建 @clickhouse/client 实例 — 性能最优配置
+    // create the @clickhouse/client instance — best-performance configuration
     this.client = createClient({
       url: endpoint,
       username,
       password,
       database: this.database,
-      // gzip 压缩：减少 ~80% 网络流量
+      // gzip compression: reduces network traffic by ~80%
       compression: {
         request: compression,
       },
-      // ClickHouse 服务端异步插入 + Keep-Alive
+      // ClickHouse server-side async insert + Keep-Alive
       clickhouse_settings: {
-        async_insert: 1,              // 异步插入，CK 服务端合并小批量
-        wait_for_async_insert: 1,     // 等待写入完成确认
+        async_insert: 1,              // async insert; the CK server merges small batches
+        wait_for_async_insert: 1,     // wait for write-completion acknowledgement
       },
-      // 请求超时
+      // request timeout
       request_timeout: timeoutMs,
-      // Keep-Alive 连接池配置
+      // Keep-Alive connection pool configuration
       keep_alive: {
         enabled: true,
       },
@@ -228,7 +228,7 @@ export class ClickHouseDirectExporter {
       ?? "core";
     this.maxConcurrentInserts = options.maxConcurrentInserts ?? 5;
 
-    // 定时 flush
+    // timed flush
     this.flushTimer = setInterval(() => {
       void this.flush();
     }, this.flushIntervalMs);
@@ -244,11 +244,11 @@ export class ClickHouseDirectExporter {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // Public API: 导出数据
+  // Public API: export data
   // ════════════════════════════════════════════════════════════════════════════
 
   /**
-   * 导出一个 Span (Trace) 到 ClickHouse.
+   * Export a Span (Trace) to ClickHouse.
    */
   exportSpan(span: {
     traceId: string;
@@ -317,7 +317,7 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 导出一条 Log 到 ClickHouse.
+   * Export a Log to ClickHouse.
    */
   exportLog(log: {
     timestamp?: number; // epoch nanos
@@ -363,7 +363,7 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 导出 Gauge 指标到 ClickHouse.
+   * Export Gauge metrics to ClickHouse.
    */
   exportGauge(metric: {
     name: string;
@@ -397,7 +397,7 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 导出 Counter (Sum) 指标到 ClickHouse.
+   * Export Counter (Sum) metrics to ClickHouse.
    */
   exportSum(metric: {
     name: string;
@@ -434,7 +434,7 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 导出 Histogram 指标到 ClickHouse.
+   * Export Histogram metrics to ClickHouse.
    */
   exportHistogram(metric: {
     name: string;
@@ -482,7 +482,7 @@ export class ClickHouseDirectExporter {
   // ════════════════════════════════════════════════════════════════════════════
 
   /**
-   * Flush 所有缓冲数据到 ClickHouse.
+   * Flush all buffered data to ClickHouse.
    */
   async flush(): Promise<void> {
     await Promise.allSettled([
@@ -495,7 +495,7 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 优雅关闭：flush 剩余数据，关闭连接池.
+   * Graceful shutdown: flush remaining data and close the connection pool.
    */
   async shutdown(): Promise<void> {
     this._shutdown = true;
@@ -511,14 +511,14 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 是否已关闭.
+   * Whether it has been shut down.
    */
   get isShutdown(): boolean {
     return this._shutdown;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // Internal: 分表 flush
+  // Internal: per-table flush
   // ════════════════════════════════════════════════════════════════════════════
 
   private async flushTraces(): Promise<void> {
@@ -552,15 +552,15 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 通过 @clickhouse/client SDK 批量插入数据.
-   * 自动 gzip 压缩 + async_insert + Keep-Alive 连接池.
+   * Bulk-insert data via the @clickhouse/client SDK.
+   * Automatic gzip compression + async_insert + Keep-Alive connection pool.
    */
   private async insertRows(table: string, rows: unknown[]): Promise<void> {
     if (rows.length === 0) return;
 
-    // 并发控制：避免过多并发请求打爆 ClickHouse
+    // concurrency control: avoid too many concurrent requests overwhelming ClickHouse
     if (this.activeInserts >= this.maxConcurrentInserts) {
-      // 放回缓冲区
+      // put back into the buffer
       this.requeue(table, rows);
       return;
     }
@@ -582,7 +582,7 @@ export class ClickHouseDirectExporter {
           `[clickhouse-exporter] INSERT ${table} error: ${err instanceof Error ? err.message : String(err)}`
         );
       }
-      // 失败的数据放回缓冲区
+      // put failed data back into the buffer
       this.requeue(table, rows);
     } finally {
       this.activeInserts--;
@@ -590,7 +590,7 @@ export class ClickHouseDirectExporter {
   }
 
   /**
-   * 失败时有限重新入队（最多保留 2x batchSize 避免 OOM）.
+   * On failure, re-enqueue in a limited way (keep at most 2x batchSize to avoid OOM).
    */
   private requeue(table: string, rows: unknown[]): void {
     const maxBuffer = this.batchSize * 2;
@@ -615,7 +615,7 @@ export class ClickHouseDirectExporter {
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * 将 hrtime [seconds, nanoseconds] 或 epoch nanos 转为纳秒数.
+ * Convert hrtime [seconds, nanoseconds] or epoch nanos to nanoseconds.
  */
 function hrtimeToNanos(time: [number, number] | number): bigint {
   if (typeof time === "number") {
@@ -625,8 +625,8 @@ function hrtimeToNanos(time: [number, number] | number): bigint {
 }
 
 /**
- * 将纳秒时间戳转为 ClickHouse DateTime64(9) 格式.
- * 格式: "YYYY-MM-DD HH:mm:ss.NNNNNNNNN"
+ * Convert a nanosecond timestamp to ClickHouse DateTime64(9) format.
+ * Format: "YYYY-MM-DD HH:mm:ss.NNNNNNNNN"
  */
 function nanosToClickHouseTimestamp(nanos: bigint | number): string {
   const ns = BigInt(nanos);
@@ -646,7 +646,7 @@ function nanosToClickHouseTimestamp(nanos: bigint | number): string {
 }
 
 /**
- * SpanKind 数字 → 字符串.
+ * SpanKind number → string.
  */
 function spanKindToString(kind: number): string {
   switch (kind) {
@@ -660,7 +660,7 @@ function spanKindToString(kind: number): string {
 }
 
 /**
- * StatusCode 数字 → 字符串.
+ * StatusCode number → string.
  */
 function statusCodeToString(code: number): string {
   switch (code) {
@@ -672,7 +672,7 @@ function statusCodeToString(code: number): string {
 }
 
 /**
- * 将 OTel Attributes (可能是嵌套对象) 展平为 Map(String, String).
+ * Flatten OTel Attributes (possibly nested objects) into Map(String, String).
  */
 function flattenAttributes(attrs?: Record<string, unknown>): Record<string, string> {
   if (!attrs) return {};
@@ -693,16 +693,16 @@ function flattenAttributes(attrs?: Record<string, unknown>): Record<string, stri
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// OTel SpanExporter 适配器 — 让 ClickHouseDirectExporter 可以直接注册到
-// OTel TracerProvider 作为标准 SpanExporter
+// OTel SpanExporter adapter — lets ClickHouseDirectExporter be registered directly on the
+// OTel TracerProvider as a standard SpanExporter
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
- * 适配 OTel SpanExporter 接口.
- * 用法：
+ * Adapt the OTel SpanExporter interface.
+ * Usage:
  *   const chExporter = new ClickHouseDirectExporter({...});
  *   const spanExporter = new ClickHouseSpanExporter(chExporter);
- *   // 传给 NodeSDK 的 traceExporter 或作为额外 SpanProcessor
+ *   // pass to NodeSDK's traceExporter or use as an extra SpanProcessor
  */
 export class ClickHouseSpanExporter {
   private ch: ClickHouseDirectExporter;
@@ -759,7 +759,7 @@ export class ClickHouseSpanExporter {
 }
 
 /**
- * 适配 OTel LogRecordExporter 接口.
+ * Adapt the OTel LogRecordExporter interface.
  */
 export class ClickHouseLogExporter {
   private ch: ClickHouseDirectExporter;

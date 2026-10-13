@@ -1,6 +1,6 @@
 FROM node:22-slim AS base
 
-# apt 源默认走 Debian 官方，公网可直接构建。内网构建加速：
+# The apt source defaults to official Debian and can be built directly on the public network. To speed up builds on an internal network:
 #   docker build --build-arg APT_MIRROR=mirrors.tencent.com .
 ARG APT_MIRROR=deb.debian.org
 RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
@@ -12,9 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# node:22-slim 自带 npm@10.9.8 有 arborist "edgesOut" crash（干净 `npm
-# install` 稳定报 `Cannot read properties of null (reading 'edgesOut')`）。
-# base 里升到 11，三个 builder stage 全部继承。
+# node:22-slim ships npm@10.9.8, which has an arborist "edgesOut" crash (a clean `npm
+# install` reliably reports `Cannot read properties of null (reading 'edgesOut')`).
+# Upgrade to 11 in the base; all three builder stages inherit it.
 RUN npm install -g npm@11 --no-audit --no-fund
 
 WORKDIR /app
@@ -67,7 +67,7 @@ ENV NODE_ENV=production \
     LOG_LEVEL=info \
     LOG_FORMAT=json
 
-# runtime stage：只拷必需文件，不带源码/文档/测试/构建配置
+# runtime stage: copy only the necessary files, without source/docs/tests/build config
 COPY --from=panel-builder /build/panel/dist /app/panel/dist
 COPY --from=panel-builder /build/panel/node_modules /app/panel/node_modules
 COPY --from=panel-builder /build/panel/package.json /app/panel/package.json
@@ -76,7 +76,7 @@ COPY --from=panel-builder /build/panel/web/dist /app/panel/web/dist
 COPY --from=knowledge-builder /build/knowledge/dist /app/knowledge/dist
 COPY --from=knowledge-builder /build/knowledge/node_modules /app/knowledge/node_modules
 COPY --from=knowledge-builder /build/knowledge/package.json /app/knowledge/package.json
-# Swagger UI 从这个路径读 openapi.yaml（src/server.ts）
+# Swagger UI reads openapi.yaml from this path (src/server.ts)
 COPY --from=knowledge-builder /build/knowledge/openapi.yaml /app/knowledge/openapi.yaml
 
 COPY start-combined.sh /usr/local/bin/start-combined.sh

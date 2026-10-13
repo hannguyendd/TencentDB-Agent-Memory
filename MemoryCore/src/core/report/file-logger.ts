@@ -1,33 +1,33 @@
 /**
- * file-logger.ts — 本地日志文件写入器
+ * file-logger.ts — local log file writer
  *
- * 将日志双写到本地文件，支持：
- * - 文件轮转（rotate）
- * - 备份数量限制
- * - 目录自动创建
- * - 错误静默处理（不影响主业务流程）
+ * Dual-writes logs to a local file, supporting:
+ * - file rotation (rotate)
+ * - backup count limit
+ * - automatic directory creation
+ * - silent error handling (does not affect the main business flow)
  *
- * 使用同步文件写入（appendFileSync），避免 WriteStream 导致进程无法退出。
- * 日志写入量小且不频繁，同步开销可忽略。
+ * Uses synchronous file writes (appendFileSync) to avoid a WriteStream preventing the process from exiting.
+ * Log volume is small and infrequent, so the synchronous overhead is negligible.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
 export interface FileLoggerConfig {
-  /** 日志文件目录，如 /data/log/。为空时禁用文件写入。 */
+  /** Log file directory, e.g. /data/log/. File writing is disabled when empty. */
   path: string;
-  /** 日志文件名，如 core.log */
+  /** Log file name, e.g. core.log */
   filename: string;
-  /** 单文件最大字节数，超出后轮转 */
+  /** Max bytes per file; rotates when exceeded */
   rotateSizeBytes: number;
-  /** 保留的备份文件数量 */
+  /** Number of backup files to keep */
   rotateBackupLimit: number;
 }
 
 /**
- * FileLogger 本地日志文件写入器。
- * 实现日志双写到本地文件，支持 rotate。
+ * FileLogger local log file writer.
+ * Implements dual-writing of logs to a local file, with rotate support.
  */
 export class FileLogger {
   private cfg: FileLoggerConfig;
@@ -38,13 +38,13 @@ export class FileLogger {
   constructor(cfg: FileLoggerConfig) {
     this.cfg = cfg;
 
-    // Path 为空时禁用
+    // disabled when Path is empty
     if (!cfg.path) {
       this.disabled = true;
       return;
     }
 
-    // 设置默认值
+    // set defaults
     if (this.cfg.rotateSizeBytes <= 0) {
       this.cfg.rotateSizeBytes = 100 * 1024 * 1024; // 100MB
     }
@@ -52,7 +52,7 @@ export class FileLogger {
       this.cfg.rotateBackupLimit = 10;
     }
 
-    // 尝试初始化
+    // try to initialize
     try {
       this.initFile();
     } catch (err) {
@@ -62,8 +62,8 @@ export class FileLogger {
   }
 
   /**
-   * write 写入一条日志。
-   * 格式：[时间][级别] 消息 {json数据}\n
+   * write writes one log entry.
+   * Format: [time][level] message {json data}\n
    */
   write(level: string, message: string, data?: Record<string, unknown>): void {
     if (this.disabled) {
@@ -74,32 +74,32 @@ export class FileLogger {
       const line = this.formatLine(level, message, data);
       this.writeLine(line);
     } catch {
-      // 写入失败静默处理，不影响主流程
+      // write failures are handled silently and do not affect the main flow
     }
   }
 
   /**
-   * flush 刷新缓冲区到磁盘（同步写入模式下为 no-op，保留接口兼容）。
+   * flush flushes the buffer to disk (a no-op in synchronous write mode, kept for interface compatibility).
    */
   async flush(): Promise<void> {
-    // 同步写入模式下，数据已经写入磁盘，无需额外操作
+    // in synchronous write mode the data is already on disk; nothing more to do
   }
 
   /**
-   * close 关闭（同步写入模式下为 no-op，保留接口兼容）。
+   * close closes (a no-op in synchronous write mode, kept for interface compatibility).
    */
   close(): void {
-    // 同步写入模式下，无需关闭操作
+    // in synchronous write mode there is nothing to close
   }
 
-  // ─── 私有方法 ───
+  // ─── Private methods ───
 
   private formatLine(level: string, message: string, data?: Record<string, unknown>): string {
     const timestamp = new Date().toISOString();
     let line = `[${timestamp}][${level}] ${message}`;
 
     if (data && Object.keys(data).length > 0) {
-      // 按 key 排序以保证输出稳定
+      // sort by key to keep the output stable
       const sorted: Record<string, unknown> = {};
       for (const key of Object.keys(data).sort()) {
         sorted[key] = data[key];
@@ -114,23 +114,23 @@ export class FileLogger {
   private writeLine(line: string): void {
     const lineBytes = Buffer.byteLength(line, "utf-8");
 
-    // 检查是否需要轮转
+    // check whether rotation is needed
     if (this.currentSize + lineBytes > this.cfg.rotateSizeBytes) {
       this.rotate();
     }
 
-    // 同步追加写入
+    // synchronous append write
     fs.appendFileSync(this.filePath, line, "utf-8");
     this.currentSize += lineBytes;
   }
 
   private initFile(): void {
-    // 自动创建目录
+    // automatically create the directory
     fs.mkdirSync(this.cfg.path, { recursive: true });
 
     this.filePath = path.join(this.cfg.path, this.cfg.filename);
 
-    // 获取当前文件大小
+    // get the current file size
     try {
       const stat = fs.statSync(this.filePath);
       this.currentSize = stat.size;
@@ -143,7 +143,7 @@ export class FileLogger {
     try {
       this.currentSize = 0;
 
-      // 重命名当前文件为备份（带时间戳）
+      // rename the current file to a backup (with timestamp)
       const now = new Date();
       const ts = now.toISOString().replace(/[:.]/g, "").replace("T", "_").replace("Z", "");
       const backupName = `${this.cfg.filename}.${ts}`;
@@ -152,10 +152,10 @@ export class FileLogger {
       try {
         fs.renameSync(this.filePath, backupPath);
       } catch {
-        // rename 失败不影响后续
+        // rename failure does not affect subsequent steps
       }
 
-      // 清理超出 limit 的旧备份
+      // clean up old backups beyond the limit
       this.cleanOldBackups();
     } catch (err) {
       this.disabled = true;
@@ -170,7 +170,7 @@ export class FileLogger {
 
       const backups = entries
         .filter((name) => name.startsWith(prefix) && name !== this.cfg.filename)
-        .sort(); // 时间戳在后缀，字典序即时间序
+        .sort(); // timestamp is in the suffix, so lexicographic order is chronological order
 
       if (backups.length > this.cfg.rotateBackupLimit) {
         const toDelete = backups.slice(0, backups.length - this.cfg.rotateBackupLimit);
@@ -178,12 +178,12 @@ export class FileLogger {
           try {
             fs.unlinkSync(path.join(this.cfg.path, name));
           } catch {
-            // 删除失败静默处理
+            // delete failures are handled silently
           }
         }
       }
     } catch {
-      // 静默处理
+      // handled silently
     }
   }
 }

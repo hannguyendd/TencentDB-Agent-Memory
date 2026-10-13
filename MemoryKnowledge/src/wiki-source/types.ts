@@ -1,19 +1,19 @@
 /**
- * wiki-source —— wiki 外部来源的抽象。
+ * wiki-source — abstraction of wiki external sources.
  *
- * 与 code-source 对称：
- *   - **Provider（wiki 平台）** → `providers/<id>.ts`：平台常量 + 拉取实现
- *   - 认证方式复用 `code-source/auth-methods/` 的 AuthMethod（表单元数据 + 注入约定）
+ * Symmetric with code-source:
+ *   - **Provider (wiki platform)** → `providers/<id>.ts`: platform constants + fetch implementation
+ *   - The auth method reuses the AuthMethod of `code-source/auth-methods/` (form metadata + injection convention)
  *
- * 差异（相对 codegraph）：
- *   - wiki 需要 **列文档树 + 逐页拉内容**，无法靠一个 URL 完成
- *   - 因此 provider 必须实现 resolveRoot / listPages / fetchPage
- *   - 文档 §2.1 定义的契约；KS 侧实现，Panel 只调接口
+ * Differences (relative to codegraph):
+ *   - wiki needs to **list the document tree + fetch content page by page**, which cannot be done with a single URL
+ *   - So a provider must implement resolveRoot / listPages / fetchPage
+ *   - Contract defined in doc §2.1; implemented on the KS side, Panel only calls the API
  */
 
 import type { AuthMethod } from "../code-source/auth-methods/types.js";
 
-/** 前端下拉展示用的来源元数据。 */
+/** Source metadata for frontend dropdown display. */
 export interface WikiSourceMeta {
   id: string;
   auth_method: AuthMethod["kind"];
@@ -22,77 +22,77 @@ export interface WikiSourceMeta {
 }
 
 /**
- * 令牌申请页定位。
+ * Token application page location.
  *
- * **地址一律由部署配置提供**，不在代码里硬编码内网域名。两种形态：
+ * **Addresses always come from deployment config**; no intranet domain is hard-coded in code. Two forms:
  *
- * - `{ tokenUrlEnv }`（**优先**）：该 env 里就是**完整 URL**，原样使用、不拼接。
- *   适用于令牌页与来源不同域、或**与其它来源共用同一个令牌页**的场景
- *   （如 iWiki 与 TAPD 都用太湖 PAT 页 → 都指向同一个 `TAI_PAT_URL`）。
- * - `{ path }`：站内相对路径，拼到 `WIKI_SOURCE_<ID>_SITE_BASE_URL`。
+ * - `{ tokenUrlEnv }` (**preferred**): that env holds the **full URL**, used as is without concatenation.
+ *   Applicable when the token page is on a different domain from the source, or is **shared with other sources**
+ *   (e.g. iWiki and TAPD both use the Taihu PAT page → both point to the same `TAI_PAT_URL`).
+ * - `{ path }`: an in-site relative path, appended to `WIKI_SOURCE_<ID>_SITE_BASE_URL`.
  *
- * 用完整 URL 形态时，多个来源可以指向**同一个 env**，改地址只改一处，不会漏。
+ * With the full URL form, multiple sources can point to the **same env**; changing the address means changing only one place, with nothing missed.
  */
 export type TokenDoc =
   | { tokenUrlEnv: string }
   | { path: string };
 
 /**
- * 遍历策略：决定"从导入根出发，如何发现文档"。
+ * Traversal strategy: decides "starting from the import root, how to discover documents".
  *
- * - `"tree"`：走平台提供的**层级接口**（父 → 子），按目录结构展开。
- *     优点：结构完整、与平台目录一致；
- *     缺点：依赖平台有层级 API，且多为逐层接口（大空间递归次数多、耗时长）。
+ * - `"tree"`: use the platform's **hierarchy API** (parent → child), expanding by directory structure.
+ *     Pros: complete structure, consistent with the platform directories;
+ *     Cons: depends on the platform having a hierarchy API, and mostly level-by-level APIs (large spaces need many recursions and take long).
  *
- * - `"links"`：解析**页面正文里的超链接**来发现文档（类似爬虫）。
- *     优点：不依赖层级 API，任何能拿到正文的平台都可用；
- *     缺点：只能发现被链接到的页面，且需要拉正文（有额外请求开销）。
+ * - `"links"`: parse the **hyperlinks in page bodies** to discover documents (similar to a crawler).
+ *     Pros: does not depend on a hierarchy API; usable on any platform where the body can be obtained;
+ *     Cons: can only discover linked pages, and needs to fetch bodies (extra request overhead).
  */
 export type CrawlMode = "tree" | "links";
 
-/** links 策略的默认遍历深度（只从入口页的直接链接走一层）。 */
+/** Default traversal depth of the links strategy (go only one level from the entry page's direct links). */
 export const DEFAULT_LINKS_MAX_DEPTH = 1;
 
-/** 遍历选项。 */
+/** Traversal options. */
 export interface CrawlOptions {
   mode?: CrawlMode;
-  /** 最大遍历深度，1 = 只取入口页直接链接到的文档。仅 links 策略有意义。 */
+  /** Maximum traversal depth; 1 = only documents directly linked from the entry page. Only meaningful for the links strategy. */
   maxDepth?: number;
 }
 
-/** 导入根：目录 or 单文档。 */
+/** Import root: directory or single document. */
 export interface ResolvedRoot {
   rootType: "dir" | "doc";
   rootId: string;
   displayName: string;
   estimatedCount?: number;
   /**
-   * 当目录根本身也是一个文档 id 时（部分平台的目录页与普通文档共用
-   * 同一 URL 形态，如 `/p/<id>`），记下该 id，
-   * 供 listPages 从它开始逐层展开。
-   * 空间根（rootId 是空间键）不带此字段。
+   * When the directory root itself is also a document id (on some platforms a directory page shares
+   * the same URL form as an ordinary document, such as `/p/<id>`), record that id,
+   * for listPages to expand level by level starting from it.
+   * A space root (rootId is a space key) does not carry this field.
    */
   rootDocId?: string;
 }
 
-/** 远端节点引用（扁平，含目录节点）。 */
+/** Remote node reference (flat, including directory nodes). */
 export interface RemotePageRef {
   externalId: string;
   title: string;
   path: string;
   parentId?: string | null;
-  /** true = 目录，仅展示不可下载。 */
+  /** true = directory, display only, not downloadable. */
   isDir?: boolean;
   version?: string;
   updatedAt?: string;
 }
 
 /**
- * 拉取到的单篇内容。
+ * A single fetched piece of content.
  *
- * `title` 可为 undefined：部分 provider 的内容接口只回正文、不回标题
- * （实测确认存在此类平台）。此时由上层用列表阶段（listPages）的标题补全；
- * provider **不可用 id 兜底**，否则落盘文件名会退化成 `<id>.md`。
+ * `title` may be undefined: some providers' content APIs return only the body, not the title
+ * (such platforms were confirmed to exist by measurement). In that case the upper layer fills it in with the listing-stage (listPages) title;
+ * the provider **must not fall back to the id**, otherwise the on-disk filename degrades to `<id>.md`.
  */
 export interface RemotePageContent extends Omit<RemotePageRef, "title" | "path"> {
   title?: string;
@@ -103,56 +103,56 @@ export interface RemotePageContent extends Omit<RemotePageRef, "title" | "path">
 }
 
 /**
- * 拉取执行上下文。
+ * Fetch execution context.
  *
- * 凭据**由此注入**，provider 不自行读库；
- * 这样 provider 保持纯函数式，便于测试与复用（含定时同步）。
+ * Credentials are **injected here**; the provider does not read the DB itself;
+ * this keeps providers purely functional, easy to test and reuse (including scheduled sync).
  */
 export interface SourceContext {
-  /** 明文凭据（PAT 等）。 */
+  /** Plaintext credential (PAT etc.). */
   secret: string;
-  /** basic 认证时的用户名（可选）。 */
+  /** Username for basic auth (optional). */
   username?: string;
-  /** MCP / API 端点。 */
+  /** MCP / API endpoint. */
   endpoint: string;
-  /** 单次请求超时（ms）。 */
+  /** Per-request timeout (ms). */
   timeoutMs?: number;
 }
 
 /**
- * wiki 来源 provider 契约（文档 §2.1）。
+ * wiki source provider contract (doc §2.1).
  *
- * 一个平台文件 = 一个实现：
- *   - `id` / `authMethod` / `sitePaths`：平台常量
- *   - `resolveRoot` / `listPages` / `fetchPage`：平台拉取能力
- *   - `fetchPages`：可选批量，不实现则降级逐个 fetchPage
+ * One platform file = one implementation:
+ *   - `id` / `authMethod` / `sitePaths`: platform constants
+ *   - `resolveRoot` / `listPages` / `fetchPage`: platform fetch capabilities
+ *   - `fetchPages`: optional batch; if not implemented, degrade to fetching one by one with fetchPage
  */
 export interface WikiSourceProvider {
   readonly id: string;
   readonly authMethod: AuthMethod;
   readonly sitePaths: {
-    /** 令牌申请页定位（站内路径 / 跨站路径，见 TokenDoc）。 */
+    /** Token application page location (in-site path / cross-site path, see TokenDoc). */
     tokenDoc?: TokenDoc;
   };
 
   /**
-   * 服务端点地址的**配置名后缀**，拼成 `WIKI_SOURCE_<UPPER_ID>_<suffix>`。
+   * **Config name suffix** of the service endpoint address, assembled into `WIKI_SOURCE_<UPPER_ID>_<suffix>`.
    *
-   * 默认 `"MCP_URL"`（走 MCP 协议型）；
-   * REST 型平台可声明为 `"API_BASE_URL"` 等，避免被迫叫 MCP。
+   * Default `"MCP_URL"` (MCP protocol type);
+   * REST-style platforms can declare `"API_BASE_URL"` etc., avoiding being forced to be named MCP.
    *
-   * 地址一律来自部署配置，**无内置默认值**（内网基础设施必须显式配置）。
+   * Addresses always come from deployment config, **with no built-in default** (intranet infrastructure must be configured explicitly).
    */
   readonly endpointEnvSuffix?: string;
 
-  /** 解析地址为导入根，自动判定目录 or 文档。 */
+  /** Resolve the address into an import root, automatically deciding directory or document. */
   resolveRoot(ctx: SourceContext, inputUrl: string): Promise<ResolvedRoot>;
 
   /**
-   * 列举节点，扁平返回且保留目录节点。
+   * List nodes, returning a flat list that keeps directory nodes.
    *
-   * `opts` 可选：调用方可指定遍历策略（见 CrawlOptions）。
-   * 不传 → 用 provider 默认策略（`defaultCrawlMode`，未声明时按 `"tree"`）。
+   * `opts` optional: the caller may specify a traversal strategy (see CrawlOptions).
+   * When omitted → use the provider's default strategy (`defaultCrawlMode`, `"tree"` if not declared).
    */
   listPages(
     ctx: SourceContext,
@@ -161,20 +161,20 @@ export interface WikiSourceProvider {
   ): Promise<RemotePageRef[]>;
 
   /**
-   * 该 provider 的默认遍历策略。**可选**，未声明时按 `"tree"`。
+   * The provider's default traversal strategy. **Optional**; `"tree"` if not declared.
    *
-   * 取舍：
-   * - `tree` 与平台目录结构一致、覆盖完整，是"导入整个空间/目录"的自然默认；
-   *   但依赖平台有层级接口，且多为逐层 API（大空间递归耗时较长）。
-   * - `links` 只须读正文、请求更少，适合"从入口页抓一批相关文档"；
-   *   但只能发现被链接到的页面。
+   * Trade-offs:
+   * - `tree` is consistent with the platform directory structure with full coverage, the natural default for "import the whole space/directory";
+   *   but depends on the platform having a hierarchy API, and mostly level-by-level APIs (large spaces recursion takes long).
+   * - `links` only needs to read bodies with fewer requests, suitable for "grab a batch of related documents from an entry page";
+   *   but can only discover linked pages.
    *
-   * 调用方始终可用 `CrawlOptions.mode` 覆盖。
+   * The caller can always override with `CrawlOptions.mode`.
    */
   readonly defaultCrawlMode?: CrawlMode;
 
   fetchPage(ctx: SourceContext, pageId: string): Promise<RemotePageContent>;
 
-  /** 可选批量；不支持则降级逐个 fetchPage。 */
+  /** Optional batch; if not supported, degrade to fetching one by one with fetchPage. */
   fetchPages?(ctx: SourceContext, ids: string[]): Promise<RemotePageContent[]>;
 }

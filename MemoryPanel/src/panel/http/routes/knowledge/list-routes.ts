@@ -2,7 +2,7 @@
  * /api/v1/knowledge/wiki/team-assets
  * /api/v1/knowledge/code-graph/team-assets
  *
- * 团队池：meta list-accessible（visibility=team）→ KS get 补运营状态。
+ * Team pool: meta list-accessible (visibility=team) -> KS get to fill in operational status.
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -52,7 +52,7 @@ function registerTeamAssets(
     );
     const active = assets.filter((a) => isActiveMetaAsset(a.status));
     const joined = await joinKnowledgeAssetsWithKs(deps, ctx, active, assetType);
-    // 补充 KS 侧未注册 meta 的资源（创建中/失败的 code-graph 等）
+    // Supplement resources not registered in meta on the KS side (code-graph being created / failed, etc.)
     const items = await mergeWithKsOnlyItems(deps, ctx, teamId, joined, assetType);
     return respondEnvelope(c, okEnvelope(c, { items, total: items.length }));
   });

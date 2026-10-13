@@ -1,22 +1,22 @@
 /**
- * stages/instance-upstream-responses.ts —— codex + workbuddy 专用的 instance
- * upstream 解析 + 400 早退 + override 应用 一次搞定 stage。
+ * stages/instance-upstream-responses.ts — a stage dedicated to codex + workbuddy that does instance
+ * upstream resolution + 400 early exit + override application in one go.
  *
- * 与 openai-chat/anthropic 走的 stageInstanceUpstreamEarly + stageInstanceUpstreamOverride
- * 分两步的姿势不同, 原因是 codex/wb 的 forwardToUpstream 在 handler 尾段执行,
- * 早期没跟 modelGate 一起做 instance 决策 (只算了 shouldOverride 供 modelGate 用)。
- * 保持在 forwardToUpstream 里做 override 是合适的 (spaceId + path 都已在手),
- * 但把 blocked/unmanaged 400 + override 应用 抽到一份 stage 消灭 codex/wb 两处 ~48 行
- * 的复制。
+ * Unlike openai-chat/anthropic, which use the two-step approach of stageInstanceUpstreamEarly + stageInstanceUpstreamOverride,
+ * the reason is that codex/wb's forwardToUpstream runs at the tail of the handler,
+ * and early on did not make the instance decision together with modelGate (it only computed shouldOverride for modelGate).
+ * Keeping the override inside forwardToUpstream is appropriate (spaceId + path are both in hand),
+ * but the blocked/unmanaged 400 + override application is extracted into a single stage, eliminating ~48 lines
+ * of duplication between codex/wb.
  *
- * openai-chat/anthropic 用的两个 stage 与本 stage 保持"逻辑等价, 时机不同":
- *   - blocked → 400 (upstream_disabled 与 openai-chat 的 stageInstanceUpstreamEarly 一致)
- *   - unmanaged → 400 (agent_not_configured 同上)
- *   - override → 写 body.model + skipCreditReport=true + 返回新 url/headers 覆盖
- *   - official → 保持全局 upstream 不动
+ * The two stages used by openai-chat/anthropic stay "logically equivalent, different timing" with this stage:
+ *   - blocked → 400 (upstream_disabled, consistent with openai-chat's stageInstanceUpstreamEarly)
+ *   - unmanaged → 400 (agent_not_configured, same as above)
+ *   - override → write body.model + skipCreditReport=true + return the new url/headers override
+ *   - official → leave the global upstream untouched
  *
- * 差异保留原地: workbuddy 的 upstreamPath 前缀剥离 (`replace(/^\/workbuddy\/[^/]+/, "")`)
- * 由 caller 传入 pathForOverride 参数; codex 用 c.req.path。
+ * Differences stay in place: workbuddy's upstreamPath prefix stripping (`replace(/^\/workbuddy\/[^/]+/, "")`)
+ * is passed in by the caller via the pathForOverride parameter; codex uses c.req.path.
  */
 
 import type { ProxyConfig } from "../../types.js";
@@ -27,15 +27,15 @@ export interface InstanceUpstreamResponsesInput {
   agent: string;
   spaceId: string;
   config: ProxyConfig;
-  /** override 应用时用来 join 到 row.base_url 的 path 部分 (codex: c.req.path, wb: 剥前缀后) */
+  /** The path part joined onto row.base_url when applying the override (codex: c.req.path, wb: after prefix stripping) */
   pathForOverride: string;
-  /** 是否强制走 official (codex 的 isLegacyProxyPath /proxy/<sid>/ 场景 → true) */
+  /** Whether to force official (codex's isLegacyProxyPath /proxy/<sid>/ scenario → true) */
   forceOfficial?: boolean;
 }
 
 export interface InstanceUpstreamResponsesBlocked {
   kind: "blocked" | "unmanaged";
-  /** 直接返回给客户端的 400 Response body (JSON) */
+  /** The 400 Response body (JSON) returned directly to the client */
   errorBody: {
     type: "error";
     error: { type: string; message: string };
@@ -44,20 +44,20 @@ export interface InstanceUpstreamResponsesBlocked {
 }
 
 export interface InstanceUpstreamResponsesResult {
-  /** override 应用后的新 upstream URL (无 override 时 = undefined) */
+  /** New upstream URL after the override is applied (undefined when there is no override) */
   overrideUrl?: string;
-  /** override 应用后 headers 变更 (custom_unified: authorization 覆盖 + 删 x-api-key; custom_passthrough: 空) */
+  /** Header changes after the override is applied (custom_unified: override authorization + delete x-api-key; custom_passthrough: empty) */
   headerUpdates?: { authorization?: string; deleteXApiKey?: boolean };
-  /** override 应用后 body.model 需替换的 model_id (为空 = 不改) */
+  /** model_id to replace body.model with after the override is applied (empty = leave unchanged) */
   bodyModelOverride?: string;
-  /** custom upstream 用户自付 → credit 跳过 */
+  /** Custom upstream is paid by the user → skip credit */
   skipCreditReport: boolean;
 }
 
 /**
- * 主入口。返回 { kind: "blocked"|"unmanaged", errorBody } 时 caller 应立即 400;
- * 否则 caller 用 result.overrideUrl/headerUpdates/bodyModelOverride/skipCreditReport
- * 直接应用即可 (override 未触发时全为 undefined/false)。
+ * Main entry. When it returns { kind: "blocked"|"unmanaged", errorBody }, the caller should respond 400 immediately;
+ * otherwise the caller applies result.overrideUrl/headerUpdates/bodyModelOverride/skipCreditReport
+ * directly (all undefined/false when no override is triggered).
  */
 export async function stageInstanceUpstreamResponses(
   input: InstanceUpstreamResponsesInput,
@@ -123,7 +123,7 @@ export async function stageInstanceUpstreamResponses(
     };
   }
 
-  // official / 零行 fallback: 保持全局 upstream
+  // official / zero-row fallback: keep the global upstream
   return { skipCreditReport: false };
 }
 

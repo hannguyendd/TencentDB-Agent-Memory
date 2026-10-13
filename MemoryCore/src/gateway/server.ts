@@ -304,15 +304,15 @@ export class TdaiGateway {
   private timerScanner: TimerScanner | null = null;
   private pipelineWorker: PipelineWorker | null = null;
   /**
-   * 跨模块共享的并发信号量 —— memory PipelineWorker 用；skill 侧走
-   * conversation-add wire 出的 SkillConversationExtractWorker (agent 级串行 lock,
-   * 不依赖信号量做并发上限)。
+   * Concurrency semaphore shared across modules -- used by the memory PipelineWorker; the skill side goes through
+   * the SkillConversationExtractWorker wired by conversation-add (agent-level serial lock,
+   * which does not rely on the semaphore for a concurrency cap).
    */
   private workerPermitPool: WorkerPermitPool | null = null;
 
   // ── Instance config & Store pool (multi-instance VDB) ──
   private configProvider: InstanceConfigProvider | null = null;
-  // P9 选择层：非 null 时装配层走 resolver 解析；null = 旧全局开关分支（回滚）。
+  // P9 selection layer: when non-null the assembly layer resolves via the resolver; null = legacy global-switch branch (rollback).
   private backendResolver: BackendResolver | null = null;
   private storePool: StorePool | null = null;
   private quotaManager: import("../core/quota/quota-manager.js").QuotaManager | null = null;
@@ -331,18 +331,18 @@ export class TdaiGateway {
 
   // ── Skill conversation-add (§21): per-instance handler cache ──
   //
-  // 2026-07-30 池化重构后, 每 instance 只缓存 handler + trigger + sink + buffer
-  // (无 worker), 全 instance 共享同一个 SkillWorkerPool 和 skillSharedQueue。
-  // handler 端的 storage 依旧走 per-instance CosStorageBackend cache
-  // (this.cosStorageCache) 以保证 CoS 路径 prefix 正确。
+  // After the 2026-07-30 pooling refactor, each instance only caches handler + trigger + sink + buffer
+  // (no worker), and all instances share one SkillWorkerPool and skillSharedQueue.
+  // The handler-side storage still goes through the per-instance CosStorageBackend cache
+  // (this.cosStorageCache) to ensure the CoS path prefix is correct.
   //
-  // 用 in-flight Promise cache 保证并发请求同 instance 只 wire 一次 handler
-  // (worker 池是全局单例, 并发不再是 wire 的问题)。
+  // An in-flight Promise cache guarantees that concurrent requests for the same instance wire the handler only once
+  // (the worker pool is a global singleton, so concurrency is no longer a wiring problem).
   private readonly conversationAddByInstance = new Map<string, Promise<WiredConversationAddHandler>>();
 
-  /** 2026-07-30: 全进程共享的 skill agent 队列 (List + Set)。启动后 lazy init。 */
+  /** 2026-07-30: process-wide shared skill agent queue (List + Set). Lazily initialized after startup. */
   private skillSharedQueue: ISkillAgentTaskQueue | null = null;
-  /** 2026-07-30: 全进程唯一的 skill 抽取 worker 池。 */
+  /** 2026-07-30: the single process-wide skill extraction worker pool. */
   private skillWorkerPool: SkillWorkerPool | null = null;
 
   constructor(configOverrides?: GatewayConfigOverrides) {
@@ -359,23 +359,23 @@ export class TdaiGateway {
 
     // Create core
     //
-    // ── Skill 资产联动钩子（standalone/OpenClaw 与 service 模式对齐） ──
-    // service 模式下 gateway/server.ts:resolveSkillCore 会为每个 instanceId 单独
-    // 构造 per-instance SkillCore 并挂同名钩子；tdai-core 里的这份 SkillCore 走
-    // standalone / OpenClaw 内嵌 / 未走 resolveSkillCore 的旁路。两者互不干扰
-    // （每个 SkillCore 只调它自己被挂上的钩子），ensureSkillAsset / deleteAssets
-    // 幂等，即使叠加触发也无副作用。详见 SkillAssetHooks doc。
+    // ── Skill asset linkage hooks (standalone/OpenClaw aligned with service mode) ──
+    // In service mode gateway/server.ts:resolveSkillCore builds a separate per-instance SkillCore
+    // for each instanceId and attaches the same-named hooks; this SkillCore inside tdai-core is used on the
+    // standalone / OpenClaw embedded / bypass paths that do not go through resolveSkillCore. The two do not interfere
+    // (each SkillCore only calls the hooks attached to itself), and ensureSkillAsset / deleteAssets
+    // are idempotent, so even stacked triggers have no side effects. See the SkillAssetHooks doc for details.
     //
-    // standalone 模式下 instanceId 固定为 "default"（见 start() 里的
-    // `this.config.instanceId ?? "default"`），闭包这里直接拿 default 即可；
-    // service 模式下这份 SkillCore 事实上不会被 v3/skill/* 走到，闭包的 default
-    // 只是占位（不 fire 就没影响）。
+    // In standalone mode instanceId is fixed to "default" (see `this.config.instanceId ?? "default"`
+    // in start()), so the closure can simply take default here;
+    // in service mode this SkillCore is in fact never reached by v3/skill/*, and the closure's default
+    // is only a placeholder (no effect if it never fires).
     const gatewayRef = this;
     const skillAssetInstanceId = this.config.instanceId
       ?? (this.config.deployMode === "service" ? "__unset__" : "default");
-    // Shared permit pool — memory PipelineWorker 用。skill 侧走
-    // wireConversationAdd 内的 SkillConversationExtractWorker (agent 级串行 lock),
-    // 不再使用信号量做并发上限。
+    // Shared permit pool -- used by the memory PipelineWorker. The skill side goes through
+    // the SkillConversationExtractWorker inside wireConversationAdd (agent-level serial lock),
+    // and no longer uses the semaphore for a concurrency cap.
     this.workerPermitPool = new WorkerPermitPool(this.config.worker.concurrency);
 
     this.core = new TdaiCore({
@@ -383,15 +383,15 @@ export class TdaiGateway {
       config: this.config.memory,
       sessionFilter: new SessionFilter(this.config.memory.capture.excludeAgents),
       skillAssetHooks: {
-        // v1 首创前置 await：抛异常 = create 失败（避免「skill 已落库但 asset
-        // 缺失」的静默不一致）。standalone 模式下唯一的登记入口除了 handler 层的
-        // handleCreate 兜底之外就是这里 —— 无论谁调 SkillCore.create 都能触发。
+        // v1 first-time pre-await: throwing = create failed (avoiding the silent inconsistency of "skill persisted but asset
+        // missing"). In standalone mode, apart from the handleCreate fallback at the handler layer, this is the only registration entry --
+        // whoever calls SkillCore.create can trigger it.
         onSkillCreated: async ({ skill_id, team_id, agent_id, name }) => {
-          if (!team_id || !agent_id) return; // 无租户上下文 → 跳过（OpenClaw local scope 等）
+          if (!team_id || !agent_id) return; // no tenant context -> skip (OpenClaw local scope, etc.)
           const metaSvc = await gatewayRef.ensureMetadataService(skillAssetInstanceId);
           await metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name });
         },
-        // 读时自愈：fire-and-forget，异常吞掉。补历史 / 迁移 / 误删产生的孤儿 skill。
+        // Self-healing on read: fire-and-forget, exceptions swallowed. Fills in orphan skills produced by history / migration / accidental deletion.
         onSkillAccessed: (skill) => {
           if (!skill.team_id || !skill.owner_agent_id) return;
           gatewayRef
@@ -409,7 +409,7 @@ export class TdaiGateway {
               );
             });
         },
-        // 归档级联：fire-and-forget，异常吞掉。二次 delete 会重触发钩子，最终收敛。
+        // Archive cascade: fire-and-forget, exceptions swallowed. A second delete re-triggers the hook and eventually converges.
         onSkillArchived: ({ skill_id, team_id }) => {
           gatewayRef
             .ensureMetadataService(skillAssetInstanceId)
@@ -499,13 +499,13 @@ export class TdaiGateway {
       await configSvc.initDefaults(registry, this.config.metadata);
       rawSvc.setConfigParamService(configSvc);
 
-      // 归档 Agent 时连带清掉它的 chat_memory 内容（L0–L3 + 向量 + 文件）。
-      // metadata 层拿不到 IMemoryStore / StorageAdapter，所以这里把清理能力
-      // 注入进去；与 /v3/chat-memory/clear 共用同一份清理实现 + 重试策略，
-      // 避免出现"资产已删、内容还在"的孤儿数据。
+      // When archiving an Agent, also clear its chat_memory content (L0-L3 + vectors + files).
+      // The metadata layer cannot get IMemoryStore / StorageAdapter, so the cleanup capability
+      // is injected here; it shares the same cleanup implementation + retry policy as /v3/chat-memory/clear,
+      // avoiding orphan data of the "asset deleted, content still there" kind.
       //
-      // 必须按 instanceId 解析 store/storage：service 模式下每个实例有独立的
-      // TCVDB + COS，用全局单例会清到错误的库。
+      // store/storage must be resolved by instanceId: in service mode each instance has its own
+      // TCVDB + COS, and using a global singleton would clear the wrong database.
       rawSvc.setChatMemoryContentCleaner(async ({ teamId, agentId }) => {
         const { store: memoryStore, storage } = await this.resolveMemoryContentTargets(instanceId);
         await clearChatMemoryContentResilient({
@@ -527,9 +527,9 @@ export class TdaiGateway {
     initDataDirectories(this.config.data.baseDir);
 
     applyMetadataEnvFromGatewayConfig(this.config.metadata);
-    // yaml `taskSource.env` → process.env（env 已设置则不覆盖）。
-    // 必须在任何 task-source 路由 / provider 调用之前：registry 在构造上下文时
-    // 就直接读 env，晚于此处回填会拿到空串并被判为「未配置」而 fail-fast。
+    // yaml `taskSource.env` -> process.env (not overridden if the env is already set).
+    // Must be before any task-source route / provider call: the registry reads env directly
+    // when constructing its context; backfilling later than this would get an empty string and be judged "not configured", failing fast.
     applyTaskSourceEnvFromGatewayConfig(this.config.taskSource);
 
     this.memorySystemUserConfig = resolveMemorySystemUserConfig(this.config.metadata);
@@ -541,9 +541,9 @@ export class TdaiGateway {
       );
     }
 
-    // llm.provider=proxy 时 fail-fast：确认 memory 系统用户完整、userKey 格式合法。
-    // instanceId 每请求变化，运行期由 resolveEffectiveLlmConfig 再校验一次；这里
-    // 只兜底 systemUser / baseUrl 这类启动即可确定的错误，避免走到第一次抽取才炸。
+    // Fail-fast when llm.provider=proxy: confirm the memory system user is complete and the userKey format is valid.
+    // instanceId varies per request, and resolveEffectiveLlmConfig validates once more at runtime; here
+    // we only guard errors determinable at startup, such as systemUser / baseUrl, to avoid blowing up only at the first extraction.
     try {
       validateLlmProviderConfig(this.config.llm, this.config.metadata);
       if (this.config.llm.provider === "proxy") {
@@ -554,7 +554,7 @@ export class TdaiGateway {
       }
     } catch (err) {
       if (err instanceof LlmResolveError) {
-        throw new Error(`[LLM] provider 配置校验失败: ${err.message}`);
+        throw new Error(`[LLM] provider config validation failed: ${err.message}`);
       }
       throw err;
     }
@@ -573,11 +573,11 @@ export class TdaiGateway {
     const metadataPool = await this.ensureMetadataStorePool();
     initApiTraceConfig(metadataPool.backend, { enabled: readApiTraceEnabled() });
 
-    // ── 初始化可观测性门面层全局后端 ──
-    // 必须在 initOTelSDK 之前调用，因为 LangfuseFilteringProcessor 构造时
-    // 会通过 getObservabilityBackend().llmTrace.createSpanProcessor() 获取处理器。
-    // 如果不先初始化，门面层所有 API（trace.report / metricProducer.send / obsLogger）
-    // 都会走 NoopBackend，导致 Metric、Langfuse、业务 Trace 全部丢失。
+    // ── Initialize the observability facade layer's global backend ──
+    // Must be called before initOTelSDK, because when LangfuseFilteringProcessor is constructed
+    // it obtains the processor via getObservabilityBackend().llmTrace.createSpanProcessor().
+    // If not initialized first, all facade-layer APIs (trace.report / metricProducer.send / obsLogger)
+    // would go to NoopBackend, losing Metric, Langfuse, and business Trace entirely.
     const obsCfg = this.config.observability;
     try {
       const clickhouseConfig = Object.fromEntries([
@@ -617,17 +617,17 @@ export class TdaiGateway {
       this.logger.warn(`Observability backend init failed (non-fatal): ${msg}`);
     }
 
-    // ── 初始化 OTel SDK（Trace + Log + ClickHouse 双写 + Langfuse）──
-    // 必须在 HTTP server 创建之前初始化，否则 wrapWithTrace 中的 Tracer 是 NoopTracer
-    // 注意：即使 otel.enabled=false，只要 langfuse.enabled=true 也需要初始化 SDK
-    // （Langfuse 通过 OTel SDK 的 spanProcessor 上报 LLM span）
+    // ── Initialize the OTel SDK (Trace + Log + ClickHouse dual write + Langfuse) ──
+    // Must be initialized before the HTTP server is created, otherwise the Tracer in wrapWithTrace is a NoopTracer
+    // Note: even if otel.enabled=false, the SDK must be initialized as long as langfuse.enabled=true
+    // (Langfuse reports LLM spans via the OTel SDK's spanProcessor)
     const needOTelSDK = obsCfg.otel.enabled || obsCfg.langfuse.enabled;
     if (needOTelSDK) {
       try {
         const otelOk = await initOTelSDK({
           serviceName: obsCfg.otel.serviceName,
           serviceVersion: obsCfg.otel.serviceVersion,
-          // 仅当 otel 启用时才传 endpoint，避免 langfuse-only 模式下创建无效的 gRPC exporter
+          // Pass the endpoint only when otel is enabled, to avoid creating an invalid gRPC exporter in langfuse-only mode
           endpoint: obsCfg.otel.enabled ? obsCfg.otel.endpoint : undefined,
           protocol: obsCfg.otel.protocol,
           tenantId: obsCfg.otel.tenantId,
@@ -650,7 +650,7 @@ export class TdaiGateway {
         });
         this.logger.info(`OTel SDK initialized: ${otelOk ? "enabled" : "skipped (deps not available)"}`);
       } catch (err) {
-        // 可观测性初始化失败不影响主业务
+        // Observability initialization failure does not affect the main business
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`OTel SDK init failed (non-fatal): ${msg}`);
       }
@@ -674,8 +674,8 @@ export class TdaiGateway {
     // In service mode, CosStorageBackend was already injected above.
     if (!this.core.getStorage()) {
       if (this.config.data.fileStore === "rowfs") {
-        // standalone + rowfs：核心存储即组合后端（行视图 + 本地回退），
-        // 与 v2 数据面共用同一装配点，管道/插件路径同样命中行。
+        // standalone + rowfs: the core store is the composite backend (row view + local fallback),
+        // sharing the same assembly point with the v2 data plane, so pipeline/plugin paths also hit rows.
         const rowfsAdapter = await this.resolveStorageForInstance(this.config.instanceId ?? "default");
         this.core.setStorage(rowfsAdapter);
         this.logger.info(`${TAG} StorageAdapter initialized (rowfs, db=${this.storePool?.mode})`);
@@ -700,17 +700,17 @@ export class TdaiGateway {
 
     // Create HTTP server (with Trace middleware wrapping)
     //
-    // [skill-perf 2026-07-21] Skill 接口可观测性埋点（issue：/v3/skill/extract
-    // ttfb 忽快忽慢，缺少 phase-by-phase 耗时 log）：
-    //   - socket-level 打 tcp.connect（debug）
-    //   - request 头读完后立即打 skill.perf.req.enter，作为服务端 T0
-    //   - res.on('finish') 打 skill.perf.req.finish（服务端 flush 时刻）
-    // 只针对 /v3/skill/ 前缀，避免污染 meta / memory 主链路日志。
+    // [skill-perf 2026-07-21] Skill API observability instrumentation (issue: /v3/skill/extract
+    // ttfb is erratic, and there is no phase-by-phase timing log):
+    //   - at socket level log tcp.connect (debug)
+    //   - right after the request headers are read, log skill.perf.req.enter as the server-side T0
+    //   - res.on('finish') logs skill.perf.req.finish (the server flush moment)
+    // Only for the /v3/skill/ prefix, to avoid polluting the meta / memory main-path logs.
     this.server = http.createServer((req, res) => {
       const perfT0 = Date.now();
       const isSkill = typeof req.url === "string" && req.url.startsWith("/v3/skill/");
       if (isSkill) {
-        // 挂到 req 上以便 handler 内部读取 T0 计算 phase 耗时
+        // Attach to req so the handler can read T0 internally to compute phase durations
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (req as any).__skillPerfT0 = perfT0;
         const src = `${req.socket.remoteAddress ?? "?"}:${req.socket.remotePort ?? "?"}`;
@@ -736,7 +736,7 @@ export class TdaiGateway {
         });
       }
       wrapWithTrace(req, res, () => this.handleRequest(req, res)).catch((err) => {
-        // wrapWithTrace 内部已经记录了错误，这里只做 fallback
+        // wrapWithTrace has already recorded the error internally; only a fallback here
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Internal Server Error" }));
@@ -744,8 +744,8 @@ export class TdaiGateway {
       });
     });
 
-    // TCP-level：新 socket 打一条 debug，用来看 keepalive 是否命中（同一 src ip:port
-    // 在很短时间内多次触发这条 log = 反代/网关没复用连接）
+    // TCP-level: log a debug for a new socket, to see whether keepalive is hit (the same src ip:port
+    // triggering this log multiple times in a short time = the reverse proxy/gateway is not reusing connections)
     this.server.on("connection", (socket) => {
       this.logger.debug?.(
         `[skill-perf] tcp.connect t=${Date.now()} src=${socket.remoteAddress ?? "?"}:${socket.remotePort ?? "?"}`,
@@ -828,11 +828,11 @@ export class TdaiGateway {
   private async doStop(): Promise<void> {
     this.logger.info("Shutting down gateway...");
 
-    // 优雅关闭 OTel SDK（flush 剩余 Span/Log）
+    // Gracefully shut down the OTel SDK (flush remaining Spans/Logs)
     try {
       await shutdownOTelSDK();
     } catch {
-      // Best-effort shutdown，不影响主流程
+      // Best-effort shutdown, does not affect the main flow
     }
 
     // Stop integrated services first
@@ -840,8 +840,8 @@ export class TdaiGateway {
       await this.pipelineWorker.stop();
       this.logger.info("Pipeline Worker stopped");
     }
-    // 2026-07-30 池化重构后, 全进程一个 SkillWorkerPool, 直接 stop 池就够。
-    // conversationAddByInstance 里只是 handler bundle, 不持有生命周期资源。
+    // After the 2026-07-30 pooling refactor there is one SkillWorkerPool per process, so stopping the pool directly is enough.
+    // conversationAddByInstance is only a handler bundle and holds no lifecycle resources.
     if (this.skillWorkerPool) {
       await this.skillWorkerPool.stop().catch((e) =>
         this.logger.warn(`[skill-worker-pool] stop failed: ${e}`),
@@ -859,8 +859,8 @@ export class TdaiGateway {
       this.logger.info("State Backend closed");
     }
     if (this.storePool) {
-      // 进程关停场景下没有需要保护的 in-flight 请求, 跳过 grace period (默认 30s),
-      // 否则 closeAll 会硬等满 grace 才返回, 拖慢退出。
+      // In process shutdown there are no in-flight requests to protect, so skip the grace period (default 30s),
+      // otherwise closeAll would block for the full grace before returning, slowing the exit.
       this.storePool.setGraceCloseDelay(0);
       await this.storePool.closeAll();
       this.logger.info("Store Pool closed");
@@ -916,18 +916,18 @@ export class TdaiGateway {
         return await this.handleInstanceDestroy(req, res);
       }
 
-      // ── /v3/instance/destroy — v3 兼容版本。
-      //    请求/响应契约与 v2 一致；鉴权同 v2（Bearer apiKey，运维接口，
-      //    不走租户 x-tdai-user-key）。
-      //    实现上先复用 v2 的通用清理（state / store / cos / quota），再预留
-      //    v3 独有的 metadata 清理（team/user/asset/acl 等），后续由负责 v3
-      //    metadata 的同学补上。此处不做完全复用，避免把 v3 侧清理静默漏掉。
+      // -- /v3/instance/destroy -- the v3-compatible version.
+      //    Request/response contract is the same as v2; authentication is the same as v2 (Bearer apiKey, an ops endpoint,
+      //    not going through the tenant x-tdai-user-key).
+      //    In implementation it first reuses v2's generic cleanup (state / store / cos / quota), then reserves the
+      //    v3-only metadata cleanup (team/user/asset/acl, etc.), to be filled in later by the owner of v3
+      //    metadata. Full reuse is not done here, to avoid silently missing the v3-side cleanup.
       if (method === "POST" && pathname === "/v3/instance/destroy") {
         if (!this.checkAuth(req, res)) return;
         return await this.handleInstanceDestroyV3(req, res);
       }
 
-      // ── v3 internal metadata（/v3/internal/meta/*，仅 Bearer）──
+      // -- v3 internal metadata (/v3/internal/meta/*, Bearer only) --
       if (pathname.startsWith(`${V3_INTERNAL_PREFIX}/`)) {
         if (!this.checkAuthForV2(req, res)) return;
         const handledInternal = await handleInternalMetaRoute(
@@ -935,9 +935,9 @@ export class TdaiGateway {
           {
             getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
             logger: this.logger,
-            // v2 InstanceUpstream:D 接口(§6.D)拉数据时触发 store 层 seed default 组,
-            // 数据源来自 config.upstream.supportedAgents。空数组 → 不 seed,
-            // Proxy 拉到 items=[] 走"零行 fallback",行为等同 v1(全走全局 upstream)。
+            // When the v2 InstanceUpstream:D endpoint (§6.D) pulls data, it triggers the store layer to seed the default group,
+            // with the data source from config.upstream.supportedAgents. Empty array -> no seed,
+            // Proxy pulls items=[] and takes the "zero-row fallback", with behavior equivalent to v1 (everything via the global upstream).
             getSupportedAgents: () => this.config.upstream.supportedAgents,
           },
         );
@@ -951,7 +951,7 @@ export class TdaiGateway {
         const handledV3 = await handleV3MetaRoute(req, res, pathname, method, parseJsonBody, sendJson, {
           getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
           logger: this.logger,
-          // v2 InstanceUpstream:supported-agents(§6.A)接口 + groups/create 时 agents 枚举校验 + Panel B1 seed 数据源。
+          // v2 InstanceUpstream:supported-agents (§6.A) endpoint + agents enum validation on groups/create + Panel B1 seed data source.
           getSupportedAgents: () => this.config.upstream.supportedAgents,
         });
         if (handledV3) return;
@@ -959,7 +959,7 @@ export class TdaiGateway {
 
       // ── v3 task-source routes (/v3/task-source/*) ──
       // Layer 1: same Bearer apiKey gate as v2. Layer 3 (x-tdai-user-key) inside the router.
-      // 来源令牌由 Panel 放进**请求体 credential** 下发（不落库、不进 header）。
+      // The source token is delivered by Panel in the **request body credential** (not persisted, not in headers).
       if (pathname.startsWith("/v3/task-source/")) {
         if (!this.checkAuthForV2(req, res)) return;
         const handledTaskSource = await handleV3TaskSourceRoute(
@@ -995,9 +995,9 @@ export class TdaiGateway {
       }
 
       // ── v2 / v3 API routes ──
-      // /v2 = 现有数据面 + 管理面入口（team/agent 可选，user fallback）。
-      // /v3 = L0–L3 数据面"严格 isolation 版本"（team/agent/user/session 必填），共享同一组 handler 实现，
-      //       仅在 dispatch 层多一层校验。详见 v2-router.ts 中 V3_PREFIX/V3_ALLOWED_SUBPATHS 注释。
+      // /v2 = existing data plane + management plane entry (team/agent optional, user fallback).
+      // /v3 = the L0-L3 data plane "strict isolation version" (team/agent/user/session required), sharing the same set of handler implementations,
+      //       with just one extra validation layer at the dispatch layer. See the V3_PREFIX/V3_ALLOWED_SUBPATHS comments in v2-router.ts.
       //
       // Apply the develop-introduced apiKey gate first so v2/v3 inherits the
       // optional shared-secret protection. v2's own `parseV2Auth` (Bearer +
@@ -1023,9 +1023,9 @@ export class TdaiGateway {
         // `V3_STRICT_ISOLATION` controls only /v3 L0–L3 memory data-plane
         // strictness. Default OFF for local/integration; production should set it.
         v3StrictIsolation: resolveV3StrictIsolation(),
-        // handleConversationAdd 用它自动登记 chat_memory 资产（team+agent 粒度）
-        // 并绑定到 agent。首次写入触发 create + bind；后续同 (team, agent) 走
-        // MetadataService 的进程内 LRU 短路。
+        // handleConversationAdd uses it to automatically register the chat_memory asset (team+agent granularity)
+        // and bind it to the agent. The first write triggers create + bind; later ones for the same (team, agent) take
+        // MetadataService's in-process LRU short circuit.
         getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
       };
 
@@ -1041,15 +1041,15 @@ export class TdaiGateway {
         getResolvedSkillConfig: () => this.core.getResolvedSkillConfig(),
         quotaManager: this.quotaManager ?? undefined,
         logger: this.logger,
-        // Standalone 模式下 SkillCore 由 TdaiCore 全局构造（不带 onSkillCreated 钩子），
-        // handleCreate 用这个 dep 在 skill 创建成功后调 metaSvc.ensureSkillAsset()
-        // 完成 asset 登记 + agent fixed-asset 绑定。service 模式下 buildSkillCore 里
-        // 的 onSkillCreated 钩子做同样的事，两条路径都覆盖，ensureSkillAsset 本身幂等。
+        // In Standalone mode SkillCore is constructed globally by TdaiCore (without the onSkillCreated hook);
+        // handleCreate uses this dep to call metaSvc.ensureSkillAsset() after a skill is created successfully,
+        // completing asset registration + agent fixed-asset binding. In service mode the onSkillCreated hook in buildSkillCore
+        // does the same thing; both paths are covered, and ensureSkillAsset itself is idempotent.
         getMetadataService: (instanceId) => this.ensureMetadataService(instanceId),
-        // handleListing mode='activity' 用: 读 proxy 侧 skill_usage_logs 计算 MRR。
-        // 复用 /v3/analytics/* 的 lazy singleton (ensureAnalyticsChClient)。
-        // CH 未配置 → 返回 null → activity 分支自动降级到原 auto 逻辑。
-        // 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
+        // Used by handleListing mode='activity': reads the proxy-side skill_usage_logs to compute MRR.
+        // Reuses the lazy singleton of /v3/analytics/* (ensureAnalyticsChClient).
+        // CH not configured -> returns null -> the activity branch automatically degrades to the original auto logic.
+        // Design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
         getAnalyticsChClient: () => this.ensureAnalyticsChClient(),
       };
 
@@ -1087,24 +1087,24 @@ export class TdaiGateway {
         }
 
         // ── Skill: per-instance resolver (TcvdbSkillStore + COS storage) ──
-        // 复用 Memory 侧的 COS adapter，创建 per-instance SkillCore。
-        // Skill queue + worker 如果已在 tdai-core 中启动则复用；否则
-        // service 模式下可在此处单独启动。
+        // Reuse the Memory-side COS adapter to create a per-instance SkillCore.
+        // Skill queue + worker are reused if already started in tdai-core; otherwise
+        // in service mode they can be started separately here.
         if (storePool.mode === "tcvdb" || storePool.mode === "mongodb") {
-          // per-instance resolvers 抽到了私有方法（同一份实现被 handler 和 skill worker 共用）。
+          // The per-instance resolvers were extracted into private methods (the same implementation shared by the handler and the skill worker).
           // tcvdb: TcvdbSkillStore + COS storage；mongodb: MongoSkillStore + (standalone) LocalStorage / (service) COS。
           skillDeps.resolveSkillCore = (instanceId: string) => this.resolveSkillCoreForInstance(instanceId);
           skillDeps.buildSkillExtractor = (core, instanceId) => this.buildSkillExtractorForInstance(core, instanceId);
         }
         // /v3/skill/conversation/add + /v3/skill/extract{,result} wiring:
-        //   - tcvdb (service) / mongodb: 走 ensureConversationAddForInstance
+        //   - tcvdb (service) / mongodb: go through ensureConversationAddForInstance
         //     (per-instance store from StorePool + resolveStorageForInstance)，
-        //     抽取产出的 skill 落到 per-instance 后端（mongodb → MongoSkillStore）。
-        //   - sqlite (standalone): 走 ensureConversationAddForStandalone (单例 SqliteSkillStore + LocalStorage/内存队列)
+        //     skills produced by extraction land in the per-instance backend (mongodb -> MongoSkillStore).
+        //   - sqlite (standalone): go through ensureConversationAddForStandalone (singleton SqliteSkillStore + LocalStorage / in-memory queue)
         //
-        // 返回完整 WiredConversationAdd:
-        //   - handleConversationAdd 用 .handler
-        //   - handleExtract 用 .trigger (direct-trigger)
+        // Returns the complete WiredConversationAdd:
+        //   - handleConversationAdd uses .handler
+        //   - handleExtract uses .trigger (direct-trigger)
         skillDeps.resolveConversationAdd = async (instanceId: string) => {
           const wired = storePool.mode === "tcvdb" || storePool.mode === "mongodb"
             ? await this.ensureConversationAddForInstance(instanceId)
@@ -1348,11 +1348,11 @@ export class TdaiGateway {
   }
 
   /**
-   * POST /v3/instance/destroy — v3 兼容路由。
+   * POST /v3/instance/destroy -- v3-compatible route.
    *
-   * 请求/响应契约与 v2 完全一致，调用方零改动即可切换。
+   * The request/response contract is exactly the same as v2, so callers can switch with zero changes.
    *
-   * 在通用清理之上 drop 该实例元数据库（v3.0 分库：`MetadataStorePool.purgeInstance`）。
+   * On top of the generic cleanup, drop the instance's metadata database (v3.0 per-instance database: `MetadataStorePool.purgeInstance`).
    */
   private async handleInstanceDestroyV3(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const body = await parseJsonBody<{ instance_id?: string }>(req);
@@ -1376,8 +1376,8 @@ export class TdaiGateway {
   }
 
   /**
-   * 通用清理步骤（state / store / cos / quota），v2 与 v3 共用。
-   * @param source 仅用于日志前缀，便于分辨调用方。
+   * Generic cleanup steps (state / store / cos / quota), shared by v2 and v3.
+   * @param source only used as a log prefix, to tell callers apart.
    */
   private async purgeInstanceCommon(
     instanceId: string,
@@ -1439,11 +1439,11 @@ export class TdaiGateway {
 
     // 4. Purge skill queue residue (2026-07-30)
     //
-    // 全进程共享一条 skill agent LIST + SET, key 里不含 instanceId。要清掉
-    // 属于本 instance 的 tuple, 需要 SSCAN + LREM 按 `{instanceId}|` 前缀
-    // 匹配 5 段 tuple; 同时清 extract-lock:{instanceId}|* / tasks-mutex:*
-    // 相关的锁 key (SCAN + DEL)。Standalone / 无 redis 场景走内存队列, 用
-    // Local queue 的 _snapshot 迭代删除。
+    // The whole process shares one skill agent LIST + SET, and the key does not contain instanceId. To clear
+    // the tuples belonging to this instance, SSCAN + LREM must match 5-segment tuples by the `{instanceId}|` prefix;
+    // also clear the locks related to extract-lock:{instanceId}|* / tasks-mutex:*
+    // (SCAN + DEL). Standalone / no-redis scenarios use the in-memory queue, deleting by iterating
+    // the Local queue's _snapshot.
     try {
       const skillPurged = await this.purgeSkillQueueForInstance(instanceId);
       cleaned.skill_queue = skillPurged;
@@ -1468,8 +1468,8 @@ export class TdaiGateway {
   }
 
   /**
-   * v3 独有：drop 该实例元数据库（MongoDB dropDatabase / SQLite 删目录）。
-   * 失败时写入返回结构，不抛出，与 purgeInstanceCommon 一致。
+   * v3-only: drop the instance's metadata database (MongoDB dropDatabase / SQLite delete directory).
+   * On failure it writes into the returned structure and does not throw, consistent with purgeInstanceCommon.
    */
   private async purgeV3Metadata(instanceId: string): Promise<Record<string, unknown>> {
     try {
@@ -1939,10 +1939,10 @@ export class TdaiGateway {
     });
     this.logger.info(`Instance Config Provider + Store Pool initialized (mode=${this.config.deployMode})`);
 
-    // P9 选择层接入：装配层（resolveStoreBackendConfigs / resolveStorageForInstance）
-    // 改走 resolver。storeMode 传显式覆盖值（未设置时 resolver 按形态兜底，规则与
-    // effectiveStoreMode 相同）；fileStore 已是 T3.0 解析后的确定值。
-    // TDAI_BACKEND_RESOLVER=off → 不构建 resolver，装配层回退旧全局开关分支。
+    // P9 selection layer integration: the assembly layer (resolveStoreBackendConfigs / resolveStorageForInstance)
+    // now goes through the resolver. storeMode passes an explicit override (when unset the resolver falls back by form, with the same rules as
+    // effectiveStoreMode); fileStore is already the definite value after T3.0 resolution.
+    // TDAI_BACKEND_RESOLVER=off -> the resolver is not built, and the assembly layer falls back to the legacy global-switch branch.
     if (this.config.features.backendResolver) {
       this.backendResolver = new LocalBackendResolver({
         deployMode: this.config.deployMode,
@@ -1993,7 +1993,7 @@ export class TdaiGateway {
     // 3. Start Pipeline Worker
     const { PipelineWorker } = await import("../services/pipeline-worker.js");
     const rawExecutor = this.buildTaskExecutor();
-    // 用 TracedTaskExecutor 装饰器包装，为 L1/L2/L3 任务添加 Trace Span
+    // Wrapped with the TracedTaskExecutor decorator, adding a Trace Span to L1/L2/L3 tasks
     const executor = new TracedTaskExecutor(rawExecutor);
     this.pipelineWorker = new PipelineWorker(this.stateBackend, executor, {
       pollIntervalMs: this.config.worker.pollMs,
@@ -2004,26 +2004,26 @@ export class TdaiGateway {
       parkedClaimHeartbeatMs: this.config.worker.parkedClaimHeartbeatMs,
       lockRetryConcurrency: this.config.worker.lockRetryConcurrency,
       maxParkedTasks: this.config.worker.maxParkedTasks,
-      // L1 完成后推进 L2 timer（快路径：L1完成 → delay秒后触发L2）
+      // After L1 completes, advance the L2 timer (fast path: L1 completes -> trigger L2 after delay seconds)
       onL1Complete: statefulManager.advanceL2TimerAfterL1.bind(statefulManager),
-      // L2 完成后设置 maxInterval 兜底 timer
+      // After L2 completes, set the maxInterval fallback timer
       onL2Complete: statefulManager.armL2MaxInterval.bind(statefulManager),
-      // 与 skill worker 共享的节点级并发上限
+      // Node-level concurrency cap shared with the skill worker
       permitPool: this.workerPermitPool ?? undefined,
     }, this.logger);
     await this.pipelineWorker.start();
     this.logger.info("Pipeline Worker started");
 
-    // Skill worker 由 ensureConversationAddForInstance/Standalone 内的
-    // wireConversationAdd 起, 无需在此额外启动 (对齐 2026-07-17 skill_extract
-    // 收敛方案: /v3/skill/extract 也走同一 worker + agent 队列)。
+    // The Skill worker is started by wireConversationAdd inside ensureConversationAddForInstance/Standalone,
+    // so there is no need to start it additionally here (aligned with the 2026-07-17 skill_extract
+    // convergence plan: /v3/skill/extract also goes through the same worker + agent queue).
   }
 
   /**
-   * 按 instance_id 构造 per-instance SkillCore（TCVDB VDB + COS + versioning + hooks）。
+   * Build a per-instance SkillCore by instance_id (TCVDB VDB + COS + versioning + hooks).
    *
-   * 与 handleRequest 里内联版本共享同一实现体，避免 skill worker（进程级单例）
-   * 和 handler（每请求）走两份不同的构造逻辑。
+   * Shares the same implementation body as the inline version in handleRequest, avoiding the skill worker (process-level singleton)
+   * and the handler (per request) taking two different construction logics.
    */
   /**
    * Resolve the per-instance backend configs to feed StorePool.getStore/getSkillStore.
@@ -2036,13 +2036,13 @@ export class TdaiGateway {
   private async resolveStoreBackendConfigs(
     instanceId: string,
   ): Promise<{ vdbConfig: VdbConfig | null; mongoConfig: MongoConfig | null }> {
-    // P9 选择层路径：解析结果带显式 kind，且已经过 validateResolution
-    // （sqlite × rowfs 等非法组合在解析期 fail-fast，而不是首次读写时）。
+    // P9 selection-layer path: the resolution result carries an explicit kind and has already passed validateResolution
+    // (illegal combinations like sqlite x rowfs fail fast at resolution time, rather than at the first read/write).
     if (this.backendResolver) {
       const resolution = await this.backendResolver.resolve(instanceId);
       return dbChoiceToStoreConfigs(resolution.db);
     }
-    // 旧分支（TDAI_BACKEND_RESOLVER=off 回滚路径）：进程级全局 mode 门控。
+    // Legacy branch (TDAI_BACKEND_RESOLVER=off rollback path): process-level global mode gating.
     const provider = this.configProvider;
     const mode = this.storePool?.mode;
     if (!provider || !mode) {
@@ -2097,8 +2097,8 @@ export class TdaiGateway {
     });
 
     const { SkillCore } = await import("../core/skill/skill-core.js");
-    // 旧版本清理双维度:时间 (versionTtlSeconds) + 数量 (maxNonHeadVersions)。
-    // 拿不到配置就是 0 (关闭), 行为与新增前完全一致, 向后兼容。
+    // Old-version cleanup has two dimensions: time (versionTtlSeconds) + count (maxNonHeadVersions).
+    // If no config is available it is 0 (off), with behavior exactly the same as before the addition, backward compatible.
     const skillCfg = this.core.getResolvedSkillConfig();
     return new SkillCore({
       store: skillStore,
@@ -2137,8 +2137,8 @@ export class TdaiGateway {
   }
 
   /**
-   * 按 skillCore + instance_id 构造 per-instance SkillExtractor（含 LLM runner）。
-   * instance_id 参与 llm resolver 拼 upstream URL（provider=proxy 场景关键）。
+   * Build a per-instance SkillExtractor (including the LLM runner) by skillCore + instance_id.
+   * instance_id participates in the llm resolver's assembly of the upstream URL (key in the provider=proxy scenario).
    */
   private async buildSkillExtractorForInstance(
     skillCore: SkillCoreType,
@@ -2181,13 +2181,13 @@ export class TdaiGateway {
       core: skillCore,
       runner: llmRunner,
       systemPrompt: SKILL_REVIEW_PROMPT,
-      // 冷启动/批量导入 (asset-import) 会传 strict_mode:true,经 SkillTaskEntry.mode
-      // 一路带到 extract({mode:'strict'}); 老流量 mode 未传时仍用上面的 SKILL_REVIEW_PROMPT。
+      // Cold start / bulk import (asset-import) passes strict_mode:true, which is carried via SkillTaskEntry.mode
+      // all the way to extract({mode:'strict'}); old traffic without mode still uses the SKILL_REVIEW_PROMPT above.
       strictSystemPrompt: SKILL_REVIEW_PROMPT_STRICT,
       maxIterations: cfg?.extraction.maxIterations ?? 5,
-      // 透传 archiveBytes 派生的 head/tail chars + 独立的 maxTokens，
-      // 让 skill.extraction.archiveBytes 与 skill.extraction.maxTokens 生效
-      // (yaml 里改完不用改代码)。cfg 缺失时 SkillExtractor 内部有默认。
+      // Pass through the head/tail chars derived from archiveBytes + an independent maxTokens,
+      // so that skill.extraction.archiveBytes and skill.extraction.maxTokens take effect
+      // (changing them in yaml requires no code change). SkillExtractor has defaults internally when cfg is missing.
       headChars: cfg?.extraction.headChars,
       tailChars: cfg?.extraction.tailChars,
       maxTokens: cfg?.extraction.maxTokens,
@@ -2197,22 +2197,22 @@ export class TdaiGateway {
   }
 
   /**
-   * 懒装 per-instance conversation-add：handler + worker + sink 一整套。
+   * Lazily wire per-instance conversation-add: handler + worker + sink as a whole set.
    *
-   * 依赖：
-   *   - storage: 复用 memory 的 CosStorageBackend（resolveSkillCoreForInstance 里已 cache）
-   *   - redis: 复用 stateBackend 的 ioredis 客户端（skill:tasks-mutex / skill:extract-lock
-   *     用同一物理连接）
-   *   - skillCore/extractor: 走跟 handleExtract 相同的 per-instance factory
-   *   - metadataService: 兜底登记 skill asset
+   * Dependencies:
+   *   - storage: reuse memory's CosStorageBackend (already cached in resolveSkillCoreForInstance)
+   *   - redis: reuse the stateBackend's ioredis client (skill:tasks-mutex / skill:extract-lock
+   *     use the same physical connection)
+   *   - skillCore/extractor: go through the same per-instance factory as handleExtract
+   *   - metadataService: fallback registration of the skill asset
    *
-   * keyPrefix 拼 memory 的 redis.keyPrefix，例如
-   * `tdai_memory_prod_v3:skill-conv` —— 跟老 skill 队列
-   * (`{prefix}:skill:*`) 字面不撞。
+   * keyPrefix is spliced from memory's redis.keyPrefix, for example
+   * `tdai_memory_prod_v3:skill-conv` -- literally not colliding with the old skill queue
+   * (`{prefix}:skill:*`).
    */
   private ensureConversationAddForInstance(instanceId: string): Promise<WiredConversationAddHandler> {
-    // In-flight cache: 同 instanceId 并发请求共享同一个 handler wire promise。
-    // (worker 池是全局单例, 并发不再有 wire 出多个 worker 抢锁的问题)
+    // In-flight cache: concurrent requests for the same instanceId share the same handler wire promise.
+    // (the worker pool is a global singleton, so there is no longer a problem of multiple workers being wired and contending for locks)
     const cached = this.conversationAddByInstance.get(instanceId);
     if (cached) return cached;
 
@@ -2227,8 +2227,8 @@ export class TdaiGateway {
   }
 
   /**
-   * Standalone (sqlite) 版本的 in-flight cache 入口，语义与
-   * ensureConversationAddForInstance 完全一致，只是 build 走 standalone 路径。
+   * In-flight cache entry for the Standalone (sqlite) version, with semantics exactly the same as
+   * ensureConversationAddForInstance, except that build goes through the standalone path.
    */
   private ensureConversationAddForStandalone(instanceId: string): Promise<WiredConversationAddHandler> {
     const cached = this.conversationAddByInstance.get(instanceId);
@@ -2245,22 +2245,22 @@ export class TdaiGateway {
   }
 
   /**
-   * 全进程共享的 skill agent 队列。首次访问时按 redis / 内存 lazy 构造,
-   * 之后所有 handler 入队 + SkillWorkerPool 出队都走这一个 queue 对象。
+   * Process-wide shared skill agent queue. Lazily constructed on first access by redis / in-memory,
+   * after which all handler enqueues + SkillWorkerPool dequeues go through this one queue object.
    *
-   * key prefix 与老 per-instance queue 相同 (`${mem}:skill-conv:*`), 保证
-   * 升级过程 redis 层平滑, 不做数据迁移。老 4 段 tuple 由 pool 侧丢弃 + error。
+   * The key prefix is the same as the old per-instance queue (`${mem}:skill-conv:*`), ensuring a smooth
+   * upgrade at the redis layer with no data migration. Old 4-segment tuples are dropped + errored by the pool side.
    */
   /**
-   * Purge instance 时清掉共享 skill 队列里属于该 instance 的残留 (2026-07-30)。
+   * On purge instance, clear leftovers belonging to that instance from the shared skill queue (2026-07-30).
    *
-   * 场景:
-   *   - Redis 后端: SSCAN `pending-agents-set` 匹配 `{instanceId}|*` → 逐个
-   *     SREM + LREM; SCAN 查所有 `extract-lock:{instanceId}|*` /
+   * Scenarios:
+   *   - Redis backend: SSCAN `pending-agents-set` matching `{instanceId}|*` -> one by one
+   *     SREM + LREM; SCAN all `extract-lock:{instanceId}|*` /
    *     `tasks-mutex:{instanceId}|*` → DEL。
-   *   - Local 内存后端 (standalone / 无 redis): 用私有字段 list/set 直接过滤。
+   *   - Local in-memory backend (standalone / no redis): filter directly using the private list/set fields.
    *
-   * 幂等 —— 无残留时不报错, 返回 0。
+   * Idempotent -- no error when there are no leftovers; returns 0.
    */
   private async purgeSkillQueueForInstance(instanceId: string): Promise<{
     tuples_removed: number;
@@ -2275,7 +2275,7 @@ export class TdaiGateway {
     const memoryPrefix = this.config.redis?.keyPrefix ?? "tdai_memory";
     const keyPrefix = `${memoryPrefix}:skill-conv`;
 
-    // Redis 后端: 直接从 stateBackend 拿 ioredis 客户端做 SCAN
+    // Redis backend: get the ioredis client directly from the stateBackend to SCAN
     const redisClient = this.getSharedIoRedisClient();
     if (redisClient && queue instanceof RedisSkillAgentTaskQueue) {
       const client = redisClient as unknown as {
@@ -2288,7 +2288,7 @@ export class TdaiGateway {
       const setKey = `${keyPrefix}:pending-agents-set`;
       const listKey = `${keyPrefix}:pending-agents`;
       let tuplesRemoved = 0;
-      // SSCAN + MATCH 匹配 5 段 tuple
+      // SSCAN + MATCH matches 5-segment tuples
       let cursor = "0";
       do {
         const [next, members] = await client.sscan(setKey, cursor, "MATCH", `${prefixSegment}*`, "COUNT", 500);
@@ -2300,11 +2300,11 @@ export class TdaiGateway {
         }
       } while (cursor !== "0");
 
-      // 4 段 legacy tuple 如果 instanceId 恰好是 space_id 值也会命中 space_id
-      // 段的前缀; 不做启发式匹配以免误伤, 靠 pool 自身 legacy 分支处理 (见
-      // worker-pool.ts)。若确定要清可以另开脚本, 本次仅清 5 段。
+      // 4-segment legacy tuples would also hit the prefix of the space_id segment if instanceId happens to equal a space_id value;
+      // no heuristic matching is done to avoid collateral damage, and the pool's own legacy branch handles them (see
+      // worker-pool.ts). If clearing them is really wanted, a separate script can be written; this time only the 5-segment ones are cleared.
 
-      // SCAN + MATCH 清 extract-lock / tasks-mutex
+      // SCAN + MATCH to clear extract-lock / tasks-mutex
       const patterns = [
         `${keyPrefix}:extract-lock:${prefixSegment}*`,
         `${keyPrefix}:tasks-mutex:${prefixSegment}*`,
@@ -2327,7 +2327,7 @@ export class TdaiGateway {
       return { tuples_removed: tuplesRemoved, locks_removed: locksRemoved, backend: "redis" };
     }
 
-    // Local backend: 走 _snapshot 反向过滤
+    // Local backend: reverse filter via _snapshot
     if (queue instanceof LocalSkillAgentTaskQueue) {
       const snap = queue._snapshot();
       let tuplesRemoved = 0;
@@ -2364,7 +2364,7 @@ export class TdaiGateway {
       });
       this.logger.info(`[skill-worker-pool] shared queue ready: backend=redis prefix=${keyPrefix}`);
     } else {
-      // Local state backend / standalone 无 redis → 单节点内存队列
+      // Local state backend / standalone without redis -> single-node in-memory queue
       this.skillSharedQueue = new LocalSkillAgentTaskQueue();
       this.logger.warn(
         `[skill-worker-pool] no shared ioredis (deployMode=${this.config.deployMode}); ` +
@@ -2375,12 +2375,12 @@ export class TdaiGateway {
   }
 
   /**
-   * 全进程唯一的 SkillWorkerPool, start() 阶段调用一次。之后 stop() 里
-   * pool.stop() 等所有 workerLoop 退出。
+   * The single process-wide SkillWorkerPool, called once in the start() phase. After that stop() calls
+   * pool.stop() to wait for all workerLoops to exit.
    *
-   * Resolver closure 复用现有 per-instance cache：
+   * The Resolver closure reuses the existing per-instance caches:
    *   - resolveBuffer  → resolveStorageForInstance + SkillBufferStorage
-   *   - resolveExtractor → buildSkillExtractorForInstance (service) 或
+   *   - resolveExtractor -> buildSkillExtractorForInstance (service) or
    *     TdaiCore.getSkillExtractor (standalone)
    *   - resolveSink → ensureMetadataService + SkillCoreSink
    */
@@ -2410,7 +2410,7 @@ export class TdaiGateway {
       extractLockRenewIntervalMs: skillCfg.worker.extractLockRenewIntervalMs,
       resolveBuffer: async (instanceId: string): Promise<SkillBufferStorage> => {
         const storage = await gateway.resolveStorageForInstance(instanceId);
-        // SkillBufferStorage 是每次 new 的 (轻量), 但 storage adapter 是缓存的
+        // SkillBufferStorage is newly created each time (lightweight), but the storage adapter is cached
         const { SkillBufferStorage: Cls } = await import("../core/skill/conversation-add/buffer-storage.js");
         return new Cls({ storage });
       },
@@ -2441,11 +2441,11 @@ export class TdaiGateway {
   }
 
   /**
-   * 把 resolved skill config 的归档/压缩派生字段翻译成 wireConversationAdd 的
-   * thresholds / compressOptions / oversizeOptions 覆盖参数。cfg 缺失时返回空对象,
-   * wire 层退回内置默认 (与旧行为等价)。
+   * Translate the archive/compression derived fields of the resolved skill config into override parameters for wireConversationAdd's
+   * thresholds / compressOptions / oversizeOptions. Returns an empty object when cfg is missing,
+   * and the wire layer falls back to built-in defaults (equivalent to the old behavior).
    *
-   * 让 yaml 里的 skill.extraction.archiveBytes / skill.compress 生效不用改代码。
+   * Makes skill.extraction.archiveBytes / skill.compress in yaml take effect without code changes.
    */
   private buildSkillWireOverrides(): Pick<
     WireConversationAddDeps,
@@ -2473,22 +2473,22 @@ export class TdaiGateway {
   }
 
   private async buildConversationAddForInstance(instanceId: string): Promise<WiredConversationAddHandler> {
-    // 2026-07-30 池化后, 此函数只造 per-instance handler bundle。
-    // extractor / sink 从 handler 侧移除, 交给 SkillWorkerPool 的 resolver 现取。
-    // 但 wireConversationAddHandler 签名仍要求 extractor 参数 (兼容老 wireConversationAdd),
-    // 传一个 noop 即可 —— handler 内部不会用 extractor, 只 worker 用。
+    // After the 2026-07-30 pooling, this function only builds the per-instance handler bundle.
+    // extractor / sink are removed from the handler side and fetched on demand by the SkillWorkerPool's resolver.
+    // But the wireConversationAddHandler signature still requires an extractor parameter (compatible with the old wireConversationAdd),
+    // so pass a noop -- the handler does not use the extractor internally, only the worker does.
 
-    // 1) storage: 复用 resolveSkillCoreForInstance 已建好的 per-instance COS adapter
+    // 1) storage: reuse the per-instance COS adapter already built by resolveSkillCoreForInstance
     await this.resolveSkillCoreForInstance(instanceId);
     const storage = this.cosStorageCache?.get(instanceId);
     if (!storage) {
       throw new Error(`[skill-conversation-add] storage missing for instance=${instanceId} after resolveSkillCore`);
     }
 
-    // 2) queue: 全进程共享单例
+    // 2) queue: process-wide shared singleton
     const queue = this.ensureSkillSharedQueue();
 
-    // 3) noop extractor / sink 占位 (handler 不用, 只 worker pool 用真的)
+    // 3) noop extractor / sink placeholders (the handler does not use them; only the worker pool uses the real ones)
     const noopExtractor: ISkillExtractor = { extract: async () => ({ candidates: [] }) };
 
     const wired = wireConversationAddHandler({
@@ -2499,8 +2499,8 @@ export class TdaiGateway {
       ...this.buildSkillWireOverrides(),
     });
 
-    // Pool 首次 ensure, 保证 worker 已经在跑。多 instance 首次访问时都会走到这里,
-    // ensureSkillWorkerPool 内部有幂等 cache。
+    // On the pool's first ensure, make sure workers are already running. Multiple instances all reach here on first access,
+    // and ensureSkillWorkerPool has an idempotent cache inside.
     await this.ensureSkillWorkerPool();
 
     this.logger.info(
@@ -2510,18 +2510,18 @@ export class TdaiGateway {
   }
 
   /**
-   * Standalone 模式的 conversation-add wiring。
+   * Conversation-add wiring in Standalone mode.
    *
-   * 与 service 模式 (buildConversationAddForInstance) 的差异：
-   *   - skillCore/extractor：走 TdaiCore 全局单例（SqliteSkillStore + 单例 extractor），
-   *     不做 per-instance；standalone 本来就是单实例部署。
-   *   - storage：走 resolveStorageForInstance → LocalStorageBackend（COS 降级为 fs）。
-   *   - redis：不一定有；wire.ts 会自动降级到 LocalSkillAgentTaskQueue（单节点内存队列）。
-   *   - extractor：若 cfg.llm 不全导致 TdaiCore 没造出 skillExtractor，就 skipWorker
-   *     只挂 handler+buffer，Client 端能落 buffer，但归档触发不了（warn）。
+   * Differences from service mode (buildConversationAddForInstance):
+   *   - skillCore/extractor: go through TdaiCore's global singleton (SqliteSkillStore + singleton extractor),
+   *     not per-instance; standalone is a single-instance deployment anyway.
+   *   - storage: go through resolveStorageForInstance -> LocalStorageBackend (COS degrades to fs).
+   *   - redis: not necessarily present; wire.ts automatically degrades to LocalSkillAgentTaskQueue (single-node in-memory queue).
+   *   - extractor: if cfg.llm is incomplete and TdaiCore did not build a skillExtractor, then skipWorker
+   *     only attaches handler+buffer; the Client side can land the buffer, but archive triggering does not work (warn).
    */
   private async buildConversationAddForStandalone(instanceId: string): Promise<WiredConversationAddHandler> {
-    // 2026-07-30 池化后, standalone 走同一套 handler wire, worker 池全局单例。
+    // After the 2026-07-30 pooling, standalone goes through the same handler wire, with a global singleton worker pool.
     const skillCore = this.core.getSkillCore();
     if (!skillCore) {
       throw new Error(`[skill-conversation-add] SkillCore not enabled (standalone) — check cfg.skill.enabled`);
@@ -2539,11 +2539,11 @@ export class TdaiGateway {
       ...this.buildSkillWireOverrides(),
     });
 
-    // Standalone 模式下 extractor 可能因 cfg.llm 未配全而不可用; 但 pool 侧
-    // 会在 resolveExtractor 里抛错, 归档到队列的 tuple 会走 consumeAgent 的 catch
-    // 分支被识别为 transient → 无限 requeue 等外部恢复。跟老 skipWorker 逻辑
-    // 等价 (老: handler 端 wire 后完全跳过 worker; 新: 任务照样落队列, 但 pool
-    // 端消费失败, 后续 extractor 配好后自然恢复)。
+    // In Standalone mode the extractor may be unavailable because cfg.llm is not fully configured; but the pool side
+    // throws in resolveExtractor, and tuples archived into the queue go through consumeAgent's catch
+    // branch and are identified as transient -> requeued indefinitely awaiting external recovery. Equivalent to the old skipWorker logic
+    // (old: after the handler side wires, the worker is skipped entirely; new: tasks still land in the queue, but the pool
+    // side fails to consume, and recovers naturally once the extractor is configured).
     await this.ensureSkillWorkerPool();
 
     this.logger.info(
@@ -2553,13 +2553,13 @@ export class TdaiGateway {
   }
 
   /**
-   * 解析某实例的「内容侧」句柄（memory store + storage），用于清空 chat_memory
-   * 内容。两种模式都走各自既有的解析路径，保证与 /v2 数据面读写命中同一份数据：
-   *   - service（storePool + configProvider 就绪）：per-instance TCVDB + COS
-   *   - standalone：TdaiCore 的全局 VectorStore +本地 storage
+   * Resolve the "content-side" handles of an instance (memory store + storage), used to clear chat_memory
+   * content. Both modes use their own existing resolution paths, guaranteeing that they hit the same data as /v2 data plane reads/writes:
+   *   - service (storePool + configProvider ready): per-instance TCVDB + COS
+   *   - standalone: TdaiCore's global VectorStore + local storage
    *
-   * 任一侧不可用时**抛错**而不是静默跳过 —— 归档 Agent 时若跳过内容清理，
-   * 就会留下"资产已删、内容还在"的孤儿数据，正是本次要修的问题。
+   * When either side is unavailable it **throws** rather than silently skipping -- if content cleanup were skipped when archiving an Agent,
+   * it would leave orphan data of the "asset deleted, content still there" kind, which is exactly the problem to fix here.
    */
   private async resolveMemoryContentTargets(
     instanceId: string,
@@ -2591,7 +2591,7 @@ export class TdaiGateway {
 
   /**
    * Resolve per-instance StorageAdapter — the single FS-dimension switch point
-   * (二期 M3). Dispatches on the resolved `data.fileStore`:
+   * (Phase 2 M3). Dispatches on the resolved `data.fileStore`:
    *   - `local`/`cos` → resolveFileOthersForInstance (the pre-rowfs paths,
    *     cached in `cosStorageCache` — the name is historical; it also holds
    *     LocalStorageBackend adapters in standalone mode):
@@ -2605,23 +2605,23 @@ export class TdaiGateway {
    * on both paths.
    */
   private async resolveStorageForInstance(instanceId: string): Promise<StorageAdapter> {
-    // P9 选择层路径：两轴解析结果（profile × others）。rows → L2/L3 profile
-    // 键走行视图、其余键走 others 腿；files → 单后端形态，others 腿服务全部键。
+    // P9 selection-layer path: two-axis resolution result (profile x others). rows -> L2/L3 profile
+    // keys go through the row view and the other keys go through the others leg; files -> single-backend form, the others leg serves all keys.
     if (this.backendResolver) {
       const resolution = await this.backendResolver.resolve(instanceId);
       const othersKind = resolution.fs.others.kind;
       if (resolution.fs.profile === "rows") {
         return this.resolveRowfsStorageForInstance(instanceId, othersKind);
       }
-      // mongofs 腿需要实例 Mongo 配置（本地解析器不会产生 files×mongofs，
-      // 这里是给未来按实例下发形态留的正面路径）。
+      // The mongofs leg needs the instance Mongo config (the local resolver never produces files x mongofs;
+      // this is the positive path reserved for delivering forms per instance in the future).
       if (othersKind === "mongofs") {
         const { mongoConfig } = await this.resolveStoreBackendConfigs(instanceId);
         return this.resolveMongoFsOthersForInstance(instanceId, mongoConfig);
       }
       return this.resolveFileOthersForInstance(instanceId);
     }
-    // 旧分支（TDAI_BACKEND_RESOLVER=off 回滚路径）：FILE_STORE_MODE 单点开关。
+    // Legacy branch (TDAI_BACKEND_RESOLVER=off rollback path): FILE_STORE_MODE single-point switch.
     if (this.config.data.fileStore === "rowfs") {
       return this.resolveRowfsStorageForInstance(instanceId, this.config.data.fileStoreOthers);
     }
@@ -2629,14 +2629,14 @@ export class TdaiGateway {
   }
 
   /**
-   * rowfs 文件模式：ProfileRowStorageBackend（行视图）+ others 文件后端的组合。
+   * rowfs file mode: a composite of ProfileRowStorageBackend (row view) + the others file backend.
    *
-   * - 行底座能力校验（D8③ fail-fast）：sqlite × rowfs 等非法组合在此抛
-   *   BackendCapabilityError，而不是在首次读写时才暴露。
-   * - 返回的组合后端**不绑定隔离域**；请求级隔离由 handler 层的
-   *   scopeProfileStorageView 重绑定进查询条件（构造参数透传，不套键前缀）。
-   * - 不按实例缓存：组合后端是纯对象装配，构造极便宜；不缓存可避免
-   *   storePool LRU 逐出后持有失效的 store 句柄（others 侧自身有缓存）。
+   * - Row-substrate capability check (D8-3 fail-fast): illegal combinations such as sqlite x rowfs throw
+   *   BackendCapabilityError here, rather than being exposed only at the first read/write.
+   * - The returned composite backend is **not bound to an isolation domain**; request-level isolation is rebound into the query conditions
+   *   by the handler layer's scopeProfileStorageView (constructor params pass through, no key prefix).
+   * - Not cached per instance: the composite backend is pure object assembly and is extremely cheap to construct; not caching avoids
+   *   holding a stale store handle after a storePool LRU eviction (the others side has its own cache).
    */
   private async resolveRowfsStorageForInstance(
     instanceId: string,
@@ -2649,16 +2649,16 @@ export class TdaiGateway {
     const { store } = await this.storePool.getStore(instanceId, vdbConfig, mongoConfig);
     const rowStore = requireProfileRowStore(store, { dbKind: this.storePool.mode, fsKind: "rowfs" });
 
-    // mongofs others 腿（TCS 零磁盘形态）：非 profile 键全部落在实例自己的
-    // Mongo 库里。合法性（mongofs ⇒ db.kind=mongodb）由选择层
-    // validateResolution 拦截；旧分支路径在此防御性再查一次。
+    // mongofs others leg (TCS zero-disk form): all non-profile keys land in the instance's own
+    // Mongo database. Legality (mongofs => db.kind=mongodb) is blocked by the selection layer's
+    // validateResolution; the legacy branch path checks once more defensively here.
     const others =
       othersKind === "mongofs"
         ? await this.resolveMongoFsOthersForInstance(instanceId, mongoConfig)
         : await this.resolveFileOthersForInstance(instanceId);
     const profileBackend = new ProfileRowStorageBackend({
       store: rowStore,
-      // 导航里写给模型看的读取工具名属于挂载面；工具通用改名归专项七。
+      // The read tool name written in the navigation for the model belongs to the mounting surface; generic tool renaming belongs to special project 7.
       navigation: { readTool: "tdai_read_file" },
       logger: this.logger,
     });
@@ -2672,8 +2672,8 @@ export class TdaiGateway {
   }
 
   /**
-   * 形态原有的文件后端（standalone→local / service→cos），per-instance 缓存。
-   * 既是 local/cos 模式的正面路径，也是 rowfs 模式组合后端的 others 侧。
+   * The file backend native to the form (standalone->local / service->cos), cached per instance.
+   * It is both the positive path of local/cos modes and the others side of the rowfs-mode composite backend.
    */
   private async resolveFileOthersForInstance(instanceId: string): Promise<StorageAdapter> {
     const cached = this.cosStorageCache?.get(instanceId);
@@ -2717,10 +2717,10 @@ export class TdaiGateway {
   }
 
   /**
-   * mongofs others 腿（FILE_STORE_OTHERS=mongofs）：通用 Mongo 文件后端，
-   * 数据落在实例自己的库（与记忆 store 同一个 Db 句柄，经共享 client pool）。
-   * 复用 cosStorageCache 做 per-instance 缓存——Db 句柄无状态，缓存失效
-   * 语义与 local/cos 腿一致。
+   * mongofs others leg (FILE_STORE_OTHERS=mongofs): a generic Mongo file backend,
+   * with data landing in the instance's own database (the same Db handle as the memory store, via the shared client pool).
+   * Reuses cosStorageCache for per-instance caching -- the Db handle is stateless, and cache invalidation
+   * semantics are consistent with the local/cos legs.
    */
   private async resolveMongoFsOthersForInstance(
     instanceId: string,
@@ -2742,11 +2742,11 @@ export class TdaiGateway {
   }
 
   /**
-   * 从 RedisStateBackend 取 ioredis 客户端；非 Redis backend 返回 null。
+   * Get the ioredis client from RedisStateBackend; returns null for non-Redis backends.
    */
   private getSharedIoRedisClient(): SkillAgentTaskQueueRedisLike | null {
     if (!this.stateBackend) return null;
-    // duck-type：只 RedisStateBackend 有 getClient()
+    // duck-type: only RedisStateBackend has getClient()
     const maybe = this.stateBackend as unknown as { getClient?: () => unknown };
     if (typeof maybe.getClient !== "function") return null;
     try {
@@ -2874,8 +2874,8 @@ export class TdaiGateway {
       }
 
       // Lazy-init COS if not yet initialized (startup may have failed).
-      // 之后统一走 resolveStorageForInstance —— FS 维度的单点开关
-      // （local/cos/rowfs），worker 与 v2 数据面必须命中同一条装配路径。
+      // After that, everything goes through resolveStorageForInstance -- the single-point switch for the FS dimension
+      // (local/cos/rowfs); the worker and the v2 data plane must hit the same assembly path.
       if (!gateway.sharedCosClient && gateway.config.deployMode !== "standalone") {
         await gateway.initSharedCosClient();
       }
@@ -2883,21 +2883,21 @@ export class TdaiGateway {
     };
 
     /**
-     * 构造 checkpoint 的跨节点互斥锁。
+     * Build the cross-node mutex for the checkpoint.
      *
-     * 为什么必需：同一 instance 的 checkpoint 是**同一个** COS 对象
-     * (`{pathPrefix}/{instanceId}/.metadata/checkpoint.json`)，而 writeRaw 是
-     * 整对象覆盖、COS 不支持 If-Match 条件写（官方文档仅提供
-     * x-cos-forbid-overwrite，语义是「不存在才写」，无法做 CAS）。
-     * 同时 L1 的任务锁是 session 级，不同 session / 不同 agent 会在多节点
-     * 合法并发 —— 若不额外互斥，后写者用旧快照覆盖先写者已提交的
-     * runner_states，导致 L1 游标丢失并永久重复抽取。
+     * Why it is required: the checkpoint of the same instance is the **same** COS object
+     * (`{pathPrefix}/{instanceId}/.metadata/checkpoint.json`), while writeRaw is a
+     * whole-object overwrite and COS does not support If-Match conditional writes (the official docs only provide
+     * x-cos-forbid-overwrite, whose semantics are "write only if absent" and cannot do CAS).
+     * At the same time, L1's task lock is session-level, so different sessions / different agents may legitimately run concurrently
+     * across multiple nodes -- without an extra mutex, a later writer would overwrite the runner_states already committed by an earlier writer
+     * with an old snapshot, causing L1 cursors to be lost and extraction to be permanently repeated.
      *
-     * lockKey 用 instanceId：与 checkpoint 对象一一对应，粒度不能更细
-     * （更细就保护不住共享对象），也不必更粗。
+     * lockKey uses instanceId: one-to-one with the checkpoint object; the granularity cannot be finer
+     * (finer would not protect the shared object), and need not be coarser.
      *
-     * stateBackend 缺失（standalone 单进程）时返回 undefined，
-     * 此时 CheckpointManager 只用进程内 withFileLock，行为与历史一致。
+     * Returns undefined when stateBackend is missing (standalone single process),
+     * in which case CheckpointManager only uses the in-process withFileLock, with behavior consistent with history.
      */
     const resolveCheckpointLock = (
       instanceId: string,
@@ -2975,7 +2975,7 @@ export class TdaiGateway {
         (task as any)._l2ProfileScopes = result.profileScopes;
 
         // Report usage after L1: memory added + credit consumed
-        // provider=proxy 模式下 credit 由 context_proxy 上报，此处仅报 memory delta。
+        // With provider=proxy, credit is reported by context_proxy; only the memory delta is reported here.
         if (gateway.quotaManager) {
           const { storedCount, creditUsed } = result;
           const reportCredit = gateway.reportedCreditFor(creditUsed, "L1");
@@ -3064,7 +3064,7 @@ export class TdaiGateway {
               if (idx) newScenes = Math.max(0, JSON.parse(idx).length - sceneCountBefore);
             } catch { /* ok */ }
           }
-          // provider=proxy 模式下 credit 由 context_proxy 上报，此处仅报 memory delta。
+          // With provider=proxy, credit is reported by context_proxy; only the memory delta is reported here.
           const reportCredit = gateway.reportedCreditFor(creditUsed, "L2");
           if (reportCredit > 0 || newScenes > 0) {
             gateway.quotaManager.reportUsage(instanceId, newScenes, reportCredit, "L2").catch(() => {});
@@ -3103,7 +3103,7 @@ export class TdaiGateway {
         const result = await core.runL3WithStore(store, storage ?? undefined);
 
         // Report credit + memory (only +1 on first persona creation)
-        // provider=proxy 模式下 credit 由 context_proxy 上报，此处仅报 memory delta。
+        // With provider=proxy, credit is reported by context_proxy; only the memory delta is reported here.
         if (gateway.quotaManager) {
           const { creditUsed } = result;
           const memoryDelta = (!personaExistedBefore && storage) ? 1 : 0;
@@ -3179,14 +3179,14 @@ export class TdaiGateway {
   }
 
   /**
-   * 应上报的 CreditDelta：provider=proxy 时归零（proxy 已上报，避免重复计费），
-   * 否则原样传递。见 quota-credit-policy.ts 详解。
+   * The CreditDelta that should be reported: zeroed when provider=proxy (the proxy has already reported, to avoid double billing),
+   * otherwise passed through as-is. See quota-credit-policy.ts for details.
    */
   private reportedCreditFor(rawCreditUsed: number, level: "L1" | "L2" | "L3"): number {
     const reported = resolveReportedCredit(rawCreditUsed, this.config.llm.provider);
     if (reported === 0 && rawCreditUsed > 0) {
       this.logger.debug?.(
-        `[quota] ${level} creditUsed=${rawCreditUsed} 由 context_proxy 上报，内核跳过 credit 部分`,
+        `[quota] ${level} creditUsed=${rawCreditUsed} reported by context_proxy, kernel skips the credit part`,
       );
     }
     return reported;
@@ -3195,13 +3195,13 @@ export class TdaiGateway {
   /**
    * Build a simple LLM client for offload executors using gateway's LLM config.
    *
-   * instanceId 用于 provider=proxy 场景把 baseUrl 拼成 /proxy/<iid>/v1；
-   * provider=openai 场景可以传 undefined。
+   * instanceId is used in the provider=proxy scenario to assemble baseUrl into /proxy/<iid>/v1;
+   * it may be undefined in the provider=openai scenario.
    */
   private buildOffloadLlmClient(instanceId?: string) {
     const llmCfg = this.config.llm;
     if (!llmCfg.baseUrl || !llmCfg.model) return null;
-    // provider=openai 时仍要求显式 apiKey；provider=proxy 时 apiKey 由 resolver 从 env 注入
+    // With provider=openai an explicit apiKey is still required; with provider=proxy the apiKey is injected by the resolver from env
     if ((llmCfg.provider ?? "openai") === "openai" && !llmCfg.apiKey) return null;
 
     let effective: StandaloneLLMConfig;
@@ -3209,7 +3209,7 @@ export class TdaiGateway {
       effective = resolveStandaloneLlmForRuntime(llmCfg, instanceId);
     } catch (err) {
       this.logger.warn(
-        `[offload-llm] provider 解析失败, skipped: ${err instanceof Error ? err.message : String(err)}`,
+        `[offload-llm] provider resolution failed, skipped: ${err instanceof Error ? err.message : String(err)}`,
       );
       return null;
     }

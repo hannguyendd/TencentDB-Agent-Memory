@@ -1,17 +1,17 @@
 /**
- * useTeamParticipation —— 拉取整个 team 的参与日志，按 task_id 分桶。
+ * useTeamParticipation -- fetch the participation log of the whole team, bucketed by task_id.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { participationLogsApi } from '@/lib/teamApi';
 import type { TaskParticipationView } from '../utils/workbench-utils';
 
 /**
- * 一次请求覆盖列表页 N 个 task 的统计数字（避免 fanout N 次），
- * 详情页也复用同一份数据从 Map 里取。
+ * One request covers the statistics for the N tasks on the list page (avoiding N fanout requests),
+ * and the detail page also reuses the same data, reading from the Map.
  *
- * - 数据源：proxy 侧 session init 完成时 append 到内核 `/v3/meta/participation-log/*`
- * - 请求失败降级为空 Map，各处显示 0 / '—'，不阻断其它区域
- * - 追随 BACKEND_REFRESH_EVENT 自动重新拉取
+ * - Data source: appended by the proxy side to the kernel `/v3/meta/participation-log/*` when session init completes
+ * - On request failure it degrades to an empty Map, showing 0 / '—' everywhere, without blocking other areas
+ * - Automatically re-fetches following BACKEND_REFRESH_EVENT
  */
 export function useTeamParticipation(teamId: string | null): Map<string, TaskParticipationView> {
   const [byTask, setByTask] = useState<Map<string, TaskParticipationView>>(() => new Map());

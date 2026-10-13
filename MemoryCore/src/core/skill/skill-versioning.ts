@@ -1,16 +1,16 @@
 /**
- * skill-versioning — 版本递增的事务编排
+ * skill-versioning — transactional orchestration of version increments
  *
- * 把 skill-store 的 `appendVersion` 与 storage 的 `copyTree` 包成一组「append a new version」原语。
- * 为 SkillCore (Phase 6) 简化 6 个 manage action 的实现。
+ * Wraps skill-store's `appendVersion` and storage's `copyTree` into an "append a new version" primitive.
+ * Simplifies the implementation of the 6 manage actions for SkillCore (Phase 6).
  *
- * 一次完整的"加一版"动作：
- *   1. 取 head（如果有）
- *   2. 校验：owner / version / 内容是否变更
- *   3. storage 拷贝 head 的版本目录到新版本目录（如果有 head）
- *   4. 在新版本目录上 apply 本次资源变更（write/remove）
- *   5. store.appendVersion 写 DB（事务内）
- *   6. 失败时尝试清理已写入的 storage 副本（best-effort）
+ * A full "add a version" action:
+ *   1. Get the head (if any)
+ *   2. Validate: owner / version / whether the content changed
+ *   3. storage copies the head's version directory to the new version directory (if there is a head)
+ *   4. Apply this run's resource changes (write/remove) on the new version directory
+ *   5. store.appendVersion writes the DB (inside a transaction)
+ *   6. On failure, try to clean up the already-written storage copy (best-effort)
  */
 
 import { createHash } from "node:crypto";
@@ -33,16 +33,16 @@ export interface AppendVersionContext {
 }
 
 export interface AppendVersionMutation {
-  /** SKILL.md 全文（含 frontmatter）。所有写入路径都需要它（hash 校验幂等）。 */
+  /** Full text of SKILL.md (including frontmatter). Required by all write paths (hash check for idempotency). */
   content: string;
-  /** 解析后 frontmatter 提取出的 name / description。 */
+  /** name / description extracted from the parsed frontmatter. */
   name: string;
   description: string;
-  /** 资源变更：本次新增 / 覆盖的文件。 */
+  /** Resource changes: files added / overwritten in this run. */
   resourcesToWrite?: SkillResourcePayload[];
-  /** 资源变更：本次删除的相对 path。 */
+  /** Resource changes: relative paths deleted in this run. */
   resourcesToRemove?: string[];
-  /** 可选：metadata_json 直接覆盖（默认保留上一版）。 */
+  /** Optional: override metadata_json directly (default keeps the previous version's). */
   metadata_json?: string;
 }
 
@@ -52,20 +52,20 @@ export interface SkillVersioningOptions {
   storage: StorageAdapter;
   logger?: { info(msg: string): void; warn(msg: string): void; error(msg: string): void };
   /**
-   * VDB 条数变更回调（用于向 Shark 上报用量）。
-   * 每次 store.appendVersion / store.deleteVersion 成功后触发。
-   * @param delta +1 表示新增了一条 VDB 文档，-N 表示删除了 N 条。
+   * VDB count change callback (for reporting usage to Shark).
+   * Fired after each successful store.appendVersion / store.deleteVersion.
+   * @param delta +1 means one VDB document was added, -N means N were deleted.
    */
   onSkillVdbChanged?: (delta: number) => void;
   /**
-   * v1 首创时的资产登记钩子。
+   * Asset registration hook on v1 creation.
    *
-   * 契约：
-   *  - 在 storage 与 DB 写入之前 `await` 调用（前置一致性保护）
-   *  - 抛异常 = createNewSkill 失败，storage / DB 都不会写
-   *  - 上层实现须幂等（同一 skill_id 多次调用应成功且不产生副作用）
-   *  - 仅 `createNewSkill` 触发；`appendNextVersion` / TTL 清理均不触发
-   *    （asset 与 version 无关，只认 skill_id）
+   * Contract:
+   *  - `await`ed before the storage and DB writes (up-front consistency protection)
+   *  - throwing = createNewSkill fails, and neither storage nor the DB is written
+   *  - the upper-level implementation must be idempotent (multiple calls for the same skill_id should succeed with no side effects)
+   *  - triggered only by `createNewSkill`; neither `appendNextVersion` nor TTL cleanup triggers it
+   *    (assets are unrelated to versions and recognize only skill_id)
    */
   onSkillCreated?: (params: {
     skill_id: string;
@@ -95,24 +95,24 @@ export class SkillVersioning {
   }
 
   /**
-   * 创建一个全新 skill 的 v1。head 不存在；调用方负责生成 skill_id。
+   * Create v1 of a brand-new skill. The head does not exist; the caller is responsible for generating the skill_id.
    *
-   * 跨系统"事务"编排（COS + skill DB + meta_assets）：
+   * Cross-system "transaction" orchestration (COS + skill DB + meta_assets):
    *
-   *   1. writeResource → COS               ← 最不可靠，先做；失败零 DB 副作用
-   *   2. store.appendVersion → skill DB    ← 失败：反向清 COS（cleanupVersionDir）
-   *   3. onSkillCreated → meta_assets      ← 失败：反向删 skill DB (deleteSkill) + 清 COS
+   *   1. writeResource → COS               ← least reliable, do it first; failure has zero DB side effects
+   *   2. store.appendVersion → skill DB    ← on failure: reverse-clean COS (cleanupVersionDir)
+   *   3. onSkillCreated → meta_assets      ← on failure: reverse-delete the skill DB (deleteSkill) + clean COS
    *
-   * 为什么这个顺序：跨 3 个系统没有真事务，只能靠"顺序 + 补偿"。原则是
-   * **最容易失败的先做、失败零副作用的先做、可靠的收尾**。COS 是最脆的（网络/
-   * 认证/权限），skill DB 是本地事务几乎不会失败，asset 涉及 agent 查询/team
-   * 校验/多表写但也是本地 DB。原实现"asset 先写"违背了这个原则：曾出现过
-   * COS 认证挂 → skill 没落库 → asset 表却已经有一行的孤儿状态。
+   * Why this order: there is no real transaction across 3 systems, only "ordering + compensation". The principle is
+   * **do the most failure-prone first, do the zero-side-effect-on-failure first, and finish with the reliable**. COS is the most fragile (network/
+   * auth/permissions), the skill DB is a local transaction that almost never fails, and the asset involves agent lookup/team
+   * validation/multi-table writes but is also a local DB. The original implementation "write asset first" violated this principle: there was once
+   * an orphan state where COS auth failed → the skill was not persisted → yet the asset table already had a row.
    *
-   * 极端情况（步骤 2/3 rollback 又失败）：
-   *   - 孤儿 skill（skill 落库但 asset 缺）由 `onSkillAccessed` 读时自愈补登记，
-   *     用户下次 get/readFile 就会补上。闭环存在。
-   *   - 孤儿 COS 文件只占空间，读路径全部过 DB，永远不会被误读到。
+   * Extreme cases (rollback of steps 2/3 also fails):
+   *   - an orphan skill (skill persisted but asset missing) is self-healed by `onSkillAccessed` on read,
+   *     and the user's next get/readFile will fill it in. The loop is closed.
+   *   - an orphan COS file only takes up space; the read path all goes through the DB, so it is never read by mistake.
    */
   async createNewSkill(
     skillId: string,
@@ -123,12 +123,12 @@ export class SkillVersioning {
     const newVersion = 1;
     const storageDir = this.resources.versionDir(skillId, newVersion);
 
-    // 整 skill 总大小聚合校验（设计 §3.5.1：≤ 50MB）—— 纯计算，零副作用。
+    // Aggregate total-size validation for the whole skill (design §3.5.1: ≤ 50MB) — pure computation, zero side effects.
     if (mut.resourcesToWrite && mut.resourcesToWrite.length > 0) {
       this.resources.assertTotalSize([], mut.resourcesToWrite, []);
     }
 
-    // ── Step 1: 写 COS（最脆的一步先做，失败零副作用）─────────────────────
+    // ── Step 1: write COS (do the most fragile step first; failure has zero side effects) ─────────────────────
     let manifest: SkillManifestEntry[] = [];
     if (mut.resourcesToWrite && mut.resourcesToWrite.length > 0) {
       try {
@@ -137,13 +137,13 @@ export class SkillVersioning {
           manifest.push(entry);
         }
       } catch (e) {
-        // 部分文件可能已写，best-effort 清理整个版本目录
+        // some files may already be written; best-effort clean up the whole version directory
         await this.cleanupVersionDir(storageDir).catch(() => { /* ignore */ });
         throw e;
       }
     }
 
-    // ── Step 2: 写 skill DB（本地事务，几乎不会失败；失败反向清 COS）────
+    // ── Step 2: write the skill DB (local transaction, almost never fails; on failure reverse-clean COS) ────
     let row: Skill;
     try {
       row = await this.store.appendVersion({
@@ -166,9 +166,9 @@ export class SkillVersioning {
       throw e;
     }
 
-    // ── Step 3: 登记 meta_assets（agent/team 校验 + createAsset + bind）──
-    //  失败 → 反向删 skill DB (deleteSkill) → 反向清 COS → 抛回业务错误。
-    //  onSkillCreated 未注入（如 tdai-core 未挂钩子）→ 直接跳过。
+    // ── Step 3: register meta_assets (agent/team validation + createAsset + bind) ──
+    //  failure → reverse-delete the skill DB (deleteSkill) → reverse-clean COS → throw back the business error.
+    //  onSkillCreated not injected (e.g. tdai-core did not attach the hook) → skip directly.
     if (this.onSkillCreated) {
       try {
         await this.onSkillCreated({
@@ -180,10 +180,10 @@ export class SkillVersioning {
           description: mut.description,
         });
       } catch (assetErr) {
-        // 反向删 skill DB。deleteSkill 本身也可能失败（DB 挂了），
-        // 但概率极低；即便失败，onSkillAccessed 读时自愈能收敛孤儿 skill。
-        // reportVdbDelta=false：+1 从未上报过（步骤 3 之后才上报），rollback
-        // 若上报 -1 会让 shark 记账出现负偏差。
+        // reverse-delete the skill DB. deleteSkill itself may also fail (DB down),
+        // but with very low probability; even if it fails, onSkillAccessed self-healing on read can converge the orphan skill.
+        // reportVdbDelta=false: the +1 was never reported (it is reported only after step 3), and if rollback
+        // reported -1 it would make shark's accounting go negative.
         try {
           await this.deleteSkill(skillId, ctx.team_id, { reportVdbDelta: false });
         } catch (rollbackErr) {
@@ -192,22 +192,22 @@ export class SkillVersioning {
               (rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)),
           );
         }
-        // COS 目录 deleteSkill 内部已清（listVersions → rmdir），这里不重复。
-        // 但如果 deleteSkill 因 DB 挂掉没跑到 storage 清理，兜底再清一次。
+        // The COS directory was already cleaned inside deleteSkill (listVersions → rmdir), so not repeated here.
+        // But if deleteSkill did not reach the storage cleanup because the DB was down, clean it once more as a safety net.
         await this.cleanupVersionDir(storageDir).catch(() => { /* ignore */ });
         throw assetErr;
       }
     }
 
-    // 所有系统写入均成功 → 上报 VDB delta
+    // all system writes succeeded → report the VDB delta
     this.onSkillVdbChanged?.(1);
     return row;
   }
 
   /**
-   * 在已有 head 之上追加新版本。head 必须存在（调用方先调 store.getHead 拿到）。
+   * Append a new version on top of an existing head. The head must exist (the caller first calls store.getHead to get it).
    *
-   * 内容未变（content_hash 相同）且无资源变更 → 返回 head（幂等，不写 storage / DB）。
+   * Content unchanged (same content_hash) and no resource changes → return head (idempotent, no storage / DB write).
    */
   async appendNextVersion(
     head: Skill,
@@ -225,10 +225,10 @@ export class SkillVersioning {
       (!mut.resourcesToRemove || mut.resourcesToRemove.length === 0);
 
     if (noContentChange && noResourceChange) {
-      return head; // 幂等
+      return head; // idempotent
     }
 
-    // 整 skill 总大小聚合校验（设计 §3.5.1：≤ 50MB）。
+    // Aggregate total-size validation for the whole skill (design §3.5.1: ≤ 50MB).
     if (
       (mut.resourcesToWrite && mut.resourcesToWrite.length > 0) ||
       (mut.resourcesToRemove && mut.resourcesToRemove.length > 0)
@@ -240,18 +240,18 @@ export class SkillVersioning {
       );
     }
 
-    // 1) 拷贝旧版本目录到新版本目录（如果旧版本有内容）
+    // 1) copy the old version directory to the new version directory (if the old version has content)
     try {
       await this.storage.copyTree(oldStorageDir, newStorageDir);
     } catch (e) {
       const msg = (e as Error).message ?? "";
-      // 如果旧版本根本没目录（旧 skill 创建时无资源），跳过 copy
+      // if the old version has no directory at all (the old skill was created without resources), skip the copy
       if (!/STORAGE_NOT_FOUND/.test(msg)) {
         throw e;
       }
     }
 
-    // 2) 在新版本目录上应用资源变更
+    // 2) apply the resource changes on the new version directory
     let manifest: SkillManifestEntry[] = [...head.manifest];
     try {
       if (mut.resourcesToRemove) {
@@ -263,7 +263,7 @@ export class SkillVersioning {
       if (mut.resourcesToWrite) {
         for (const p of mut.resourcesToWrite) {
           const entry = await this.resources.writeResource(head.skill_id, newVersion, p);
-          // 合并到 manifest（覆盖同 path）
+          // merge into the manifest (overwriting the same path)
           manifest = manifest.filter((m) => m.path !== entry.path);
           manifest.push(entry);
         }
@@ -273,7 +273,7 @@ export class SkillVersioning {
       throw e;
     }
 
-    // 3) 写 DB（事务内 + fts 同步）
+    // 3) write the DB (inside a transaction + fts sync)
     try {
       const row = await this.store.appendVersion({
         user_id: ctx.user_id,
@@ -293,9 +293,9 @@ export class SkillVersioning {
       this.onSkillVdbChanged?.(1);
       return row;
     } catch (e) {
-      // DB 失败 → 清理刚 copy 的新目录
-      // 注：store.appendVersion 不再做 hash 幂等（由本类早期 short-circuit 处理），
-      // 因此不会抛 IdempotentNoOpError；类型仍保留导出供外部 import 一处即可。
+      // DB failure → clean up the newly copied directory
+      // Note: store.appendVersion no longer does hash idempotency (handled by this class's early short-circuit),
+      // so it will not throw IdempotentNoOpError; the type is still exported so external code only needs to import from one place.
       await this.cleanupVersionDir(newStorageDir).catch(() => { /* ignore */ });
       throw e;
     }
@@ -311,53 +311,53 @@ export class SkillVersioning {
   }
 
   // ─────────────────────────────────────────────────
-  //  真删除：一次性删掉某 skill 的所有版本（含 storage 与 shark 上报）
+  //  True delete: delete all versions of a skill at once (including storage and shark reporting)
   // ─────────────────────────────────────────────────
 
   /**
-   * 物理删除一整个 skill（含所有版本行 + 每个版本的 storage 目录）。
+   * Physically delete a whole skill (including all version rows + the storage directory of each version).
    *
-   * 编排语义：
-   *   1. 先 listVersions 拿到所有版本的 storage_dir（DB 是权威源，先读后删）
-   *   2. store.deleteAllVersions —— 一次性 DELETE 所有版本行 + 清 fts / vec
-   *   3. 逐版本 rmdir storage（失败仅 warn，不回滚 DB）
-   *   4. 汇总一次 `onSkillVdbChanged(-N)`（N = 实际删除的行数）
-   *      —— 与 TTL 路径逐行 `onSkillVdbChanged(-1)` 不同，delete 走整块上报，
-   *      减少 shark HTTP 请求；语义上都是 shark MemoryDelta 累加。
+   * Orchestration semantics:
+   *   1. first listVersions to get the storage_dir of all versions (the DB is the authoritative source; read before deleting)
+   *   2. store.deleteAllVersions — DELETE all version rows at once + clear fts / vec
+   *   3. rmdir storage version by version (failure only warns, no DB rollback)
+   *   4. report `onSkillVdbChanged(-N)` once in aggregate (N = the number of rows actually deleted)
+   *      — unlike the TTL path which does `onSkillVdbChanged(-1)` row by row, delete reports as a whole block,
+   *      reducing shark HTTP requests; semantically both accumulate shark MemoryDelta.
    *
-   * 返回实际删除的行数。skill 不存在时返回 0，不触发上报（避免虚报）。
+   * Returns the number of rows actually deleted. Returns 0 when the skill does not exist and does not trigger reporting (to avoid false reports).
    *
-   * 权限校验（team_id / owner / expected_version）由调用方 SkillCore.delete
-   * 完成。本方法不做业务规则校验，只按 (skill_id, team_id) 做物理清理。
+   * Permission checks (team_id / owner / expected_version) are done by the caller SkillCore.delete.
+   * This method does no business-rule validation and only does physical cleanup by (skill_id, team_id).
    */
   async deleteSkill(
     skillId: string,
     teamId?: string,
     opts?: {
       /**
-       * 是否上报 VDB delta。默认 true（正常删除路径）。
-       * createNewSkill 的 rollback 路径应传 false —— 因为对应的 +1 从未上报过
-       * （+1 只在整个 create 三步全绿之后才发），rollback 里再上报 -N 会让
-       * shark 记账出现负偏差。
+       * Whether to report the VDB delta. Default true (normal delete path).
+       * The rollback path of createNewSkill should pass false — because the corresponding +1 was never reported
+       * (the +1 is sent only after all three steps of create are green), and reporting -N again in rollback would make
+       * shark's accounting go negative.
        */
       reportVdbDelta?: boolean;
     },
   ): Promise<number> {
     const reportDelta = opts?.reportVdbDelta ?? true;
 
-    // 1. 先拉全量版本元信息（拿 storage_dir）。listVersions 上限 1000,
-    //    单 skill 版本数在 TTL 保护 + 业务上限下远小于此值。
+    // 1. first pull the metadata of all versions (to get storage_dir). listVersions has a cap of 1000,
+    //    and the version count of a single skill is far below this value under TTL protection + business caps.
     const versions = await this.store.listVersions(skillId, teamId, { limit: 1000, offset: 0 });
 
-    // 2. 物理删 DB 行
+    // 2. physically delete the DB rows
     const deleted = await this.store.deleteAllVersions(skillId, teamId);
     if (deleted <= 0) {
-      // 什么都没删（skill 不存在 / team 不匹配）→ 不上报，不清 storage
+      // nothing was deleted (skill does not exist / team mismatch) → do not report, do not clean storage
       return 0;
     }
 
-    // 3. 清 storage 目录（失败仅 warn）—— 用 listVersions 拿到的 dir，
-    //    而不是拼路径，容忍历史版本 storage_dir 命名不一致的情况。
+    // 3. clean the storage directories (failure only warns) — use the dir obtained from listVersions,
+    //    rather than assembling the path, tolerating inconsistent storage_dir naming of historical versions.
     for (const v of versions) {
       if (!v.storage_dir) continue;
       try {
@@ -367,7 +367,7 @@ export class SkillVersioning {
       }
     }
 
-    // 4. 一次性上报 shark（-N）；rollback 路径下不上报（见 opts 注释）
+    // 4. report to shark once (-N); not reported on the rollback path (see the opts comment)
     if (reportDelta) {
       this.onSkillVdbChanged?.(-deleted);
     }
@@ -376,33 +376,33 @@ export class SkillVersioning {
   }
 
   // ─────────────────────────────────────────────────
-  //  版本清理：写后清理超量/过期旧版本
+  //  Version cleanup: clean up excess/expired old versions after writes
   // ─────────────────────────────────────────────────
 
   private static readonly KEEP_RECENT = 3;
 
   /**
-   * 单次清理可处理的最多版本行数（= store.listVersions 后端的硬上限）。
-   * 单 skill 版本数一旦超过 1000，1000 之外的最老版本本次看不到也删不掉，
-   * 要在下几轮写路径里分批收敛。实测生产环境 Top3 版本数 < 200，够用。
+   * Max number of version rows a single cleanup can handle (= the hard cap of the store.listVersions backend).
+   * Once a single skill has more than 1000 versions, the oldest versions beyond 1000 cannot be seen or deleted this time,
+   * and must converge in batches over the next few write paths. In production the measured top-3 version counts are < 200, which is enough.
    */
   private static readonly LIST_LIMIT = 1000;
 
   /**
-   * 清理指定 skill 的旧版本（先删 DB 行，后删 storage 目录）。
-   * fire-and-forget 调用，不抛异常。
+   * Clean up old versions of the given skill (delete DB rows first, then storage directories).
+   * Called fire-and-forget, does not throw.
    *
-   * 两个维度，取并集（谁更严谁生效）：
-   *  - 时间 (ttlSeconds > 0): 非 head 且 created_at < now - ttlSeconds 的被删；
-   *    对最近 KEEP_RECENT 个非 head 版本保底（即使过期也不删），防止高频写时
-   *    刚落下的历史版本立刻被清掉。
-   *  - 数量 (maxNonHeadVersions > 0): 非 head 版本数超过 N 时，删掉最老的
-   *    超出部分。注意数量维度**不受 KEEP_RECENT 保护** —— 它本身就保证了
-   *    "保留最新的 N 个"，再叠 KEEP_RECENT 会让小 N 值失效。
-   *  - 两者都为 0：早退，什么都不做（默认行为，向后兼容）。
+   * Two dimensions, taking the union (whichever is stricter takes effect):
+   *  - Time (ttlSeconds > 0): non-head versions with created_at < now - ttlSeconds are deleted;
+   *    the most recent KEEP_RECENT non-head versions are guaranteed (not deleted even if expired), to prevent
+   *    just-written historical versions from being cleaned immediately under frequent writes.
+   *  - Count (maxNonHeadVersions > 0): when the number of non-head versions exceeds N, delete the oldest
+   *    excess. Note the count dimension is **not protected by KEEP_RECENT** — it already guarantees
+   *    "keep the newest N", and stacking KEEP_RECENT would make small N values ineffective.
+   *  - Both 0: return early and do nothing (default behavior, backward compatible).
    *
-   * head 永不删（三个后端 deleteVersion 都硬编码了 is_head=0）；
-   * archived skill 整组跳过。
+   * The head is never deleted (all three backends' deleteVersion hardcode is_head=0);
+   * archived skills are skipped as a whole group.
    */
   async cleanupExpiredVersionsForSkill(
     skillId: string,
@@ -412,9 +412,9 @@ export class SkillVersioning {
   ): Promise<void> {
     if (ttlSeconds <= 0 && maxNonHeadVersions <= 0) return;
 
-    // ⚠️ 必须显式传大 limit：listVersions 的后端默认是 50 条，不传 limit 会导致
-    // 超过 50 版本的 skill 永远收敛不到真实上限（静默失效，不报错）。
-    // 1000 是三个后端的硬上限（Math.min(..., 1000)），对齐 deleteSkill:350 的既有写法。
+    // ⚠️ A large limit must be passed explicitly: listVersions' backend default is 50; omitting limit would cause
+    // skills with more than 50 versions to never converge to the real cap (silently ineffective, no error).
+    // 1000 is the hard cap of the three backends (Math.min(..., 1000)), aligned with the existing approach at deleteSkill:350.
     const all = await this.store.listVersions(
       skillId,
       undefined,
@@ -422,29 +422,29 @@ export class SkillVersioning {
     );
     if (!all.length) return;
 
-    // archived skill 整组保护
+    // archived skills are protected as a whole group
     const head = all.find((v) => v.is_head);
     if (!head || head.status === "archived") return;
 
-    // version DESC —— 最新在前
+    // version DESC — newest first
     const sorted = [...all].sort((a, b) => b.version - a.version);
     const nonHeadSorted = sorted.filter((v) => !v.is_head);
 
-    // 收集两个维度各自要删的 version 号，最后并集。
+    // collect the version numbers to delete for each of the two dimensions, then take the union.
     const toDelete = new Set<number>();
 
-    // ── 数量维度 ──
+    // ── Count dimension ──
     if (maxNonHeadVersions > 0 && nonHeadSorted.length > maxNonHeadVersions) {
       for (const v of nonHeadSorted.slice(maxNonHeadVersions)) {
         toDelete.add(v.version);
       }
     }
 
-    // ── 时间维度 ──
+    // ── Time dimension ──
     if (ttlSeconds > 0) {
       const nowMs = now ?? Date.now();
       const cutoffMs = nowMs - ttlSeconds * 1000;
-      // KEEP_RECENT 保护最近 N 个非 head 版本（即使过期）
+      // KEEP_RECENT protects the most recent N non-head versions (even if expired)
       const protectedVersions = new Set(
         nonHeadSorted.slice(0, SkillVersioning.KEEP_RECENT).map((v) => v.version),
       );
@@ -457,20 +457,20 @@ export class SkillVersioning {
 
     if (toDelete.size === 0) return;
 
-    // 并集删除（按 version 号在 nonHeadSorted 的位置回查元数据拿 storage_dir）
+    // union delete (look up metadata by version number's position in nonHeadSorted to get storage_dir)
     const metaByVersion = new Map(nonHeadSorted.map((v) => [v.version, v]));
     for (const version of toDelete) {
       const v = metaByVersion.get(version);
       if (!v) continue;
 
-      // 先删 DB 行（数据源），再删 storage 目录（附属物）
+      // delete the DB rows first (the data source), then the storage directories (the appendage)
       const deleted = await this.store.deleteVersion(v.skill_id, version);
       if (!deleted) continue;
 
-      // 上报 VDB 删除（负值）
+      // report the VDB deletion (negative value)
       this.onSkillVdbChanged?.(-1);
 
-      // storage 删除失败仅记日志，不影响 DB 的正确性
+      // storage deletion failure is only logged and does not affect the correctness of the DB
       try {
         await this.storage.rmdir(v.storage_dir);
       } catch {
@@ -481,5 +481,5 @@ export class SkillVersioning {
 
 }
 
-// 重新导出错误类型，让上层 import 一处即可
+// re-export the error type so upper layers only need to import from one place
 export { IdempotentNoOpError, SkillStoreError, SkillResourceError };

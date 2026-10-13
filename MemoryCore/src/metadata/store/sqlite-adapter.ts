@@ -1,10 +1,10 @@
 /**
- * SQLite 实现的 IMetadataStore。
+ * SQLite implementation of IMetadataStore.
  *
- * 对应设计文档 §6.1 / §6.2。基于 Node 内置 `node:sqlite`（DatabaseSync，Node 22+）。
- * 单连接隐式串行 + 显式 BEGIN/COMMIT 保证复合写入原子性。
+ * Corresponds to design doc §6.1 / §6.2. Based on Node's built-in `node:sqlite` (DatabaseSync, Node 22+).
+ * A single connection is implicitly serial + explicit BEGIN/COMMIT guarantees atomicity of composite writes.
  *
- * 表前缀 `meta_`，与内核已有 entity_* / l0 / l1 表隔离。
+ * Table prefix `meta_`, isolated from the kernel's existing entity_* / l0 / l1 tables.
  */
 
 import { createRequire } from "node:module";
@@ -105,7 +105,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   private readonly dbPath: string;
   private initialized = false;
 
-  /** @param dbPath 文件路径或 ":memory:"。 */
+  /** @param dbPath File path or ":memory:". */
   constructor(dbPath: string) {
     this.dbPath = dbPath;
   }
@@ -320,8 +320,8 @@ export class SqliteMetadataStore implements IMetadataStore {
       CREATE INDEX IF NOT EXISTS idx_meta_config_params_module
         ON meta_config_params(module);
 
-      -- v2 (模型组) 结构。v1 未真正投产,直接 DROP + 重建,不留兼容 shim。
-      -- 详见 docs/design/2026-08-25-instance-upstream-config.md §5.1。
+      -- v2 (model group) structure. v1 never really went into production; DROP + rebuild directly, leaving no compatibility shim.
+      -- See docs/design/2026-08-25-instance-upstream-config.md §5.1.
       DROP TABLE IF EXISTS meta_instance_upstream_config;
       CREATE TABLE meta_instance_upstream_config (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -341,7 +341,7 @@ export class SqliteMetadataStore implements IMetadataStore {
         updated_at TEXT NOT NULL,
         UNIQUE(group_id)
       );
-      -- default / extraction 单例约束(每实例最多 1 行)。
+      -- default / extraction singleton constraint (at most 1 row per instance).
       CREATE UNIQUE INDEX IF NOT EXISTS ux_iuc_singleton_group_type
         ON meta_instance_upstream_config(group_type)
         WHERE group_type IN ('default','extraction');
@@ -364,7 +364,7 @@ export class SqliteMetadataStore implements IMetadataStore {
     this.db.exec(`DROP INDEX IF EXISTS ux_meta_users_single_system_admin`);
   }
 
-  /** 存量库：若 meta_users 仍有 user_key 列，回填 meta_user_keys 后不再写入该列。 */
+  /** Existing database: if meta_users still has the user_key column, backfill meta_user_keys and stop writing that column. */
   private migrateLegacyUserKeys(): void {
     const hasUserKeyCol = this.all<{ name: string }>(
       "SELECT name FROM pragma_table_info('meta_users') WHERE name = 'user_key'",
@@ -458,14 +458,14 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   /**
-   * BEGIN IMMEDIATE 事务:比 BEGIN 更早持有 RESERVED lock,阻止其他连接
-   * 在 SELECT-then-INSERT 的中间窗口插入冲突行。
+   * BEGIN IMMEDIATE transaction: holds the RESERVED lock earlier than BEGIN, preventing other connections
+   * from inserting conflicting rows in the middle window of SELECT-then-INSERT.
    *
-   * 用于 upstream config 的 "读全表 → 校验 agents 全域唯一 → 写入" 临界区
-   * (docs/design/2026-08-25-instance-upstream-config.md §5.3)。
+   * Used for the critical section of upstream config "read the whole table → validate agents global uniqueness → write"
+   * (docs/design/2026-08-25-instance-upstream-config.md §5.3).
    *
-   * SQLite 的 busy_timeout (init 里设了 5s) 会让并发的第二个 IMMEDIATE
-   * 阻塞等待锁,拿到锁后重新执行事务体。所以调用方通常不需要重试。
+   * SQLite's busy_timeout (set to 5s in init) makes a concurrent second IMMEDIATE
+   * block waiting for the lock, and re-run the transaction body after getting it. So callers usually do not need to retry.
    */
   private withImmediateTx<T>(fn: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
@@ -554,8 +554,8 @@ export class SqliteMetadataStore implements IMetadataStore {
         });
         return this.getUserById(userId)!;
       } catch (err) {
-        // 调用方显式指定 default_key_value 时命中 UNIQUE：翻译为业务错(HTTP 409)。
-        // 不 retry：随机 key_value 生成场景下 192bit 熵不可能碰撞，能到这里的只有显式指定。
+        // When the caller explicitly specifies default_key_value it hits UNIQUE: translate into a business error (HTTP 409).
+        // No retry: with randomly generated key_value, 192 bits of entropy cannot collide; only an explicit specification can get here.
         if (isUserKeyValueCollision(err)) {
           throw new DuplicateUserKeyError(defaultKeyValue);
         }
@@ -609,9 +609,9 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   updateUser(userId: string, patch: Partial<UserEntity>): UserEntity | null {
-    // external_id / auth_provider：外部认证（如 WOA）绑定存量账号时写入，
-    // 用于下次登录判断是否初次。白名单漏掉 auth_provider 会导致绑定"看似成功、
-    // 实际没写域"，下次按域反查落空 → 401，属静默失效，务必保留。
+    // external_id / auth_provider: written when external auth (e.g. WOA) binds an existing account,
+    // used to determine whether it is a first login next time. If the allowlist misses auth_provider, the binding "looks successful
+    // but actually never wrote the domain", and the next reverse lookup by domain misses → 401, a silent failure; be sure to keep it.
     const allowed = ["password", "display_name", "email", "raw_profile_json", "status", "metadata_json", "username", "external_id", "auth_provider"] as const;
     this.applyUpdate("meta_users", "user_id", userId, allowed, patch);
     return this.getUserById(userId);
@@ -799,7 +799,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // Team（自动 admin 成员）
+  // Team (automatic admin member)
   // ============================================================
   createTeam(input: CreateTeamInput): TeamEntity {
     const now = nowIso();
@@ -1064,7 +1064,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // Task（含 linkAgents 原子）
+  // Task (including atomic linkAgents)
   // ============================================================
   createTask(input: CreateTaskInput): TaskEntity {
     const now = nowIso();
@@ -1386,8 +1386,8 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   deleteAssets(assetIds: string[]): BatchDeleteResult {
-    // 物理删除 meta_assets，并级联清理绑定与 ACL。
-    // 已不存在视为幂等成功（Skill 钩子/handler 双通道会二次调用）。
+    // Physically delete meta_assets, and cascade-clean bindings and ACLs.
+    // Already absent counts as idempotent success (the Skill hook/handler dual channel will call twice).
     const result: BatchDeleteResult = { deleted_ids: [], failed: [] };
     for (const id of assetIds) {
       const existing = this.getAssetById(id);
@@ -1443,7 +1443,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // AgentFixedAsset（全量替换）
+  // AgentFixedAsset (full replace)
   // ============================================================
   setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): void {
     const now = nowIso();
@@ -1477,8 +1477,8 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   addAgentFixedAsset(agentId: string, b: FixedAssetBindingInput): void {
-    // UNIQUE(agent_id, asset_id) 已在 schema 里定义（sqlite-adapter.ts:227 段），
-    // INSERT OR IGNORE 命中冲突时 no-op，天然幂等。
+    // UNIQUE(agent_id, asset_id) is already defined in the schema (sqlite-adapter.ts:227 section),
+    // INSERT OR IGNORE is a no-op on conflict, naturally idempotent.
     this.run(
       `INSERT OR IGNORE INTO meta_agent_fixed_assets
         (id, agent_id, asset_id, asset_type, injection_mode, priority, created_by, created_at)
@@ -1501,7 +1501,7 @@ export class SqliteMetadataStore implements IMetadataStore {
   ): ListPage<FixedAssetBindingEntity> {
     const types = filter?.assetTypes ?? [];
     if (types.length > 0) {
-      // JOIN meta_assets 做类型过滤，避免"分页在前、类型过滤在后"截断
+      // JOIN meta_assets for the type filter, avoiding truncation from "paginate first, filter by type after"
       const placeholders = types.map(() => "?").join(",");
       const base = `FROM meta_agent_fixed_assets b
         INNER JOIN meta_assets a ON a.asset_id = b.asset_id
@@ -1902,13 +1902,13 @@ export class SqliteMetadataStore implements IMetadataStore {
     };
   }
 
-  // ── InstanceUpstreamConfig (v2 模型组) ─────────────────────────────────
+  // ── InstanceUpstreamConfig (v2 model group) ─────────────────────────────────
   //
-  // 所有写入方法都用 withImmediateTx 包裹,拿 RESERVED lock 后:
-  //   1. SELECT-all → 内存构建 "其他行 agents 并集" (排除自身 group_id)
-  //   2. 校验:agents 全域唯一 / group_type mismatch / version match
-  //   3. UPSERT/UPDATE/DELETE 完成后再 COMMIT
-  // 并发写入的第二个 IMMEDIATE 阻塞等待 busy_timeout(5s),自动串行化。
+  // All write methods are wrapped in withImmediateTx; after taking the RESERVED lock:
+  //   1. SELECT-all → build in memory the "union of other rows' agents" (excluding own group_id)
+  //   2. Validate: agents global uniqueness / group_type mismatch / version match
+  //   3. COMMIT after UPSERT/UPDATE/DELETE completes
+  // The second IMMEDIATE of a concurrent write blocks waiting up to busy_timeout (5s), serializing automatically.
 
   getInstanceUpstreamGroup(groupId: string): InstanceUpstreamConfigEntity | null {
     return this.mapInstanceUpstreamGroup(
@@ -1923,13 +1923,13 @@ export class SqliteMetadataStore implements IMetadataStore {
     filter?: InstanceUpstreamConfigFilter,
     seedIfEmpty?: SupportedAgent[],
   ): InstanceUpstreamConfigEntity[] {
-    // seed + diff-append 只在传入 supportedAgents 时跑。
-    // seed 分支已抽成 ensureDefaultSeeded,供其他写入路径共用(存量实例首个请求
-    // 不是 list 而是 create/update/toggle/... 时的兜底,防止 default 未 seed 导致
-    // AGENT_NOT_CONFIGURED)。
+    // seed + diff-append only run when supportedAgents is passed in.
+    // The seed branch has been extracted into ensureDefaultSeeded, shared by other write paths (a safety net for existing
+    // instances whose first request is create/update/toggle/... rather than list, preventing an unseeded default from causing
+    // AGENT_NOT_CONFIGURED).
     if (seedIfEmpty && seedIfEmpty.length > 0) {
       this.ensureDefaultSeeded(seedIfEmpty);
-      // 已存在 default → 走 diff-append 同步逻辑(方案 E)
+      // default already exists → go through the diff-append sync logic (option E)
       this._syncDefaultAgentsWithSnapshot(seedIfEmpty);
     }
 
@@ -1940,7 +1940,7 @@ export class SqliteMetadataStore implements IMetadataStore {
       params.push(filter.group_type);
     }
     const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
-    // 排序:group_type default → custom → extraction, 同类 updated_at DESC
+    // Ordering: group_type default → custom → extraction, and within the same type updated_at DESC
     const sql = `SELECT * FROM meta_instance_upstream_config${where}
       ORDER BY CASE group_type WHEN 'default' THEN 0 WHEN 'custom' THEN 1 ELSE 2 END,
       updated_at DESC`;
@@ -1949,11 +1949,11 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 幂等 seed:若 default 行不存在,写入一行 (agents=supported, mode=official)。
-   * 供 list 及所有写入路径(create/update/toggle/delete + extraction/*)共用。
+   * Idempotent seed: if the default row does not exist, write one row (agents=supported, mode=official).
+   * Shared by list and all write paths (create/update/toggle/delete + extraction/*).
    *
-   * 与 diff-append 分离:seed 只保证 "有" default 一行,不做 supported ↔ snapshot
-   * 收敛;后者只在 listInstanceUpstreamGroups 里跑,避免所有写入都刷 snapshot。
+   * Separate from diff-append: seed only guarantees that a default row "exists", and does not do supported ↔ snapshot
+   * convergence; the latter only runs in listInstanceUpstreamGroups, avoiding every write refreshing the snapshot.
    */
   ensureDefaultSeeded(supported: SupportedAgent[]): void {
     if (!supported || supported.length === 0) return;
@@ -1963,7 +1963,7 @@ export class SqliteMetadataStore implements IMetadataStore {
     if (hasDefault) return;
     try {
       this.withImmediateTx(() => {
-        // 事务内再确认一次(可能刚被别人 seed)
+        // Re-confirm inside the transaction (it may have just been seeded by someone else)
         const check = this.get(
           "SELECT id FROM meta_instance_upstream_config WHERE group_type='default' LIMIT 1",
         );
@@ -1977,32 +1977,32 @@ export class SqliteMetadataStore implements IMetadataStore {
           this.newGroupId("default"),
           DEFAULT_GROUP_NAME,
           JSON.stringify(agentsList),
-          JSON.stringify(agentsList),   // seed 时 snapshot = agents
+          JSON.stringify(agentsList),   // at seed time snapshot = agents
           now,
           now,
         );
       });
     } catch (e) {
-      // 并发下的 UNIQUE 冲突:另一个进程刚 seed 完 → 忽略
+      // UNIQUE conflict under concurrency: another process just finished seeding → ignore
       const msg = (e as Error).message ?? "";
       if (!msg.includes("UNIQUE") && !msg.includes("unique")) throw e;
     }
   }
 
   /**
-   * 方案 E:default.agents 与 supported-agents 全集 diff-append 同步。
+   * Option E: diff-append sync between default.agents and the full supported-agents set.
    *
-   * 场景对照(design doc §11 决策 11d):
-   * - A. seed 首次: 由 seed 分支直接写入,不走本方法
-   * - B. 存量实例 snapshot=空: 视为"用户已认可当前状态",snapshot 填成 agents,不改 agents
-   * - C. Proxy 加了新 agent(supported > snapshot): diff append 到 agents,snapshot 更新
-   * - D. 用户主动 remove agent + Proxy 又加了新的: 只加新的,不恢复用户 remove 的
-   * - E. Proxy 下线 agent(supported < snapshot): snapshot 收缩,agents 不动
-   *      (老 agent 在 agents 里但已从 supported 移除是合法的,请求会 unmanaged;由 Panel 引导清理)
-   * - F. 无变化(diff=空): 不写 db,hot path 零开销
+   * Scenarios (design doc §11 decision 11d):
+   * - A. First seed: written directly by the seed branch, does not go through this method
+   * - B. Existing instance with empty snapshot: treated as "the user has accepted the current state", snapshot is filled with agents, agents unchanged
+   * - C. Proxy adds a new agent (supported > snapshot): diff appended to agents, snapshot updated
+   * - D. User actively removed an agent + Proxy adds a new one: only add the new one, do not restore the one the user removed
+   * - E. Proxy takes an agent offline (supported < snapshot): snapshot shrinks, agents untouched
+   *      (an old agent being in agents but removed from supported is legal; requests will be unmanaged; the Panel guides cleanup)
+   * - F. No change (diff empty): no db write, zero overhead on the hot path
    *
-   * 并发保护:UPDATE 用 WHERE version=<读到的>,失败静默(另一次 list 会重试);
-   * SQLite BEGIN IMMEDIATE 也是串行锁,极难冲突。
+   * Concurrency protection: UPDATE uses WHERE version=<the one read>, failing silently (another list will retry);
+   * SQLite BEGIN IMMEDIATE is also a serial lock, so conflicts are very unlikely.
    */
   private _syncDefaultAgentsWithSnapshot(supported: SupportedAgent[]): void {
     const supportedNames = Array.from(new Set(supported.map((a) => a.agent_source))).sort();
@@ -2011,15 +2011,15 @@ export class SqliteMetadataStore implements IMetadataStore {
     const row = this.get(
       "SELECT id, group_id, agents, supported_agents_snapshot, version FROM meta_instance_upstream_config WHERE group_type='default' LIMIT 1",
     );
-    if (!row) return; // 表还没 seed(理论上不该发生,seed 分支应先跑)
+    if (!row) return; // table not yet seeded (in theory should not happen; the seed branch should run first)
     const r = row as Record<string, unknown>;
     let currentAgents: string[] = [];
     let currentSnapshot: string[] = [];
-    try { currentAgents = JSON.parse(String(r.agents ?? "[]")); } catch { /* 保持空 */ }
-    try { currentSnapshot = JSON.parse(String(r.supported_agents_snapshot ?? "[]")); } catch { /* 保持空 */ }
+    try { currentAgents = JSON.parse(String(r.agents ?? "[]")); } catch { /* keep empty */ }
+    try { currentSnapshot = JSON.parse(String(r.supported_agents_snapshot ?? "[]")); } catch { /* keep empty */ }
     const version = Number(r.version ?? 1);
 
-    // 场景 B: snapshot 空(存量实例首次)→ 只补 snapshot,不改 agents
+    // Scenario B: snapshot empty (existing instance first time) → only fill snapshot, do not change agents
     if (currentSnapshot.length === 0) {
       const now = nowIso();
       this.run(
@@ -2034,18 +2034,18 @@ export class SqliteMetadataStore implements IMetadataStore {
       return;
     }
 
-    // 场景 C/D: supported 里有 snapshot 之外的新 agent → append 到 agents + snapshot 更新
+    // Scenario C/D: supported has new agents beyond the snapshot → append to agents + update snapshot
     const newAgents = supportedNames.filter((a) => !currentSnapshot.includes(a));
-    // 场景 E: supported 收缩(agent 下线),snapshot 也跟着收缩,但 agents 不动
+    // Scenario E: supported shrinks (agent offline), snapshot shrinks along with it, but agents untouched
     const snapshotShrunk = currentSnapshot.some((a) => !supportedSet.has(a));
     if (newAgents.length === 0 && !snapshotShrunk) {
-      return; // hot path: 全无变化,零开销
+      return; // hot path: nothing changed, zero overhead
     }
 
-    // 计算新 agents:union(current, newAgents),但要保持 全域唯一(不能跟 custom 组的 agents 重叠)
+    // Compute the new agents: union(current, newAgents), but keep global uniqueness (must not overlap with the custom groups' agents)
     const nextAgents = [...currentAgents];
     if (newAgents.length > 0) {
-      // 检查这些新 agent 有没有被 custom 组占用
+      // Check whether these new agents are already occupied by a custom group
       const customRows = this.all<Row>(
         "SELECT agents FROM meta_instance_upstream_config WHERE group_type='custom'",
       );
@@ -2059,7 +2059,7 @@ export class SqliteMetadataStore implements IMetadataStore {
         if (!customUsed.has(a) && !nextAgents.includes(a)) nextAgents.push(a);
       }
     }
-    const nextSnapshot = supportedNames; // 收缩 + 扩张都对齐 supported
+    const nextSnapshot = supportedNames; // both shrink and expand align to supported
 
     const now = nowIso();
     this.run(
@@ -2082,7 +2082,7 @@ export class SqliteMetadataStore implements IMetadataStore {
     const agents = input.agents ?? [];
 
     return this.withImmediateTx(() => {
-      // 1. 单例约束(default / extraction 只能一行)
+      // 1. Singleton constraint (default / extraction may only have one row)
       if (input.group_type === "default" || input.group_type === "extraction") {
         const existing = this.get(
           "SELECT group_id FROM meta_instance_upstream_config WHERE group_type = ? LIMIT 1",
@@ -2096,19 +2096,19 @@ export class SqliteMetadataStore implements IMetadataStore {
         }
       }
 
-      // 2. agents 全域唯一校验(仅 default/custom 参与)
+      // 2. agents global uniqueness check (only default/custom participate)
       if (input.group_type !== "extraction") {
         this.assertAgentsNotOverlap(agents, null);
       }
 
-      // 2b. 组名全域唯一(仅 custom 参与写入方,校验目标含 default/extraction 保留名)
-      //     default/extraction 走 seed 的固定名不触发此路径。历史脏数据不清理,
-      //     只拦新写入 —— 参考设计文档 §5.3(v2.8)。
+      // 2b. Group name global uniqueness (only custom is the writing party; the validation targets include the reserved names of default/extraction)
+      //     default/extraction use the fixed names from seed and do not trigger this path. Historical dirty data is not cleaned,
+      //     only new writes are blocked -- see design doc §5.3 (v2.8).
       if (input.group_type === "custom") {
         this.assertGroupNameUnique(input.name ?? "", null);
       }
 
-      // 3. INSERT(custom/extraction 的 snapshot 恒 [];default 由 seed 路径独立处理,不走此 create 分支)
+      // 3. INSERT (the snapshot of custom/extraction is always []; default is handled independently by the seed path and does not go through this create branch)
       this.run(
         `INSERT INTO meta_instance_upstream_config
           (group_id, group_type, name, agents, enabled, mode, base_url, api_key, model_id, description, version, supported_agents_snapshot, created_at, updated_at)
@@ -2161,18 +2161,18 @@ export class SqliteMetadataStore implements IMetadataStore {
         );
       }
 
-      // agents 变更 → 校验全域唯一(排除自身)
+      // agents change → validate global uniqueness (excluding self)
       const nextAgents = input.agents ?? current.agents;
       if (input.agents !== undefined && current.group_type !== "extraction") {
         this.assertAgentsNotOverlap(nextAgents, current.group_id);
       }
 
-      // name 变更 → 校验全域唯一(仅 custom;default/extraction 的 name 由 service 层
-      // DEFAULT_GROUP_IMMUTABLE_FIELDS 拦掉,这里再兜一次)
+      // name change → validate global uniqueness (custom only; the name of default/extraction is blocked by the service layer's
+      // DEFAULT_GROUP_IMMUTABLE_FIELDS, with one more safety check here)
       //
-      // 历史脏数据豁免:如果 trim 后 name 与 current.name 完全相同(前端"编辑弹层"
-      // 回传原名的常见姿势),不触发查重 — 否则库里已有的重名行任何 update 都会挂,
-      // 违背"以前重名的就算了不管"的产品约定。参考设计文档 §5.3(v2.8)。
+      // Historical dirty data exemption: if the trimmed name is exactly identical to current.name (the common pattern where the frontend "edit dialog"
+      // sends back the original name), do not trigger the duplicate check -- otherwise any update of an existing duplicate-name row in the database would fail,
+      // violating the product convention "ignore what was already duplicated before". See design doc §5.3 (v2.8).
       if (
         input.name !== undefined
         && current.group_type === "custom"
@@ -2181,7 +2181,7 @@ export class SqliteMetadataStore implements IMetadataStore {
         this.assertGroupNameUnique(input.name, current.group_id);
       }
 
-      // PATCH 合并
+      // PATCH merge
       const merged = {
         name: input.name ?? current.name,
         agents: nextAgents,
@@ -2261,9 +2261,9 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 校验待写入 agents 与其他行的 agents 不重叠。
-   * `selfGroupId` 传入时排除自己(update 场景);create 时传 null。
-   * 冲突 → InstanceUpstreamWriteConflictError("agents_overlap", detail.conflict_groups)。
+   * Validate that the agents to be written do not overlap with the agents of other rows.
+   * When `selfGroupId` is passed, exclude itself (update scenario); pass null on create.
+   * Conflict → InstanceUpstreamWriteConflictError("agents_overlap", detail.conflict_groups).
    */
   private assertAgentsNotOverlap(candidate: string[], selfGroupId: string | null): void {
     if (candidate.length === 0) return;
@@ -2302,13 +2302,13 @@ export class SqliteMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 校验组名(trim 后)与其他任意组(含 default / extraction 保留名)不冲突。
-   * 大小写敏感、空白 trim 后精确匹配。selfGroupId 传入时排除自己(update 场景);
-   * create 时传 null。冲突 → InstanceUpstreamWriteConflictError("name_duplicate",
-   * detail.conflict_group)。空串或全空白 name 直接放过(由 assertGroupName 兜住)。
+   * Validate that the group name (after trim) does not conflict with any other group (including the reserved names of default / extraction).
+   * Case-sensitive, exact match after whitespace trim. When selfGroupId is passed, exclude itself (update scenario);
+   * pass null on create. Conflict → InstanceUpstreamWriteConflictError("name_duplicate",
+   * detail.conflict_group). An empty or all-whitespace name is let through directly (caught by assertGroupName).
    *
-   * 历史脏数据不清理:表内已存在的重名行 list 出来照常,只在新写入时拦。
-   * 参考设计文档 §5.3(v2.8)。
+   * Historical dirty data is not cleaned: existing duplicate-name rows in the table are listed as usual, and are only blocked on new writes.
+   * See design doc §5.3 (v2.8).
    */
   private assertGroupNameUnique(candidateName: string, selfGroupId: string | null): void {
     const candidate = (candidateName ?? "").trim();
@@ -2335,7 +2335,7 @@ export class SqliteMetadataStore implements IMetadataStore {
     }
   }
 
-  /** 生成 group_id:default→dflt-<r> / custom→grp-<r> / extraction→ext-<r>。 */
+  /** Generate group_id: default→dflt-<r> / custom→grp-<r> / extraction→ext-<r>. */
   private newGroupId(gt: GroupType): string {
     const prefix = gt === "default" ? "dflt" : gt === "extraction" ? "ext" : "grp";
     return generateId(prefix);

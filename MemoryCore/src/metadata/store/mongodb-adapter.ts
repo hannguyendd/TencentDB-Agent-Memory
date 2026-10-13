@@ -1,11 +1,11 @@
 /**
- * MongoDB 实现的 IMetadataStore。
+ * MongoDB implementation of IMetadataStore.
  *
- * 对应设计文档 §6.1 / §6.4（MongoDB 事务处理）。
- * 复合写入（createTeam + admin、createTask + linkAgents、setAgentFixedAssets 全量替换、
- * deleteAssets 级联）使用 multi-document transaction（需副本集）保证原子性。
+ * Corresponds to design doc §6.1 / §6.4 (MongoDB transaction handling).
+ * Composite writes (createTeam + admin, createTask + linkAgents, setAgentFixedAssets full replace,
+ * deleteAssets cascade) use multi-document transactions (requires a replica set) to guarantee atomicity.
  *
- * 集合命名与 SQLite 表对齐（meta_*）。读操作统一投影掉 `_id`。
+ * Collection naming aligns with the SQLite tables (meta_*). Read operations uniformly project out `_id`.
  */
 
 import type {
@@ -94,7 +94,7 @@ function isStorePkCollision(err: unknown): boolean {
   return isPkCollision(err) || isMongoRelationIdCollision(err);
 }
 
-/** E11000 on meta_user_keys.key_value (调用方显式指定 default_key_value 时并发命中)。 */
+/** E11000 on meta_user_keys.key_value (hit concurrently when the caller explicitly specifies default_key_value). */
 function isUserKeyValueCollision(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { code?: number; keyPattern?: Record<string, unknown> };
@@ -104,9 +104,9 @@ function isUserKeyValueCollision(err: unknown): boolean {
 const PROJECT_NO_ID = { projection: { _id: 0 } } as const;
 
 export interface MongoMetadataStoreOptions {
-  /** 是否启用多文档事务（需副本集）。默认 true。 */
+  /** Whether to enable multi-document transactions (requires a replica set). Default true. */
   useTransactions?: boolean;
-  /** false 时 close() 不关闭 client（MetadataStorePool 共享连接）。 */
+  /** When false, close() does not close the client (MetadataStorePool shares the connection). */
   ownsClient?: boolean;
 }
 
@@ -116,16 +116,16 @@ export class MongoMetadataStore implements IMetadataStore {
   private readonly useTransactions: boolean;
   private readonly ownsClient: boolean;
   /**
-   * v1→v2 legacy sweep 一次性标记。true 表示本进程已在 list 路径上做过 index/文档
-   * 清理,后续 list 直接跳过 —— sweep 是历史迁移动作 (dropIndex + deleteMany),
-   * 数据面已在 v2 后就永远不会再回退,不需要每次 list 都跑一遍 (每次要 2 次
-   * Mongo 网络往返,是 400ms 稳态延迟的主贡献者)。进程重启会再跑一次做兜底。
+   * One-time flag for the v1→v2 legacy sweep. true means this process has already done the index/document
+   * cleanup on the list path, and subsequent lists skip it -- the sweep is a historical migration action (dropIndex + deleteMany),
+   * the data plane will never roll back after v2, so there is no need to run it on every list (each run costs 2
+   * Mongo network round trips, the main contributor to the 400ms steady-state latency). A process restart runs it once more as a safety net.
    */
   private legacyV1Swept = false;
   /**
-   * v1 user_key 迁移一次性标记(与 legacyV1Swept 同套路)。init() 每次都跑
-   * `find(all users)` + 逐个 `findOne(user_key)`,存量实例首次冷启动 ~1s,
-   * 老实例更贵(要拉全部 users)。也是历史迁移动作,首次 init 跑完就 mark。
+   * One-time flag for the v1 user_key migration (same pattern as legacyV1Swept). init() runs every time
+   * `find(all users)` + `findOne(user_key)` one by one; an existing instance cold start takes ~1s the first time,
+   * and old instances are costlier (all users must be pulled). It is also a historical migration action; mark it after the first init finishes it.
    */
   private legacyUserKeysMigrated = false;
 
@@ -192,9 +192,9 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async init(): Promise<void> {
-    // 25 个 ensureIndex 全部并行:createIndex 幂等,不同 collection/index 互不冲突,
-    // 服务器侧原来就是各自 create,唯一开销是 RTT。串行 25 × ~70ms ≈ 1.8s,
-    // 并行 max(独立 RTT) ≈ 100~300ms(空库首建更贵些)。
+    // All 25 ensureIndex calls in parallel: createIndex is idempotent, different collections/indexes do not conflict,
+    // server-side each was already created independently, and the only overhead is the RTT. Serial 25 × ~70ms ≈ 1.8s,
+    // parallel max(independent RTT) ≈ 100~300ms (a first build on an empty database is a bit costlier).
     await Promise.all([
       // ── meta_users ──
       this.ensureIndex("meta_users", { user_id: 1 }, { unique: true }),
@@ -285,18 +285,18 @@ export class MongoMetadataStore implements IMetadataStore {
         { partialFilterExpression: { scope: "user" } },
       ),
 
-      // ── meta_instance_upstream_config (v2 模型组) ──
+      // ── meta_instance_upstream_config (v2 model group) ──
       this.ensureIndex("meta_instance_upstream_config",
         { group_id: 1 },
         { unique: true },
       ),
-      // 单例约束:default / extraction 每实例最多 1 行。
-      // ⚠️ MongoDB partial index filter 只支持 equality/$exists/$gt/$gte/$lt/$lte/$type/$and
-      // (顶层),**不支持 `$in`**。之前用 `partialFilterExpression: {group_type: {$in: [...]}}`
-      // 会被 mongo 抛 code=67 "unsupported expression",ensureIndex 里 console.warn 静默吞,
-      // 结果实际上根本没这个 unique index → default 并发 seed 会插出 2 行(mem-orooh93g
-      // 现场实证)。改成两个独立 partial index,filter 用 equality。
-      // 显式 name 避免同 spec 撞名。
+      // Singleton constraint: default / extraction have at most 1 row per instance.
+      // Warning: MongoDB partial index filter only supports equality/$exists/$gt/$gte/$lt/$lte/$type/$and
+      // (top level), and **does not support `$in`**. Previously using `partialFilterExpression: {group_type: {$in: [...]}}`
+      // made mongo throw code=67 "unsupported expression", which ensureIndex silently swallowed with console.warn,
+      // so in effect this unique index never existed → concurrent default seeds could insert 2 rows (mem-orooh93g
+      // confirmed in production). Changed to two independent partial indexes whose filters use equality.
+      // Explicit name to avoid name clashes for the same spec.
       this.ensureIndex("meta_instance_upstream_config",
         { group_type: 1 },
         { unique: true, partialFilterExpression: { group_type: "default" }, name: "ux_group_type_default" },
@@ -311,13 +311,13 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 安全创建索引：索引创建失败不会中断初始化流程，但会记录日志便于线上排查。
+   * Safely create an index: an index creation failure does not abort the initialization flow, but is logged for online troubleshooting.
    *
-   * ★ E11000 自愈:当 partial unique index 因存量脏数据(dupe)建不成功时,
-   * 检测目标 spec 是不是我们已知的单例约束(default / extraction 单例),
-   * 是就调 _dedupSingletonRows 挑 winner 删其他,重试 createIndex。
-   * 只对 meta_instance_upstream_config 的 group_type=1 spec 生效,其他 collection
-   * 走静默 error(不认识的 spec 不敢乱删数据)。
+   * ★ E11000 self-healing: when a partial unique index cannot be built because of existing dirty data (dupes),
+   * detect whether the target spec is a singleton constraint we know (default / extraction singleton),
+   * and if so call _dedupSingletonRows to pick a winner and delete the others, then retry createIndex.
+   * Only takes effect for the group_type=1 spec of meta_instance_upstream_config; other collections
+   * go through the silent error path (unrecognized specs, so we do not dare to delete data blindly).
    */
   private async ensureIndex(
     colName: string,
@@ -333,19 +333,19 @@ export class MongoMetadataStore implements IMetadataStore {
         ?? (err instanceof Error ? err.message : String(err));
       const specStr = `${colName}(${JSON.stringify(spec)})`;
       if (code === 85 || code === 86) {
-        // 索引已存在但定义不同（如 options 变化），索引创建被跳过，功能不受影响
+        // The index already exists but with a different definition (e.g. options changed); index creation is skipped and functionality is unaffected
         console.warn(`[mongodb-adapter] ensureIndex skipped (index exists with different options) ${specStr}: ${msg}`);
         return;
       }
       if (code === 67) {
-        // 索引规范本身非法(e.g. partial filter 里用了不支持的操作符 $in / $or 等)。
-        // **这是代码 bug**,unique 索引根本没建成 → 应用层并发写会绕过约束。
-        // 之前 group_type $in partial filter 就是这类 bug (mem-orooh93g 出 2 行 default)。
+        // The index spec itself is invalid (e.g. the partial filter uses an unsupported operator such as $in / $or).
+        // **This is a code bug**: the unique index was never built → concurrent writes at the application layer would bypass the constraint.
+        // The earlier group_type $in partial filter was exactly this kind of bug (mem-orooh93g got 2 default rows).
         console.error(`[mongodb-adapter] ⚠ ensureIndex REJECTED (invalid spec — CODE BUG) ${specStr}: ${msg}`);
         return;
       }
       if (code === 11000) {
-        // 尝试自愈:识别 meta_instance_upstream_config 的 default/extraction 单例约束
+        // Try self-healing: recognize the default/extraction singleton constraint of meta_instance_upstream_config
         const partial = (options as { partialFilterExpression?: Record<string, unknown> } | undefined)?.partialFilterExpression;
         const targetGroupType =
           colName === "meta_instance_upstream_config" &&
@@ -359,7 +359,7 @@ export class MongoMetadataStore implements IMetadataStore {
           console.error(`[mongodb-adapter] ensureIndex blocked by duplicate ${targetGroupType} rows ${specStr}, attempting auto-heal…`);
           try {
             const kept = await this._dedupSingletonRows(targetGroupType);
-            // 重试 createIndex,dedup 完再撞 11000 说明 dedup 有 bug,升级 error
+            // Retry createIndex; hitting 11000 again after dedup means the dedup has a bug, so escalate to error
             await this.col(colName).createIndex(spec, options);
             console.warn(`[mongodb-adapter] ✅ auto-healed ${targetGroupType} singleton (kept group_id=${kept}) and index built`);
             return;
@@ -371,25 +371,25 @@ export class MongoMetadataStore implements IMetadataStore {
             return;
           }
         }
-        // 不认识的 collection/spec 的 E11000,不敢乱删数据,只报警
+        // E11000 on an unrecognized collection/spec: do not dare to delete data blindly, only alert
         console.error(`[mongodb-adapter] ⚠ ensureIndex BLOCKED by duplicate data ${specStr}: ${msg} — unique invariant is NOT enforced until dupes are cleaned`);
         return;
       }
-      // 非预期错误（网络超时、权限不足等），需要人工排查
+      // Unexpected error (network timeout, insufficient permissions, etc.), needs manual investigation
       console.warn(`[mongodb-adapter] ensureIndex failed (unexpected error, code=${code}) ${specStr}: ${msg}`);
     }
   }
 
   /**
-   * Auto-heal helper: meta_instance_upstream_config 里同 group_type (default/extraction)
-   * 出现多行(历史脏数据 or 并发 double-seed 遗留)时,挑 winner 保留,删其他。
+   * Auto-heal helper: when meta_instance_upstream_config has multiple rows of the same group_type (default/extraction)
+   * (leftover from historical dirty data or concurrent double-seed), pick a winner to keep and delete the others.
    *
-   * Winner 规则(确定性 tiebreaker,多次跑结果一致):
-   *   1. 最早 created_at(先 seed 的留下 —— 正常并发场景先到者一般没被 update)
-   *   2. 平局 → 最早 updated_at
-   *   3. 再平 → 最小 id (auto-increment 递增号)
+   * Winner rule (deterministic tiebreaker, consistent across runs):
+   *   1. Earliest created_at (the first to be seeded stays -- in normal concurrent scenarios the first arrival is generally not updated)
+   *   2. Tie → earliest updated_at
+   *   3. Still tied → smallest id (auto-increment number)
    *
-   * 返回保留的 group_id。若只有 0 或 1 行,不动数据,返回可能存在的那一行的 group_id 或 null。
+   * Returns the retained group_id. If there are only 0 or 1 rows, data is untouched and it returns the group_id of the row that may exist, or null.
    */
   private async _dedupSingletonRows(groupType: string): Promise<string | null> {
     const rows = await this.col<Document>("meta_instance_upstream_config")
@@ -397,7 +397,7 @@ export class MongoMetadataStore implements IMetadataStore {
       .toArray();
     if (rows.length <= 1) return (rows[0] as { group_id?: string })?.group_id ?? null;
 
-    // 确定性排序,winner 排第一
+    // Deterministic sort, winner comes first
     rows.sort((a, b) => {
       const ca = String((a as Document).created_at ?? "");
       const cb = String((b as Document).created_at ?? "");
@@ -419,11 +419,11 @@ export class MongoMetadataStore implements IMetadataStore {
 
   private async migrateLegacyUserKeys(): Promise<void> {
     if (this.legacyUserKeysMigrated) return;
-    // 只捞 **含 legacy user_key 字段** 的 users(v2 用户走 meta_user_keys 表,
-    // 根本没这个字段)。原来是 find({}) 全表 → 逐个 findOne(user_keys) 打 N 次
-    // 网络往返(存量老库 ~1s;新库还是 40ms 但每 store 首次都白付)。
-    // 换成 $exists 过滤:老库只捞真需要迁的少量 doc;全 v2 的实例直接空数组,
-    // 只花 1 次 count-level 查询 (~40ms) 就 mark 完事。
+    // Only fetch users **that contain the legacy user_key field** (v2 users go through the meta_user_keys table
+    // and have no such field at all). It used to be find({}) on the whole table → findOne(user_keys) one by one, N
+    // network round trips (~1s for old existing databases; ~40ms for new ones but every store paid it needlessly the first time).
+    // Switched to a $exists filter: old databases only fetch the few docs that really need migrating; fully-v2 instances get an empty array directly,
+    // costing just one count-level query (~40ms) before marking done.
     const users = await this.col<UserEntity & { user_key?: string }>("meta_users")
       .find({ user_key: { $exists: true } } as Document, PROJECT_NO_ID)
       .toArray();
@@ -531,7 +531,7 @@ export class MongoMetadataStore implements IMetadataStore {
         });
         return doc;
       } catch (err) {
-        // 调用方显式指定 default_key_value 命中 UNIQUE:翻译业务错(HTTP 409),不 retry。
+        // When the caller explicitly specifies default_key_value it hits UNIQUE: translate into a business error (HTTP 409), no retry.
         if (isUserKeyValueCollision(err)) {
           throw new DuplicateUserKeyError(defaultKeyValue);
         }
@@ -582,9 +582,9 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async updateUser(userId: string, patch: Partial<UserEntity>): Promise<UserEntity | null> {
-    // external_id / auth_provider：外部认证（如 WOA）绑定存量账号时写入，
-    // 用于下次登录判断是否初次。白名单漏掉 auth_provider 会导致绑定"看似成功、
-    // 实际没写域"，下次按域反查落空 → 401，属静默失效，务必保留。
+    // external_id / auth_provider: written when external auth (e.g. WOA) binds an existing account,
+    // used to determine whether it is a first login next time. If the allowlist misses auth_provider, the binding "looks successful
+    // but actually never wrote the domain", and the next reverse lookup by domain misses → 401, a silent failure; be sure to keep it.
     const allowed = ["password", "display_name", "email", "raw_profile_json", "status", "metadata_json", "username", "external_id", "auth_provider"];
     await this.patchOne("meta_users", { user_id: userId }, patch, allowed, true);
     return this.getUserById(userId);
@@ -1190,8 +1190,8 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async deleteAssets(assetIds: string[]): Promise<BatchDeleteResult> {
-    // 物理删除 meta_assets，并级联清理绑定与 ACL。
-    // 已不存在视为幂等成功（Skill 钩子/handler 双通道会二次调用）。
+    // Physically delete meta_assets, and cascade-clean bindings and ACLs.
+    // Already absent counts as idempotent success (the Skill hook/handler dual channel will call twice).
     const result: BatchDeleteResult = { deleted_ids: [], failed: [] };
     for (const id of assetIds) {
       const existing = await this.getAssetById(id);
@@ -1226,7 +1226,7 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   // ============================================================
-  // AgentFixedAsset（全量替换）
+  // AgentFixedAsset (full replace)
   // ============================================================
   async setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): Promise<void> {
     const now = nowIso();
@@ -1260,8 +1260,8 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   async addAgentFixedAsset(agentId: string, b: FixedAssetBindingInput): Promise<void> {
-    // (agent_id, asset_id) 上有 unique index（见 initIndexes）。冲突 = 已存在
-    // → 视作 no-op，天然幂等。
+    // There is a unique index on (agent_id, asset_id) (see initIndexes). Conflict = already exists
+    // → treated as a no-op, naturally idempotent.
     try {
       await this.col("meta_agent_fixed_assets").insertOne({
         id: generateRelationId(),
@@ -1297,7 +1297,7 @@ export class MongoMetadataStore implements IMetadataStore {
         (d) => d as FixedAssetBindingEntity,
       );
     }
-    // 类型过滤：先按 asset_type 拿 asset_id 集合，再用它过滤 binding。
+    // Type filter: first get the asset_id set by asset_type, then use it to filter bindings.
     const assetIds = await this.col("meta_assets")
       .find({ asset_type: { $in: [...types] } } as Document, { projection: { asset_id: 1 } })
       .map((d) => (d as { asset_id: string }).asset_id)
@@ -1518,11 +1518,11 @@ export class MongoMetadataStore implements IMetadataStore {
     return docs as unknown as ConfigParamEntity[];
   }
 
-  // ── InstanceUpstreamConfig (v2 模型组) ─────────────────────────────────
+  // ── InstanceUpstreamConfig (v2 model group) ─────────────────────────────────
   //
-  // 与 SQLite 实现语义等价,并发写入靠 `version` 乐观锁 + 单例 UNIQUE 索引兜底。
-  // agents 全域唯一校验用 SELECT-all → 内存计算,写入用 findOneAndUpdate({version})
-  // 匹配失败(乐观锁冲突)最多重试 3 次,再失败抛 version_mismatch。
+  // Semantically equivalent to the SQLite implementation; concurrent writes are backstopped by the `version` optimistic lock + the singleton UNIQUE index.
+  // The agents global-uniqueness check uses SELECT-all → in-memory computation; writes use findOneAndUpdate({version}),
+  // and on match failure (optimistic lock conflict) retry up to 3 times, then throw version_mismatch if still failing.
 
   private async nextInstanceUpstreamConfigId(): Promise<number> {
     const result = await this.col("meta_counters").findOneAndUpdate(
@@ -1544,15 +1544,15 @@ export class MongoMetadataStore implements IMetadataStore {
     filter?: InstanceUpstreamConfigFilter,
     seedIfEmpty?: SupportedAgent[],
   ): Promise<InstanceUpstreamConfigEntity[]> {
-    // v1 legacy 清理:v1 时期字段名 (agent_source/type) 与 v2 (group_id/group_type) 完全不同。
-    // 存量数据升级到 v2 时不做迁移(设计文档 §10.3 明确"回滚代价可接受"),这里做兜底:
-    // 一次性删掉库里没有 group_id 的旧文档,避免 seed 判断与 groups_list 结果错乱。
-    // 幂等操作,新库 deletedCount=0 无副作用。
+    // v1 legacy cleanup: the v1-era field names (agent_source/type) are completely different from v2 (group_id/group_type).
+    // Existing data is not migrated on upgrade to v2 (design doc §10.3 explicitly says "rollback cost is acceptable"); this is the safety net:
+    // one-time delete of old documents in the database without group_id, to avoid confusing the seed check and the groups_list result.
+    // Idempotent operation; on a new database deletedCount=0 with no side effects.
     await this._sweepLegacyV1Docs();
 
     if (seedIfEmpty && seedIfEmpty.length > 0) {
       await this.ensureDefaultSeeded(seedIfEmpty);
-      // 已存在 default → 走 diff-append 同步(方案 E,与 SQLite 语义等价)
+      // default already exists → go through diff-append sync (option E, semantically equivalent to SQLite)
       await this._syncDefaultAgentsWithSnapshotMongo(seedIfEmpty);
     }
 
@@ -1561,7 +1561,7 @@ export class MongoMetadataStore implements IMetadataStore {
     const docs = await this.col("meta_instance_upstream_config")
       .find(query, PROJECT_NO_ID)
       .toArray();
-    // 排序:default → custom → extraction, 同类 updated_at DESC
+    // Ordering: default → custom → extraction, and within the same type updated_at DESC
     const rank: Record<string, number> = { default: 0, custom: 1, extraction: 2 };
     docs.sort((a, b) => {
       const ra = rank[String((a as Document).group_type)] ?? 9;
@@ -1573,9 +1573,9 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 幂等 seed:若 default 行不存在,写入一行 (agents=supported, mode=official)。
-   * 供 list 及所有写入路径(create/update/toggle/delete + extraction/*)共用。
-   * 与 SQLite ensureDefaultSeeded 语义等价。
+   * Idempotent seed: if the default row does not exist, write one row (agents=supported, mode=official).
+   * Shared by list and all write paths (create/update/toggle/delete + extraction/*).
+   * Semantically equivalent to SQLite ensureDefaultSeeded.
    */
   async ensureDefaultSeeded(supported: SupportedAgent[]): Promise<void> {
     if (!supported || supported.length === 0) return;
@@ -1584,7 +1584,7 @@ export class MongoMetadataStore implements IMetadataStore {
       { projection: { _id: 1 } },
     );
     if (hasDefault) return;
-    // 用 UNIQUE partial index (group_type='default') 兜并发:失败即别人刚 seed 完。
+    // Use the UNIQUE partial index (group_type='default') as a concurrency backstop: failure means someone else just finished seeding.
     try {
       const id = await this.nextInstanceUpstreamConfigId();
       const now = nowIso();
@@ -1602,14 +1602,14 @@ export class MongoMetadataStore implements IMetadataStore {
         model_id: "",
         description: "",
         version: 1,
-        supported_agents_snapshot: agentsList,   // seed 时 snapshot = agents
+        supported_agents_snapshot: agentsList,   // at seed time snapshot = agents
         created_at: now,
         updated_at: now,
       } as Document);
     } catch (err) {
       const code = (err as { code?: number })?.code;
       if (code !== 11000) throw err;
-      // else: 并发 seed → 忽略
+      // else: concurrent seed → ignore
     }
   }
 
@@ -1618,7 +1618,7 @@ export class MongoMetadataStore implements IMetadataStore {
   ): Promise<InstanceUpstreamConfigEntity> {
     const agents = input.agents ?? [];
 
-    // 1. 单例约束
+    // 1. Singleton constraint
     if (input.group_type === "default" || input.group_type === "extraction") {
       const existing = await this.col("meta_instance_upstream_config").findOne(
         { group_type: input.group_type } as Document,
@@ -1632,13 +1632,13 @@ export class MongoMetadataStore implements IMetadataStore {
       }
     }
 
-    // 2. agents 全域唯一
+    // 2. agents global uniqueness
     if (input.group_type !== "extraction") {
       await this.assertAgentsNotOverlapMongo(agents, null);
     }
 
-    // 2b. 组名全域唯一(仅 custom;default/extraction 走 seed 固定名不触发)
-    //     历史脏数据不清理,只拦新写入 —— 参考设计文档 §5.3(v2.8)。
+    // 2b. Group name global uniqueness (custom only; default/extraction use the fixed names from seed and do not trigger it)
+    //     Historical dirty data is not cleaned, only new writes are blocked -- see design doc §5.3 (v2.8).
     if (input.group_type === "custom") {
       await this.assertGroupNameUniqueMongo(input.name ?? "", null);
     }
@@ -1660,7 +1660,7 @@ export class MongoMetadataStore implements IMetadataStore {
         model_id: input.model_id ?? "",
         description: input.description ?? "",
         version: 1,
-        supported_agents_snapshot: [],   // custom/extraction 恒 [];default 由 seed 路径写入
+        supported_agents_snapshot: [],   // custom/extraction always []; default is written by the seed path
         created_at: now,
         updated_at: now,
       } as Document);
@@ -1668,7 +1668,7 @@ export class MongoMetadataStore implements IMetadataStore {
       const code = (err as { code?: number })?.code;
       const keyPattern = (err as { keyPattern?: Record<string, unknown> })?.keyPattern;
       if (code === 11000 && keyPattern && "group_type" in keyPattern) {
-        // 并发 create default/extraction
+        // Concurrent create of default/extraction
         throw new InstanceUpstreamWriteConflictError(
           input.group_type === "default" ? "default_already_exists" : "extraction_already_exists",
           `${input.group_type} group already exists (concurrent write)`,
@@ -1682,7 +1682,7 @@ export class MongoMetadataStore implements IMetadataStore {
   async updateInstanceUpstreamGroup(
     input: UpdateInstanceUpstreamGroupInput,
   ): Promise<InstanceUpstreamConfigEntity> {
-    // 3 次乐观锁重试
+    // 3 optimistic lock retries
     for (let attempt = 0; attempt < 3; attempt++) {
       const current = await this.getInstanceUpstreamGroup(input.group_id);
       if (!current) {
@@ -1711,10 +1711,10 @@ export class MongoMetadataStore implements IMetadataStore {
         await this.assertAgentsNotOverlapMongo(nextAgents, current.group_id);
       }
 
-      // name 变更 → 校验全域唯一(仅 custom;default/extraction 由 service 层拦掉,这里兜底)
+      // name change → validate global uniqueness (custom only; default/extraction are blocked by the service layer, with a safety check here)
       //
-      // 历史脏数据豁免:trim 后 name 与 current.name 相同(前端回传原值)不触发查重,
-      // 避免"以前重名的就算了不管"约定被 update 路径打破。参考 §5.3(v2.8)。
+      // Historical dirty data exemption: if the trimmed name equals current.name (the frontend sends back the original value), do not trigger the duplicate check,
+      // avoiding breaking the "ignore what was already duplicated before" convention via the update path. See §5.3 (v2.8).
       if (
         input.name !== undefined
         && current.group_type === "custom"
@@ -1741,7 +1741,7 @@ export class MongoMetadataStore implements IMetadataStore {
       if ((result.matchedCount ?? 0) === 1) {
         return (await this.getInstanceUpstreamGroup(input.group_id))!;
       }
-      // 匹配失败:并发写入抢先了。expected_version 显式传入 → 立即冲突,否则重试。
+      // Match failed: a concurrent write got there first. If expected_version was explicitly passed → conflict immediately, otherwise retry.
       if (input.expected_version !== undefined) {
         throw new InstanceUpstreamWriteConflictError(
           "version_mismatch",
@@ -1840,9 +1840,9 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 校验组名(trim 后)与其他任意组(含 default / extraction 保留名)不冲突。
-   * SQLite 对称版:大小写敏感、空白 trim 后精确匹配。history 脏数据不清理,只拦新写入。
-   * 参考设计文档 §5.3(v2.8)。
+   * Validate that the group name (after trim) does not conflict with any other group (including the reserved names of default / extraction).
+   * SQLite-symmetric version: case-sensitive, exact match after whitespace trim. History dirty data is not cleaned, only new writes are blocked.
+   * See design doc §5.3 (v2.8).
    */
   private async assertGroupNameUniqueMongo(
     candidateName: string,
@@ -1876,38 +1876,38 @@ export class MongoMetadataStore implements IMetadataStore {
   }
 
   /**
-   * 清理 v1 遗留:文档 + v1 UNIQUE(agent_source,type) 索引。
+   * Clean up v1 leftovers: documents + the v1 UNIQUE(agent_source,type) index.
    *
-   * v1 时期建的 `agent_source_1_type_1` 索引不删掉的话,v2 写入(缺 agent_source/type)会被
-   * MongoDB 当作 `{agent_source: null, type: null}` → 第二次 v2 insert 撞 E11000。
+   * If the `agent_source_1_type_1` index created in the v1 era is not dropped, v2 writes (missing agent_source/type) would be
+   * treated by MongoDB as `{agent_source: null, type: null}` → the second v2 insert hits E11000.
    *
-   * 三步幂等,进程内只跑一次(用 legacyV1Swept 记账):
-   *   1. dropIndex('agent_source_1_type_1') —— 不存在时 IndexNotFound(code 27) 静默吞
-   *   2. deleteMany({group_id: {\$exists: false}}) —— v1 文档没 group_id
-   *   3. 后续调 ensureIndex 会补回 v2 需要的 (group_id / group_type) 索引
+   * Three idempotent steps, run only once per process (tracked with legacyV1Swept):
+   *   1. dropIndex('agent_source_1_type_1') -- IndexNotFound (code 27) silently swallowed when absent
+   *   2. deleteMany({group_id: {\$exists: false}}) -- v1 documents have no group_id
+   *   3. later calls to ensureIndex will restore the (group_id / group_type) indexes that v2 needs
    *
-   * v1→v2 是历史迁移动作,数据面切到 v2 之后就不会再有 v1 写入,进程启动扫一次
-   * 足够。原来每次 list 都跑要花 2 次 Mongo 网络往返 (~150ms),稳态 list 延迟
-   * ~400ms 里这块是主贡献者。进程重启会再跑一次兜底,不留窗口。
+   * v1→v2 is a historical migration action; after the data plane switches to v2 there will be no more v1 writes, and scanning once at process start
+   * is enough. Previously running on every list cost 2 Mongo network round trips (~150ms), the main contributor
+   * to the ~400ms steady-state list latency. A process restart runs it once more as a safety net, leaving no window.
    */
   private async _sweepLegacyV1Docs(): Promise<void> {
-    if (this.legacyV1Swept) return; // 本进程已扫过,直接返回
+    if (this.legacyV1Swept) return; // this process has already swept, return directly
 
-    // 1. 删 v1 UNIQUE 索引(如果还在)
+    // 1. Drop the v1 UNIQUE index (if still there)
     try {
       await this.col("meta_instance_upstream_config").dropIndex("agent_source_1_type_1");
       console.warn("[metadata-mongo] dropped v1-legacy index agent_source_1_type_1");
     } catch (err) {
       const code = (err as { code?: number })?.code;
       if (code !== 27 && code !== 26) {
-        // 27 = IndexNotFound, 26 = NamespaceNotFound(collection 都还没建)
+        // 27 = IndexNotFound, 26 = NamespaceNotFound (the collection has not even been created)
         console.warn(
           `[metadata-mongo] dropIndex agent_source_1_type_1 unexpected code=${code}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
 
-    // 2. 删 v1 遗留文档
+    // 2. Delete v1 leftover documents
     try {
       const result = await this.col("meta_instance_upstream_config").deleteMany(
         { group_id: { $exists: false } } as Document,
@@ -1924,15 +1924,15 @@ export class MongoMetadataStore implements IMetadataStore {
       );
     }
 
-    // 走完这一次(dropIndex 成功 or IndexNotFound 都算完成) → 记账,本进程后续 list 直接跳过。
-    // deleteMany 失败也 mark:反复重试对 500 类错误无意义,重启进程更合适。
+    // After finishing this pass (dropIndex success or IndexNotFound both count as done) → mark, and later lists in this process skip it directly.
+    // Mark even if deleteMany fails: retrying repeatedly is pointless for 500-class errors, a process restart is more appropriate.
     this.legacyV1Swept = true;
   }
 
   /**
-   * 方案 E:default.agents 与 supported-agents 全集 diff-append 同步(Mongo 版)。
-   * 语义与 SqliteMetadataStore._syncDefaultAgentsWithSnapshot 完全一致。
-   * 并发:updateOne WHERE version=<读到的>,失败静默(下次 list 会重试)。
+   * Option E: diff-append sync between default.agents and the full supported-agents set (Mongo version).
+   * Semantics are exactly the same as SqliteMetadataStore._syncDefaultAgentsWithSnapshot.
+   * Concurrency: updateOne WHERE version=<the one read>, failing silently (the next list will retry).
    */
   private async _syncDefaultAgentsWithSnapshotMongo(supported: SupportedAgent[]): Promise<void> {
     const supportedNames = Array.from(new Set(supported.map((a) => a.agent_source))).sort();
@@ -1950,7 +1950,7 @@ export class MongoMetadataStore implements IMetadataStore {
     const version = Number(d.version ?? 1);
     const now = nowIso();
 
-    // 场景 B: snapshot 空(存量实例迁移)→ 只补 snapshot,不改 agents
+    // Scenario B: snapshot empty (existing instance migration) → only fill snapshot, do not change agents
     if (currentSnapshot.length === 0) {
       await this.col("meta_instance_upstream_config").updateOne(
         { group_type: "default", version } as Document,
@@ -1959,12 +1959,12 @@ export class MongoMetadataStore implements IMetadataStore {
       return;
     }
 
-    // 场景 C/D/E: diff 计算
+    // Scenario C/D/E: diff computation
     const newAgents = supportedNames.filter((a) => !currentSnapshot.includes(a));
     const snapshotShrunk = currentSnapshot.some((a) => !supportedSet.has(a));
     if (newAgents.length === 0 && !snapshotShrunk) return;
 
-    // 计算新 agents,排除已被 custom 组占用的
+    // Compute the new agents, excluding those already occupied by a custom group
     const nextAgents = [...currentAgents];
     if (newAgents.length > 0) {
       const customDocs = await this.col("meta_instance_upstream_config")

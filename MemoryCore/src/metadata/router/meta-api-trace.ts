@@ -1,8 +1,8 @@
 /**
- * 元数据 API 可观测性：入口 / 出口 / 异常 trace 日志（含脱敏后的入参、出参）。
+ * Metadata API observability: entry / exit / exception trace logs (including sanitized inputs and outputs).
  *
- * 覆盖 /v3/meta/* 与 /v3/internal/meta/* 的 dispatch 层。
- * stdout 单行 JSON（interface: tdai-metadata-api，经 api-trace 模块）。
+ * Covers the dispatch layer of /v3/meta/* and /v3/internal/meta/*.
+ * Single-line JSON on stdout (interface: tdai-metadata-api, via the api-trace module).
  */
 import { trace } from "../../core/report/trace.js";
 import { getObservabilityBackend } from "../../core/report/factory.js";
@@ -17,7 +17,7 @@ import {
 const MAX_LOG_FIELD_CHARS = 1_024;
 const MAX_LOG_JSON_CHARS = 8_192;
 
-/** @deprecated 使用 sanitizeApiPayload；保留单测与外部导入兼容。 */
+/** @deprecated Use sanitizeApiPayload; kept for compatibility with unit tests and external imports. */
 export function sanitizeMetaPayload(value: unknown, depth = 0): unknown {
   return sanitizeApiPayload(value, MAX_LOG_FIELD_CHARS, depth);
 }
@@ -90,7 +90,7 @@ function maybeReportOtel(event: string, attrs: Record<string, string | number | 
   trace.report(event, attrs);
 }
 
-/** 请求进入 dispatch（鉴权通过后、handler 执行前）。 */
+/** Request enters dispatch (after auth passes, before the handler runs). */
 export function logMetaApiEntry(ctx: MetaApiTraceContext, body?: unknown): void {
   const policy = getApiTraceConfig().policy;
   const attrs: Record<string, string | number | boolean> = {
@@ -103,7 +103,7 @@ export function logMetaApiEntry(ctx: MetaApiTraceContext, body?: unknown): void 
   maybeReportOtel("api.http.request", { ...attrs, success: true });
 }
 
-/** 正常返回 envelope（含业务 4xx）。 */
+/** Normal return of an envelope (including business 4xx). */
 export function logMetaApiResponse(ctx: MetaApiTraceContext, envelope: ApiResponseEnvelope, httpStatus: number): void {
   const success = envelope.code === 0;
   const policy = getApiTraceConfig().policy;
@@ -121,7 +121,7 @@ export function logMetaApiResponse(ctx: MetaApiTraceContext, envelope: ApiRespon
   maybeReportOtel("api.http.response", attrs);
 }
 
-/** 未捕获异常或 MetadataError 抛出路径。 */
+/** Uncaught exception or MetadataError thrown path. */
 export function logMetaApiError(
   ctx: MetaApiTraceContext,
   err: unknown,
@@ -145,7 +145,7 @@ export function logMetaApiError(
   maybeReportOtel("api.http.error", attrs);
 }
 
-/** 鉴权/参数校验等提前返回（无 handler 执行）。 */
+/** Early return from auth/parameter validation, etc. (no handler executed). */
 export function logMetaApiRejected(
   ctx: MetaApiTraceContext,
   args: { httpStatus: number; envelopeCode: number; message: string; body?: unknown },

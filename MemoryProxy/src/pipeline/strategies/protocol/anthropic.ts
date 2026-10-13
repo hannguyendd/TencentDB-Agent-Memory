@@ -1,10 +1,10 @@
 /**
- * Anthropic Messages ProtocolStrategy (Phase 2)。
+ * Anthropic Messages ProtocolStrategy (Phase 2).
  *
- * 覆盖 claude-code agent 走的协议。老代码入口: anthropicHandler.ts::handleAnthropicMessages。
+ * Covers the protocol used by the claude-code agent. Legacy entry point: anthropicHandler.ts::handleAnthropicMessages.
  *
- * Phase 2 只填纯函数骨架, Phase 4 补齐 buildUpstreamBody (含 sanitizeThinkingBlocks)
- * / createStreamTap (含 createSseThinkingFixStream 中间件) / sanitizeForRetry 钩子。
+ * Phase 2 only fills in the pure-function skeleton; Phase 4 adds buildUpstreamBody (including sanitizeThinkingBlocks)
+ * / createStreamTap (including the createSseThinkingFixStream middleware) / the sanitizeForRetry hook.
  */
 
 import type {
@@ -29,21 +29,21 @@ export const anthropicProtocol: ProtocolStrategy = {
   },
 
   applySessionContext(body, block): void {
-    // anthropic 协议: session context 追加到 body.system (原 anthropicHandler
-    // 走 injection/agents/claude-code 的 apply, 详见 injection/adapters/anthropic-body.ts)。
-    // Phase 4 走 injection/pipeline 时保留同样语义 —— 这里 stub 只做类型契约占位。
+    // anthropic protocol: session context is appended to body.system (the original anthropicHandler
+    // went through the apply of injection/agents/claude-code, see injection/adapters/anthropic-body.ts).
+    // Phase 4 keeps the same semantics when going through injection/pipeline — this stub only holds a type-contract placeholder.
     if (!block) return;
     const existing = typeof body.system === "string" ? body.system : "";
     body.system = existing ? `${existing}\n${block}` : block;
   },
 
   applyInjection(_body, _block): void {
-    // Phase 4 接入 injection/pipeline
+    // Phase 4 hooks into injection/pipeline
   },
 
   buildUpstreamBody(body, target: ForwardTarget): unknown {
-    // Phase 4: 需要 sanitizeThinkingBlocks + target.bodyOverrides 合并。
-    // 当前 stub 仅做 bodyOverrides 合并 (与 handler openai 一致语义 for 非 thinking 路径)。
+    // Phase 4: needs sanitizeThinkingBlocks + target.bodyOverrides merge.
+    // The current stub only merges bodyOverrides (same semantics as the handler openai for the non-thinking path).
     if (target.bodyOverrides) {
       return { ...body, ...target.bodyOverrides };
     }
@@ -51,13 +51,13 @@ export const anthropicProtocol: ProtocolStrategy = {
   },
 
   sanitizeForRetry(body): Record<string, unknown> {
-    // Phase 4: 需要真正调 sanitizeThinkingBlocks (anthropicHandler.ts:279+)。
-    // 当前 stub 返回浅复制, 契约表明"anthropic 独有 retry sanitize 钩子存在"。
+    // Phase 4: needs to really call sanitizeThinkingBlocks (anthropicHandler.ts:279+).
+    // The current stub returns a shallow copy; the contract signals that "the anthropic-only retry sanitize hook exists".
     return { ...body };
   },
 
   buildUpstreamHeaders(_clientHeaders, _effectiveKey, _target, _sessionKey): Record<string, string> {
-    // Phase 4: SKIP_REQUEST_HEADERS_WITH_INTERNAL + x-api-key 而非 Bearer
+    // Phase 4: SKIP_REQUEST_HEADERS_WITH_INTERNAL + x-api-key instead of Bearer
     return {};
   },
 
@@ -74,7 +74,7 @@ export const anthropicProtocol: ProtocolStrategy = {
       const usage = (respJson.usage && typeof respJson.usage === "object")
         ? respJson.usage as Record<string, unknown>
         : undefined;
-      // anthropic non-stream: content 是 blocks 数组 [{type:"text",text:"..."}]
+      // anthropic non-stream: content is a blocks array [{type:"text",text:"..."}]
       const content = respJson.content as Array<Record<string, unknown>> | undefined;
       let assistantText: string | undefined;
       if (Array.isArray(content)) {
@@ -86,7 +86,7 @@ export const anthropicProtocol: ProtocolStrategy = {
       const upstreamRequestId = typeof respJson.id === "string" ? respJson.id : undefined;
       return { usage, assistantText, upstreamRequestId };
     } catch {
-      // 若上游返 SSE 而非 JSON, 走 SSE 解析兜底
+      // if upstream returns SSE rather than JSON, fall back to SSE parsing
       const parsed = parseAnthropicSseStream(text);
       return {
         usage: Object.keys(parsed.usage).length ? parsed.usage : undefined,
@@ -115,7 +115,7 @@ export const anthropicProtocol: ProtocolStrategy = {
   },
 
   buildLangfuseInput(body): unknown {
-    // Phase 4: 用 flattenAnthropicMessagesForOpik (anthropicHandler.ts 有)
+    // Phase 4: use flattenAnthropicMessagesForOpik (present in anthropicHandler.ts)
     return { system: body.system, messages: body.messages };
   },
 };

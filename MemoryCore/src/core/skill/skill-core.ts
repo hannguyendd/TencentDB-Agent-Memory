@@ -1,26 +1,26 @@
 /**
- * SkillCore — 6 个 manage action 的编排门面
+ * SkillCore — orchestration facade for the 6 manage actions
  *
- * 编排逻辑：
- *   1. 解析 + 校验 SKILL.md（frontmatter）
- *   2. 取 head（如有）
+ * Orchestration logic:
+ *   1. Parse + validate SKILL.md (frontmatter)
+ *   2. Get the head (if any)
  *   3. assertTeamMatch / assertOwner / assertVersionFresh
- *   4. 调 SkillVersioning.appendNextVersion / createNewSkill
+ *   4. Call SkillVersioning.appendNextVersion / createNewSkill
  *
- * 6 个写动作：
- *   - create        新建 skill v1
- *   - update        替换 SKILL.md
- *   - patch         单点串替
+ * 6 write actions:
+ *   - create        create a new skill v1
+ *   - update        replace SKILL.md
+ *   - patch         single-point string replacement
  *   - delete        head status=archived
- *   - writeFiles    增/改资源
- *   - removeFiles   删资源
+ *   - writeFiles    add/modify resources
+ *   - removeFiles   delete resources
  *
- * 4 个读动作：
- *   - get           返回 detail（默认 head；可指定 version）
- *   - list          按 team_id + filters 返回 head 行
- *   - search        FTS 命中
- *   - listVersions  历史版本元信息
- *   - readFile      读资源字节
+ * 4 read actions:
+ *   - get           return the detail (default head; a version can be specified)
+ *   - list          return head rows by team_id + filters
+ *   - search        FTS hits
+ *   - listVersions  historical version metadata
+ *   - readFile      read resource bytes
  */
 
 import { parseSkillFile, validateSkillFile } from "./skill-format.js";
@@ -49,7 +49,7 @@ import type {
 const TAG = "[skill-core]";
 
 // ═════════════════════════════════════════════════════════════════════
-//  错误类型（用于 gateway 映射 HTTP 错误码）
+//  Error types (used by the gateway to map HTTP error codes)
 // ═════════════════════════════════════════════════════════════════════
 
 
@@ -78,7 +78,7 @@ export class SkillCoreError extends Error {
   }
 }
 
-// 工具：把下层抛的各类错误统一翻译为 SkillCoreError（保留原 message）
+// Utility: uniformly translate the various errors thrown from lower layers into SkillCoreError (keeping the original message)
 function toCoreError(e: unknown): never {
   if (e instanceof SkillCoreError) throw e;
   const code = (e as { code?: string }).code as SkillCoreErrorCode | undefined;
@@ -98,43 +98,43 @@ export interface SkillCoreOptions {
   resources: SkillResourceStore;
   versioning: SkillVersioning;
   /**
-   * 用于 skill_id 生成。默认 `skl-` + 12 字符 base62（CSPRNG，71 bit 真熵）。
-   * 保持与老 sid 相同长度 (16 字符)，仅字符集从 base36 扩到 base62 且用真随机源。
-   * 测试可注入固定值。
+   * Used for skill_id generation. Default `skl-` + 12-character base62 (CSPRNG, 71 bits of true entropy).
+   * Keeps the same length as the old sid (16 characters), only the character set is widened from base36 to base62 and a true random source is used.
+   * Tests can inject a fixed value.
    */
   ulid?: () => string;
-  /** Date.now 的注入。默认 Date.now。 */
+  /** Injection of Date.now. Default Date.now. */
   now?: () => number;
-  /** 旧版本 TTL 秒数。0 = 关闭。 */
+  /** TTL in seconds for old versions. 0 = disabled. */
   versionTtlSeconds?: number;
-  /** 每个 skill 最多保留的非 head 版本数。0 = 关闭。 */
+  /** Max number of non-head versions retained per skill. 0 = disabled. */
   maxNonHeadVersions?: number;
   /**
-   * `delete` 成功归档 head 后同步触发。fire-and-forget：钩子抛异常
-   * 会被吞掉，不影响 delete 返回值（asset 状态漂移可容忍：skill 已经
-   * archived，asset 慢一步同步不影响业务）。
+   * Fired synchronously after `delete` successfully archives the head. fire-and-forget: exceptions thrown by the hook
+   * are swallowed and do not affect delete's return value (asset state drift is tolerable: the skill is already
+   * archived, and the asset syncing a step late does not affect the business).
    *
-   * 与 `SkillVersioning.onSkillCreated` 成对：一个负责 v1 登记，一个
-   * 负责整 skill 归档，二者共同覆盖 asset 生命周期两端。
+   * Paired with `SkillVersioning.onSkillCreated`: one handles v1 registration, the other
+   * handles whole-skill archiving, together covering both ends of the asset lifecycle.
    */
   onSkillArchived?: (params: { skill_id: string; team_id?: string }) => void;
   /**
-   * 读路径自愈补登记钩子。
+   * Read-path self-healing re-registration hook.
    *
-   * 触发时机：`get` / `readFile` 成功返回单个 skill 之后。
-   * 不触发：`list` / `search` / `listing` / `listVersions`（浏览类，一次 N 条，
-   * 走 LRU 也偏贵；且这些接口不必然代表"使用"）。
+   * Fire timing: after `get` / `readFile` successfully returns a single skill.
+   * Not fired for: `list` / `search` / `listing` / `listVersions` (browse-type, N entries at once,
+   * costly even with an LRU; and these interfaces do not necessarily imply "use").
    *
-   * 契约：
-   *  - fire-and-forget：抛异常吞掉，不影响 read 的返回
-   *  - 上层实现须幂等且带 LRU（同一 skill_id 只有首次真正查 store）
-   *  - 用途：兜底修复 asset 缺失（历史数据 / 迁移遗漏 / 人工误删），
-   *    保证下次前端管控页能看到这个 skill
+   * Contract:
+   *  - fire-and-forget: exceptions are swallowed and do not affect the read's return
+   *  - the upper-level implementation must be idempotent and carry an LRU (only the first time per skill_id actually queries the store)
+   *  - purpose: safety-net repair of missing assets (historical data / migration omissions / accidental manual deletion),
+   *    ensuring the frontend control page can see this skill next time
    */
   onSkillAccessed?: (skill: Skill) => void;
 }
 
-// 各 action 入参类型（四个 ID 全部可选）
+// Input types for each action (all four IDs are optional)
 export interface CreateInput extends IdFields {
   name: string;
   content: string;
@@ -231,9 +231,9 @@ export class SkillCore {
     this.store = opts.store;
     this.resources = opts.resources;
     this.versioning = opts.versioning;
-    // 默认 sid = `skl-` + 12 字符 base62（CSPRNG，~71 bit 真熵）；总长 16。
-    // 与旧 `skl-${Math.random().toString(36).slice(2,14)}` 相同长度，
-    // 碰撞概率从单实例 100 万条时的 ~1.1e-4 降至 ~1.5e-10（详见 utils/short-id.ts）。
+    // Default sid = `skl-` + 12-character base62 (CSPRNG, ~71 bits of true entropy); total length 16.
+    // Same length as the old `skl-${Math.random().toString(36).slice(2,14)}`,
+    // collision probability drops from ~1.1e-4 at 1 million entries in a single instance to ~1.5e-10 (see utils/short-id.ts).
     this.ulid = opts.ulid ?? (() => `skl-${randomBase62(12)}`);
     this.now = opts.now ?? (() => Date.now());
     this.versionTtlSeconds = opts.versionTtlSeconds ?? 0;
@@ -242,7 +242,7 @@ export class SkillCore {
     this.onSkillAccessed = opts.onSkillAccessed;
   }
 
-  /** 读路径读到具体 skill 后 fire。异常吞掉，不阻塞读。 */
+  /** Fires after the read path reads a specific skill. Exceptions are swallowed and do not block the read. */
   private notifyAccessed(skill: Skill): void {
     if (!this.onSkillAccessed) return;
     try { this.onSkillAccessed(skill); } catch { /* swallow */ }
@@ -259,32 +259,32 @@ export class SkillCore {
       throw new SkillCoreError("INVALID_FRONTMATTER", `frontmatter.name '${file.frontmatter.name}' != body.name '${input.name}'`);
     }
 
-    // 2) 生成 sid 并做碰撞检测
+    // 2) generate the sid and do a collision check
     //
-    // 背景：默认 ulid 走 CSPRNG base62 12 字符（~71 bit 真熵，单实例 100 万
-    // skill 时碰撞概率 ~1.5e-10），工程上"永远不会撞"；但仍加一层 preflight
-    // 防御，把"撞了静默覆盖"变成"撞了 retry"。为什么不上 DB UNIQUE 约束：
-    //   - SQLite skills 表 UNIQUE(skill_id, version) 已存在，v1 碰撞会被物理挡住
-    //   - TCVDB 主键是 row_id（每行唯一），无法给 skill_id 加"仅 v1 唯一"约束
-    //     （skill 天生多版本，version 2/3 就是同 skill_id 共存）
-    // → 应用层 preflight 是唯一可移植到两种 store 的方案。
+    // Background: the default ulid goes through CSPRNG base62 with 12 characters (~71 bits of true entropy; for 1 million
+    // skills in a single instance the collision probability is ~1.5e-10), so in engineering terms it "never collides"; but a preflight layer is still added
+    // as a defense, turning "collision silently overwrites" into "collision retries". Why not add a DB UNIQUE constraint:
+    //   - the SQLite skills table already has UNIQUE(skill_id, version), so a v1 collision is physically blocked
+    //   - the TCVDB primary key is row_id (unique per row), so a "unique for v1 only" constraint cannot be added on skill_id
+    //     (skills are inherently multi-version; versions 2/3 coexist with the same skill_id)
+    // → an application-layer preflight is the only approach portable to both stores.
     //
-    // 注：注入的 ulid 工厂可能不带 'skl-' 前缀，这里兜底拼上。
+    // Note: an injected ulid factory may not carry the 'skl-' prefix, so it is prepended here as a safety net.
     const MAX_ID_ATTEMPTS = 3;
     let sid = "";
     for (let attempt = 1; attempt <= MAX_ID_ATTEMPTS; attempt++) {
       const u = this.ulid();
       sid = u.startsWith("skl-") ? u : `skl-${u}`;
 
-      // 全 team 范围查（不带 team_id）：只要 skill_id 全局撞了就重试。
-      // 用 getHeadIncludingArchived 覆盖 archived 行——归档不代表 sid 空闲，
-      // 版本表 UNIQUE(skill_id, version) 仍会挡住写入。
+      // Query across the whole team (without team_id): retry as soon as the skill_id collides globally.
+      // Use getHeadIncludingArchived to cover archived rows — archiving does not mean the sid is free,
+      // the versions table's UNIQUE(skill_id, version) would still block the write.
       const existing = await this.store.getHeadIncludingArchived(sid);
       if (!existing) break;
 
       if (attempt >= MAX_ID_ATTEMPTS) {
-        // 连续 3 次撞 —— 只可能是 ulid 注入器坏了（比如测试里固定返回同一值）
-        // 或熵源崩了，不是概率事件，直接抛。
+        // 3 consecutive collisions — this can only be a broken ulid injector (e.g. a test that always returns the same value)
+        // or a failed entropy source, not a probabilistic event; throw directly.
         throw new SkillCoreError(
           "SKILL_ID_COLLISION",
           `failed to generate a unique skill_id after ${MAX_ID_ATTEMPTS} attempts`,
@@ -375,27 +375,27 @@ export class SkillCore {
   }
 
   async delete(input: DeleteInput): Promise<{ skill_id: string; archived: boolean }> {
-    // 语义：物理真删除（2026-07 变更，原为软删）。
-    // - head 不存在（skill 不存在 / 已被删）→ SKILL_NOT_FOUND
-    // - 用 getHeadIncludingArchived 兼容历史遗留 archived 行：老数据里可能还有
-    //   未被清理的 archived head（旧软删语义留下的），此时 delete 应视为"补物理删"
-    //   而不是 404。
+    // Semantics: physical hard delete (changed in 2026-07, previously soft delete).
+    // - head does not exist (skill does not exist / already deleted) → SKILL_NOT_FOUND
+    // - use getHeadIncludingArchived to accommodate legacy archived rows: old data may still contain
+    //   uncleaned archived heads (left over from the old soft-delete semantics); in that case delete should be treated as a "supplementary physical delete"
+    //   rather than a 404.
     const head = await this.store.getHeadIncludingArchived(input.skill_id, input.team_id);
     if (input.team_id) assertTeamMatchWrap(head, input.team_id);
     if (!head) throw new SkillCoreError("SKILL_NOT_FOUND");
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
 
-    // 物理删除所有版本 + 清 storage + 汇总上报 shark(-N)
+    // physically delete all versions + clear storage + report in aggregate to shark(-N)
     const deleted = await this.versioning.deleteSkill(input.skill_id, input.team_id);
 
-    // fire-and-forget：asset 状态同步失败不回滚 delete
-    // deleted > 0 才触发 —— 与 store.deleteAllVersions 语义对齐
+    // fire-and-forget: asset state sync failure does not roll back the delete
+    // triggered only when deleted > 0 — aligned with store.deleteAllVersions semantics
     if (deleted > 0 && this.onSkillArchived) {
       try { this.onSkillArchived({ skill_id: input.skill_id, team_id: input.team_id }); }
       catch { /* swallow */ }
     }
 
-    // 返回结构保持 wire 兼容：archived=true 表示"已完成删除"（真删也复用该字段）
+    // keep the return structure wire-compatible: archived=true means "deletion completed" (a hard delete also reuses this field)
     return { skill_id: input.skill_id, archived: deleted > 0 };
   }
 
@@ -425,12 +425,12 @@ export class SkillCore {
     if (input.agent_id) assertOwnerWrap(head, input.agent_id, input.team_id);
     assertVersionFreshWrap(head, input.expected_version);
 
-    // 过滤出真实存在于 head manifest 中的 path（避免无效的资源变更触发空 v+1）
+    // filter to paths that actually exist in the head manifest (avoids invalid resource changes triggering an empty v+1)
     const manifestPaths = new Set(head.manifest.map((m) => m.path));
     const toRemove = input.paths.filter((p) => manifestPaths.has(p));
 
     if (toRemove.length === 0) {
-      return head; // 幂等
+      return head; // idempotent
     }
 
     try {
@@ -455,7 +455,7 @@ export class SkillCore {
 
   async get(input: GetInput): Promise<Skill> {
     if (typeof input.version === "number") {
-      // 指定版本查询：先确认 skill 存在（通过 head），再查指定版本
+      // specified-version query: first confirm the skill exists (via the head), then query the specified version
       const head = await this.store.getHead(input.skill_id, input.team_id);
       if (input.team_id) assertTeamMatchWrap(head, input.team_id);
       if (!head) throw new SkillCoreError("SKILL_NOT_FOUND");
@@ -467,11 +467,11 @@ export class SkillCore {
         );
       }
       this.assertVersionNotExpired(row, head.version);
-      // 读时自愈：即使拿的是历史版本，也用 head 触发（asset 只认 skill_id）
+      // self-heal on read: even when a historical version was fetched, trigger with the head (the asset only recognizes skill_id)
       this.notifyAccessed(head);
       return row;
     }
-    // 不传 version → 返回最新 head
+    // no version passed → return the latest head
     const row = await this.store.getHead(input.skill_id, input.team_id);
     if (input.team_id) assertTeamMatchWrap(row, input.team_id);
     if (!row) throw new SkillCoreError("SKILL_NOT_FOUND");
@@ -488,11 +488,11 @@ export class SkillCore {
       // would exclude skills written by other team members.
       // Only apply user_id filter when there is no team_id (personal scope).
       user_id: input.team_id ? undefined : input.user_id,
-      // task_id 与 user_id 同性质，是写审计字段（记 skill 首次落库时的对话上下文），
-      // 不参与"哪些 skill 可用"的检索。传了会造成抽取器每次新对话（新 task_id）
-      // 都看不到已有 skill → LLM 走 skill_create → 撞 SKILL_NAME_DUPLICATE →
-      // 加后缀 (foo-v2, foo-v3, …) 产生大量同族 skill_id。
-      // Store 层保留按 task_id 过滤的能力（供审计接口显式使用）。
+      // task_id is of the same nature as user_id: a write-audit field (recording the conversation context when the skill was first persisted),
+      // and does not participate in the retrieval of "which skills are available". Passing it would make the extractor, on every new conversation (new task_id),
+      // fail to see existing skills → the LLM goes skill_create → hits SKILL_NAME_DUPLICATE →
+      // appends a suffix (foo-v2, foo-v3, …), producing lots of same-family skill_ids.
+      // The Store layer retains the ability to filter by task_id (for explicit use by audit interfaces).
       task_id: undefined,
       name_prefix: input.filters?.name_prefix,
       status: input.filters?.status,
@@ -510,7 +510,7 @@ export class SkillCore {
       mode: input.mode,
       agent_id: input.agent_id,
       // Same rationale as list(): task_id is audit-only, not a read filter.
-      // See list() 上的详细注释。
+      // See the detailed comment on list().
       task_id: undefined,
       // Same rationale as list(): user_id is audit-only, not a read filter
       // when team-scoped. Skills are team-shared assets.
@@ -542,18 +542,18 @@ export class SkillCore {
     if (input.team_id) assertTeamMatchWrap(head, input.team_id);
     if (!head) throw new SkillCoreError("SKILL_NOT_FOUND");
     const ver = input.version ?? head.version;
-    // 校验 path 是否在该版本的 manifest 中（如果是 head 直接看 head.manifest，否则查 by version）
+    // verify whether the path is in that version's manifest (if head, look at head.manifest directly, otherwise query by version)
     const target = typeof input.version === "number" && input.version !== head.version
       ? await this.store.getByVersion(input.skill_id, input.version, input.team_id)
       : head;
     if (!target) {
-      // head 存在但指定版本查不到 → 版本已被 GC，不是 skill 不存在
+      // head exists but the specified version cannot be found → the version was already GC'd, not that the skill does not exist
       throw new SkillCoreError(
         "STORAGE_NOT_FOUND",
         `version ${input.version} not found (may have been GC'd); current head is v${head.version}`,
       );
     }
-    // TTL 检查：指定旧版本资源时拦截
+    // TTL check: intercept when an old version's resource is specified
     if (typeof input.version === "number" && input.version !== head.version) {
       this.assertVersionNotExpired(target, head.version);
     }
@@ -582,7 +582,7 @@ export class SkillCore {
     total_bytes: number;
     warnings: string[];
   }> {
-    // 1. 取目标版本
+    // 1. get the target version
     const head = await this.store.getHead(input.skill_id, input.team_id);
     if (input.team_id) assertTeamMatchWrap(head, input.team_id);
     if (!head) throw new SkillCoreError("SKILL_NOT_FOUND");
@@ -602,10 +602,10 @@ export class SkillCore {
       target = head;
     }
 
-    // 2. 读 SKILL.md 内容（DB 权威源）
+    // 2. read SKILL.md content (DB is the authoritative source)
     const content = target.content;
 
-    // 3. 读资源文件
+    // 3. read resource files
     const warnings: string[] = [];
     const resources: Array<{
       path: string; content: string; encoding: "base64"; is_executable: boolean;
@@ -627,10 +627,10 @@ export class SkillCore {
       });
     }
 
-    // 4. 打包 zip
+    // 4. pack the zip
     const zipBuf = buildZip(target.name, content, resources);
 
-    // 5. 上限防护
+    // 5. cap protection
     if (zipBuf.length > this.resources.getMaxSkillTotalBytes()) {
       throw new SkillCoreError(
         "SKILL_EXPORT_TOO_LARGE",
@@ -659,7 +659,7 @@ export class SkillCore {
       file = parseSkillFile(raw);
       validateSkillFile(file);
     } catch (e) {
-      // Parse / 长度 / regex 失败 → 42203（设计 §3.6）
+      // Parse / length / regex failure → 42203 (design §3.6)
       throw new SkillCoreError("SKILL_FRONTMATTER_INVALID", (e as Error).message);
     }
     return file;
@@ -683,7 +683,7 @@ export class SkillCore {
 
   // ── TTL helpers ──
 
-  /** 判断非 head 版本是否过期。head 永不过期；ttlSeconds=0 关闭。 */
+  /** Determine whether a non-head version has expired. The head never expires; ttlSeconds=0 disables it. */
   private isVersionExpired(skill: Skill): boolean {
     if (skill.is_head) return false;
     if (!this.versionTtlSeconds) return false;
@@ -704,7 +704,7 @@ export class SkillCore {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  内部小工具
+//  Internal helpers
 // ═════════════════════════════════════════════════════════════════════
 
 function assertOwnerWrap(head: Skill, agentId: string, teamId?: string): void {
@@ -747,7 +747,7 @@ function splitJoin(s: string, find: string, replace: string): string {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  zip 打包
+//  zip packaging
 // ═════════════════════════════════════════════════════════════════════
 
 function buildZip(
@@ -760,7 +760,7 @@ function buildZip(
   // 1. SKILL.md
   files[`${name}/SKILL.md`] = [strToU8(skillMdContent)];
 
-  // 2. 资源文件（直接放在 name/ 下，与导入源目录结构一致）
+  // 2. resource files (placed directly under name/, consistent with the import source directory structure)
   for (const r of resources) {
     const key = `${name}/${r.path}`;
     const buf = r.encoding === "base64"
@@ -771,8 +771,8 @@ function buildZip(
     }];
   }
 
-  // fflate 的 Zippable 类型对 value 的约束与我们的 Record 不完全一致，
-  // 但运行时完全兼容（Uint8Array + opts tuple 就是合法的 ZippableFile）。
+  // fflate's Zippable type constraint on value is not entirely consistent with our Record,
+  // but is fully compatible at runtime (Uint8Array + opts tuple is a valid ZippableFile).
   const zipped = zipSync(files as unknown as Parameters<typeof zipSync>[0]);
   return Buffer.from(zipped);
 }

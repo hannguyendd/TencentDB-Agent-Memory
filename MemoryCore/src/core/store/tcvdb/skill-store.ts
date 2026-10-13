@@ -1,12 +1,12 @@
 /**
- * TcvdbSkillStore — Skill 存储层的 TCVDB (Service 模式) 实现
+ * TcvdbSkillStore — TCVDB (Service mode) implementation of the Skill storage layer
  *
- * 实现 ISkillStore 接口，提供技能元数据/内容的 VDB 持久化。
- * 对标 SqliteSkillStore 的 12 个方法，参考 TcvdbMemoryStore 的
- * Collection 创建 / upsert / query / search / hybridSearch 模式。
+ * Implements the ISkillStore interface, providing VDB persistence for skill metadata/content.
+ * Mirrors the 12 methods of SqliteSkillStore, following TcvdbMemoryStore's
+ * Collection creation / upsert / query / search / hybridSearch patterns.
  *
- * Schema: 详见 docs/design/2026-06-29-skill-vdb-schema.md
- * 接口:   src/core/skill/skill-store.interface.ts
+ * Schema: see docs/design/2026-06-29-skill-vdb-schema.md
+ * Interface:   src/core/skill/skill-store.interface.ts
  */
 
 import { randomBase62 } from "../../../utils/short-id.js";
@@ -33,26 +33,26 @@ import { SkillStoreError } from "../../skill/skill-store.interface.js";
 // ─── Config ─────────────────────────────────────────────────────────────
 
 export interface TcvdbSkillStoreConfig {
-  /** VDB 实例 URL */
+  /** VDB instance URL */
   url: string;
-  /** 账户名 (默认 "root") */
+  /** Account name (default "root") */
   username: string;
   /** API Key */
   apiKey: string;
-  /** Database 名称 */
+  /** Database name */
   database: string;
-  /** Embedding 模型名 (与 L1 共用 "bge-large-zh") */
+  /** Embedding model name (shared with L1: "bge-large-zh") */
   embeddingModel: string;
-  /** 请求超时 ms */
+  /** Request timeout in ms */
   timeout: number;
-  /** CA 证书路径 */
+  /** CA certificate path */
   caPemPath?: string;
   logger?: StoreLogger;
-  /** BM25 编码器 (shared instance) */
+  /** BM25 encoder (shared instance) */
   bm25Encoder?: BM25LocalEncoder;
-  /** 注入 ulid 工厂 */
+  /** Injected ulid factory */
   ulid?: () => string;
-  /** 注入 now */
+  /** Injected now */
   now?: () => number;
 }
 
@@ -61,7 +61,7 @@ export interface TcvdbSkillStoreConfig {
 const TAG = "[tcvdb-skill-store]";
 const SKILLS_COLLECTION_SUFFIX = "_skills";
 
-/** VDB 密集向量索引 (DISK_FLAT, HNSW fallback) */
+/** VDB dense vector index (DISK_FLAT, HNSW fallback) */
 const VECTOR_INDEX_DISK_FLAT: Record<string, unknown> = {
   fieldName: "vector",
   fieldType: "vector",
@@ -79,7 +79,7 @@ const VECTOR_INDEX_HNSW: Record<string, unknown> = {
   params: { M: 16, efConstruction: 200 },
 };
 
-/** 查询时返回的字段 (全部, vector/sparse_vector 除外) */
+/** Fields returned by queries (all, except vector/sparse_vector) */
 const SKILL_OUTPUT_FIELDS: string[] = [
   "id", "skill_id", "version", "is_head",
   "team_id", "owner_agent_id", "user_id", "task_id",
@@ -88,15 +88,15 @@ const SKILL_OUTPUT_FIELDS: string[] = [
   "created_at_ms", "updated_at_ms",
 ];
 
-/** 向量字段名 (VDB 内部名) */
+/** Vector field names (VDB internal names) */
 const DENSE_VECTOR_FIELD = "vector";
 const SPARSE_VECTOR_FIELD = "sparse_vector";
 
 // ─── Ulid helpers ───────────────────────────────────────────────────────
 
-// row_id 生成器 —— VDB doc 的物理主键 (`id` primaryKey field)。
-// 与 skill_id 分离：skill_id 在版本间共享，row_id 每一行唯一。
-// base62 12 字符（~71 bit CSPRNG 真熵）。
+// row_id generator — the physical primary key of a VDB doc (the `id` primaryKey field).
+// Separate from skill_id: skill_id is shared across versions, row_id is unique per row.
+// base62 12 characters (~71 bits of CSPRNG true entropy).
 function defaultUlid(): string {
   return randomBase62(12);
 }
@@ -142,7 +142,7 @@ export class TcvdbSkillStore implements ISkillStore {
     this.now = config.now ?? (() => Date.now());
   }
 
-  // ── ISkillStore: 生命周期 ─────────────────────────────────────────────
+  // ── ISkillStore: lifecycle ─────────────────────────────────────────────
 
   init(): void {
     if (this.initialized) return;
@@ -179,26 +179,26 @@ export class TcvdbSkillStore implements ISkillStore {
     const tid = input.team_id ?? "default";
     const sid = input.skill_id;
 
-    // 1. 查旧 head
+    // 1. look up the old head
     const head = await this._getHeadAsync(sid, tid);
 
-    // 2. Name 唯一性校验 (无 head → 新 skill, 检查重名)
+    // 2. Name uniqueness check (no head → new skill, check for a duplicate name)
     if (!head) {
       await this._assertNameUnique(input.name, tid, input.owner_agent_id ?? "default", sid);
     } else {
-      // 已有 history → name 不可变
+      // there is already history → name is immutable
       if (head.name !== input.name) {
         throw new SkillStoreError("SKILL_NAME_DUPLICATE", "name change is not allowed across versions");
       }
     }
 
-    // 3. 版本唯一性校验
+    // 3. version uniqueness check
     const newVersion = head ? head.version + 1 : 1;
     const existing = await this._queryOneAsync(
       `skill_id="${this._escape(sid)}" and version=${newVersion} and team_id="${this._escape(tid)}"`,
     );
     if (existing) {
-      // 同一版本已存在 → 幂等返回
+      // the same version already exists → idempotent return
       return existing;
     }
 
@@ -208,7 +208,7 @@ export class TcvdbSkillStore implements ISkillStore {
     const rowId = this.ulid();
     const storageDir = `skills/${sid}/v${newVersion}`;
 
-    // 4. 构建新行文档
+    // 4. build the new row document
     const doc: Record<string, unknown> = {
       id: rowId,
       skill_id: sid,
@@ -230,7 +230,7 @@ export class TcvdbSkillStore implements ISkillStore {
       updated_at_ms: ts,
     };
 
-    // 5. BM25 稀疏向量编码
+    // 5. BM25 sparse vector encoding
     if (this.bm25Encoder) {
       const sparse = this.bm25Encoder.encodeTexts([input.content]);
       if (sparse.length > 0 && sparse[0] && sparse[0].length > 0) {
@@ -238,23 +238,23 @@ export class TcvdbSkillStore implements ISkillStore {
       }
     }
 
-    // 6. 先 INSERT 新行 (补偿 VDB 无事务：新行先落，旧行后翻)
+    // 6. INSERT the new row first (compensating for VDB's lack of transactions: land the new row first, flip the old row afterwards)
     await this.client.upsert(this.skillsCollection, [doc]);
 
-    // 7. CAS 翻旧 head —— 修 2026-09-02 的并发写脏事故。
+    // 7. CAS-flip the old head — fixes the concurrent dirty-write incident of 2026-09-02.
     //
-    // 原实现是"读→合并→再 upsert"三步, 中间没锁 —— 单个 extract task 内 LLM 通过
-    // Vercel AI SDK 一次 turn 并发 skill_patch(expected_version=N) N 份, 全都读到
-    // head=vN、全都通过内存 assertVersionFresh、全都到达步骤 6 落新行, 结果 5 行
-    // (skill_id, version=N+1, is_head=1) 一起活着, listSkills(is_head=1) 之后返回
-    // 同一 skill_id N 次。
+    // The original implementation was a three-step "read → merge → upsert" with no lock in between — within a single extract task the LLM, in one turn via the
+    // Vercel AI SDK, concurrently issued N skill_patch(expected_version=N) calls, all of which read
+    // head=vN, all passed the in-memory assertVersionFresh, and all reached step 6 and landed new rows, leaving 5 rows
+    // (skill_id, version=N+1, is_head=1) alive together, so listSkills(is_head=1) afterwards returned
+    // the same skill_id N times.
     //
-    // 现在改成 VDB /document/update 的服务器侧原子 CAS: filter 精确指定"我期望的
-    // 旧 head"(skill_id + team_id + version=old + is_head=1), 只有第一个到达的
-    // writer 拿到 affectedCount=1, 后到的全部拿 affectedCount=0。后者是 loser,
-    // 立刻 DELETE 步骤 6 刚落下的孤儿新行以还原状态, 并抛 SKILL_VERSION_STALE 让
-    // 上层调用方(skill-versioning 会同时清 COS 目录)与 LLM(拿到错误后携新版本号
-    // 重试)按乐观锁语义处理。
+    // Now it is changed to VDB /document/update's server-side atomic CAS: the filter precisely specifies "the old head
+    // I expect" (skill_id + team_id + version=old + is_head=1), only the first writer to arrive
+    // gets affectedCount=1, and all later ones get affectedCount=0. The latter are losers,
+    // who immediately DELETE the orphan new row just landed in step 6 to restore state, and throw SKILL_VERSION_STALE so that
+    // the upper-level caller (skill-versioning also cleans the COS directory) and the LLM (which, on getting the error, retries with the new version number)
+    // handle it per optimistic-lock semantics.
     if (head) {
       let affected = 0;
       try {
@@ -265,9 +265,9 @@ export class TcvdbSkillStore implements ISkillStore {
           update: { is_head: 0 },
         });
       } catch (err) {
-        // 网络/VDB 抖动导致 CAS 状态不明 —— 不能贸然当 loser 删自己(万一 CAS 实际
-        // 成功了呢), 也不能贸然当 winner(万一别人先赢了呢)。保留原行为: 记 warn,
-        // 让写路径正常返回, 双 head 由 listSkills 的 version DESC 兜底解决。
+        // A network/VDB jitter left the CAS state unknown — we cannot rashly act as a loser and delete our own row (what if the CAS actually
+        // succeeded?), nor rashly act as a winner (what if someone else won first?). Keep the original behavior: log a warn,
+        // let the write path return normally, and the double head is resolved by listSkills' version DESC fallback.
         this.logger?.warn(
           `${TAG} Head-flip CAS request failed for ${sid} v${head.version}: ` +
             (err instanceof Error ? err.message : String(err)),
@@ -276,17 +276,17 @@ export class TcvdbSkillStore implements ISkillStore {
       }
 
       if (affected === 0) {
-        // loser 分支: 我们输了 CAS。步骤 6 刚落下的 v=(head+1) 是"孤儿", 必须清掉
-        // 才能让 listSkills 保持单一 head。DELETE 用 documentIds 走主键定位, 精确
-        // 只删自己那一行, 不会误伤并发 winner 的同版本兄弟行。
+        // loser branch: we lost the CAS. The v=(head+1) just landed in step 6 is an "orphan" and must be cleaned
+        // so that listSkills keeps a single head. DELETE locates by primary key via documentIds, precisely
+        // deleting only our own row, without harming a concurrent winner's same-version sibling row.
         try {
           await this.client.deleteDoc(this.skillsCollection, {
             query: { documentIds: [rowId] },
           });
         } catch (delErr) {
-          // 清孤儿失败: 场上会短暂多一行 v=(head+1) 是 is_head=1, 但因为它比 winner
-          // 的时间戳更早, listSkills 按 updated_at_ms DESC 会取到 winner。留 warn,
-          // 供运维/reconciler 兜底真删。
+          // Orphan cleanup failed: briefly there will be an extra row v=(head+1) with is_head=1 on the field, but because its timestamp is earlier than the winner's,
+          // listSkills ordered by updated_at_ms DESC will pick the winner. Leave a warn
+          // for ops/reconciler to really delete as a fallback.
           this.logger?.warn(
             `${TAG} Head-flip CAS lost race for ${sid} v${newVersion}, but orphan cleanup failed: ` +
               (delErr instanceof Error ? delErr.message : String(delErr)),
@@ -310,9 +310,9 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 内部使用：获取当前 head 但不过滤 status。archived head 也会返回。
-   * 与 `SqliteSkillStore.getHeadIncludingArchived` 语义一致。
-   * 供 `SkillCore.delete` 幂等回读、asset 补偿任务、管控台使用。
+   * Internal use: get the current head without filtering status. An archived head is also returned.
+   * Consistent with the semantics of `SqliteSkillStore.getHeadIncludingArchived`.
+   * For `SkillCore.delete` idempotent readback, asset compensation tasks, and the admin console.
    */
   async getHeadIncludingArchived(skillId: string, teamId?: string): Promise<Skill | null> {
     await this._ensureInit();
@@ -351,7 +351,7 @@ export class TcvdbSkillStore implements ISkillStore {
     }
   }
 
-  // ── ISkillStore: 查询 ─────────────────────────────────────────────────
+  // ── ISkillStore: queries ─────────────────────────────────────────────────
 
   async listSkills(opts: ListSkillsOptions): Promise<{ items: Skill[]; total: number }> {
     await this._ensureInit();
@@ -367,8 +367,8 @@ export class TcvdbSkillStore implements ISkillStore {
     if (statuses.length === 1) {
       conditions.push(`status="${this._escape(statuses[0])}"`);
     } else {
-      // VDB 不支持 `IN (...)` 语法，只支持 `OR`；用 `(status="a" or status="b")` 展开。
-      // 之前用 IN 会静默失败（VDB 返回 code=14000），导致 status=["active","archived"] 空结果。
+      // VDB does not support `IN (...)` syntax, only `OR`; expand with `(status="a" or status="b")`.
+      // Using IN before failed silently (VDB returned code=14000), causing status=["active","archived"] to return empty.
       conditions.push(
         `(${statuses.map((s) => `status="${this._escape(s)}"`).join(" or ")})`,
       );
@@ -378,9 +378,9 @@ export class TcvdbSkillStore implements ISkillStore {
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 1000);
     const offset = Math.max(opts.offset ?? 0, 0);
 
-    // name_prefix: VDB filter 语法不支持 LIKE / 字符串前缀匹配，
-    // 改为拉取符合其余条件的 head 行后在内存里做前缀过滤再分页。
-    // (head 行数量级小，一次性拉取上限 1000 可接受)
+    // name_prefix: the VDB filter syntax does not support LIKE / string prefix matching,
+    // so instead pull the head rows matching the other conditions, then do prefix filtering in memory and paginate.
+    // (the number of head rows is small; a one-time pull with a cap of 1000 is acceptable)
     if (opts.name_prefix) {
       const prefix = opts.name_prefix;
       try {
@@ -393,7 +393,7 @@ export class TcvdbSkillStore implements ISkillStore {
         const filtered = (resp.documents ?? [])
           .map((d) => this._docToSkill(d))
           .filter((s) => s.name.startsWith(prefix));
-        // 2026-09-02 auto-heal: 前缀过滤完再 dedup, 保证 UI 只看到 winner
+        // 2026-09-02 auto-heal: dedup after prefix filtering, ensuring the UI sees only winners
         const deduped = this._autoHealListSkills(filtered);
         return { items: deduped.slice(offset, offset + limit), total: deduped.length };
       } catch (err) {
@@ -423,12 +423,12 @@ export class TcvdbSkillStore implements ISkillStore {
       this.logger?.warn(`${TAG} listSkills query failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // 2026-09-02 auto-heal: 应用层 group-by skill_id 挑 winner + fire-and-forget
-    // demote loser。历史脏数据 (同一 skill_id 多行 is_head=1) 在 UI 一次刷新就自愈。
-    // 详见 _autoHealListSkills 注释。
+    // 2026-09-02 auto-heal: application-layer group-by skill_id to pick winners + fire-and-forget
+    // demote of losers. Historical dirty data (multiple rows with is_head=1 for the same skill_id) self-heals on a single UI refresh.
+    // See the _autoHealListSkills comment for details.
     const deduped = this._autoHealListSkills(rows);
-    // total 修正: 本页物理行 - 本页去掉的 loser 数。分页跨脏组时略偏, fire-and-forget
-    // 完成 + VDB filter 索引刷新后下次读自动收敛。
+    // total correction: physical rows on this page - the number of losers removed on this page. Slightly off when pagination crosses a dirty group; after fire-and-forget
+    // completes + the VDB filter index refreshes, the next read converges automatically.
     const adjustedTotal = Math.max(0, total - (rows.length - deduped.length));
     return { items: deduped, total: adjustedTotal };
   }
@@ -512,8 +512,8 @@ export class TcvdbSkillStore implements ISkillStore {
         filter: `is_head=0 and status="active" and created_at_ms<${cutoffMs}`,
         limit: 10000,
         outputFields: ["skill_id", "version", "is_head", "status", "storage_dir", "created_at_ms"],
-        // VDB 要求 sort 字段为 uint64；skill_id 是 string 不可排序（code 15143）。
-        // 用 created_at_ms 升序（先清最老的），符合 TTL 清理语义。
+        // VDB requires the sort field to be uint64; skill_id is a string and cannot be sorted (code 15143).
+        // Use created_at_ms ascending (clean the oldest first), consistent with TTL cleanup semantics.
         sort: [{ fieldName: "created_at_ms", direction: "asc" }],
       });
       return (resp.documents ?? []).map((d) => ({
@@ -545,8 +545,8 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 物理删除同 skill_id 下的所有版本行。`SkillCore.delete` 走此路径。
-   * 权限校验由调用方 SkillCore 负责；本方法只按 (skill_id, team_id) 一次 deleteDoc。
+   * Physically delete all version rows under the same skill_id. `SkillCore.delete` goes through this path.
+   * Permission checks are the responsibility of the caller SkillCore; this method does a single deleteDoc by (skill_id, team_id) only.
    */
   async deleteAllVersions(skillId: string, teamId?: string): Promise<number> {
     await this._ensureInit();
@@ -587,7 +587,7 @@ export class TcvdbSkillStore implements ISkillStore {
         collection: this.skillsCollection,
         shardNum: 1,
         replicaNum: 2,
-        description: "Skill 技能存储",
+        description: "Skill storage",
         embedding: {
           status: "enabled",
           field: "content",
@@ -645,12 +645,12 @@ export class TcvdbSkillStore implements ISkillStore {
   // ─── Private: Query helpers ───────────────────────────────────────────
 
   /**
-   * 查 head 行。默认强制 `status="active"`；`includeArchived=true` 时不加 status 过滤，
-   * 供 `getHeadIncludingArchived` 使用（archived head 的幂等回读 / 补偿任务）。
+   * Look up the head row. By default forces `status="active"`; with `includeArchived=true` no status filter is added,
+   * for use by `getHeadIncludingArchived` (idempotent readback of an archived head / compensation tasks).
    *
-   * 2026-09-02 read-time auto-heal: 从 limit=1 提升到 100, 侦测同一 skill_id
-   * 多 head 脏数据 (append-race 遗留), 应用层挑 winner + fire-and-forget demote
-   * 其他 loser。参见 _pickHeadAndAutoHeal 注释。
+   * 2026-09-02 read-time auto-heal: raised from limit=1 to 100, to detect multi-head dirty data
+   * for the same skill_id (a leftover of the append-race); the application layer picks a winner + fire-and-forget demotes
+   * the other losers. See the _pickHeadAndAutoHeal comment.
    */
   private async _getHeadAsync(
     skillId: string,
@@ -665,8 +665,8 @@ export class TcvdbSkillStore implements ISkillStore {
     try {
       const resp = await this.client.query(this.skillsCollection, {
         filter,
-        // clean skill 只有 1 行；脏 skill 生产实际观察最大 5 行，100 是防御性上限。
-        // 顺带保证下面 tiebreaker 在极端脏数据下仍有确定 winner。
+        // A clean skill has only 1 row; the largest observed in production for a dirty skill is 5 rows, and 100 is a defensive upper bound.
+        // It also ensures the tiebreaker below still has a deterministic winner under extreme dirty data.
         limit: 100,
         outputFields: SKILL_OUTPUT_FIELDS,
       });
@@ -680,25 +680,25 @@ export class TcvdbSkillStore implements ISkillStore {
 
 
   // ─── Read-time auto-heal (2026-09-02) ────────────────────────────────
-  // 处理"同 skill_id 多 head is_head=1"的历史脏数据（append-race 遗留）。
-  // 每次读 head / list 时侦测 + 挑 winner + fire-and-forget demote loser。
-  // - winner 选择完全确定性: version DESC → updated_at_ms DESC → row_id ASC。
-  //   最后一层 row_id 保证并发 reader 挑同一个 winner, 彼此的 demote 集合
-  //   不打架, 收敛无歧义。
-  // - demote 走 documentIds 精确定位, 不受 filter 表达式在时间戳并列 / VDB
-  //   filter-index 异步刷新的影响。
-  // - 失败(网络/VDB 抖动)只 warn, 主流程返回 winner 不受阻; 下次读会再检测
-  //   再尝试, 幂等收敛。
+  // Handle historical dirty data of "multiple heads is_head=1 for the same skill_id" (a leftover of the append-race).
+  // On every head read / list: detect + pick a winner + fire-and-forget demote the losers.
+  // - winner selection is fully deterministic: version DESC → updated_at_ms DESC → row_id ASC.
+  //   The last row_id tier ensures concurrent readers pick the same winner, so their demote sets
+  //   do not conflict, and convergence is unambiguous.
+  // - demote locates precisely via documentIds, unaffected by filter expressions under timestamp ties / VDB
+  //   filter-index async refresh.
+  // - on failure (network/VDB jitter) only warn; the main flow returns the winner unimpeded; the next read will detect
+  //   and retry again, converging idempotently.
   //
-  // TTL 兜底: loser 变成 (v=N, is_head=0), 后续版本推进 → v=N 落出
-  // KEEP_RECENT 保护窗 + 时间过 cutoff 时, deleteVersion(sid, N) 一次性删掉
-  // 所有 (skill_id=X, version=N, is_head=0) 行(winner 那时也已 demote), 彻底
-  // 收敛。极端场景 (skill 从此不动) loser 停在磁盘上, 但不进任何读视图。
+  // TTL fallback: a loser becomes (v=N, is_head=0), and as later versions advance → when v=N falls out of the
+  // KEEP_RECENT protection window + time passes the cutoff, deleteVersion(sid, N) deletes
+  // all (skill_id=X, version=N, is_head=0) rows at once (the winner has also been demoted by then), fully
+  // converging. In the extreme scenario (the skill never changes again) the loser stays on disk, but enters no read view.
 
   /**
-   * 从 is_head=1 候选行里挑 winner, 并 fire-and-forget demote 其他行。
-   * 输入通常来自 filter 为 `is_head=1 and ...` 的 query 结果。
-   * 空输入返回 null; 单行输入直接返回, 不触发 update。
+   * Pick a winner from the is_head=1 candidate rows and fire-and-forget demote the other rows.
+   * Input usually comes from the query results with filter `is_head=1 and ...`.
+   * Empty input returns null; a single-row input is returned directly without triggering an update.
    */
   private _pickHeadAndAutoHeal(rows: Skill[]): Skill | null {
     if (rows.length === 0) return null;
@@ -718,7 +718,7 @@ export class TcvdbSkillStore implements ISkillStore {
     );
 
     if (loserRowIds.length > 0) {
-      // fire-and-forget: 主读路径不等 demote 完成; 失败只 warn, 下次读再补。
+      // fire-and-forget: the main read path does not wait for the demote to finish; on failure only warn, and the next read makes it up.
       this.client
         .update(this.skillsCollection, {
           documentIds: loserRowIds,
@@ -736,8 +736,8 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 对 listSkills 结果做 group-by skill_id + 每组挑 winner。
-   * 供 listSkills 修正返回 items 与 total 用。
+   * Group-by skill_id on the listSkills results + pick a winner per group.
+   * Used by listSkills to correct the returned items and total.
    */
   private _autoHealListSkills(rows: Skill[]): Skill[] {
     if (rows.length <= 1) return rows;
@@ -747,7 +747,7 @@ export class TcvdbSkillStore implements ISkillStore {
       if (arr) arr.push(r);
       else grouped.set(r.skill_id, [r]);
     }
-    // 快速路径: 完全 clean 时避免多余循环
+    // fast path: avoid an extra loop when completely clean
     if (grouped.size === rows.length) return rows;
 
     const winners: Skill[] = [];
@@ -758,7 +758,7 @@ export class TcvdbSkillStore implements ISkillStore {
     return winners;
   }
 
-  /** 按 filter 取一条 */
+  /** Fetch one by filter */
   private async _queryOneAsync(filter: string): Promise<Skill | null> {
     try {
       const resp = await this.client.query(this.skillsCollection, {
@@ -777,10 +777,10 @@ export class TcvdbSkillStore implements ISkillStore {
 
   // ─── Private: Write helpers ───────────────────────────────────────────
 
-  /** Upsert 更新文档的部分字段 (保留未传字段) */
+  /** Upsert to update partial fields of a document (unspecified fields are kept) */
   private async _updateDocAsync(rowId: string, partial: Record<string, unknown>): Promise<void> {
-    // VDB upsert 需要完整文档或至少 id + 变更字段
-    // 先读取现有文档，合并后 upsert
+    // VDB upsert needs the full document or at least id + the changed fields
+    // first read the existing document, merge, then upsert
     const existing = await this._queryByIdAsync(rowId);
     if (!existing) return;
 
@@ -790,10 +790,10 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * 按主键 (id / row_id) 取一条。
-   * 注意：id 是 primaryKey 而非 filter 索引，不能用 `filter: id="..."` 查询
-   * （VDB 会报 Field Not Found:id 被 catch 成 null）。必须走 documentIds 主键查找，
-   * 对齐 memory 生产实现 (tcvdb.ts "Primary key lookup: use documentIds")。
+   * Fetch one by primary key (id / row_id).
+   * Note: id is the primaryKey, not a filter index, so it cannot be queried with `filter: id="..."`
+   * (VDB reports Field Not Found: id and it gets caught as null). Must use the documentIds primary-key lookup,
+   * aligned with the memory production implementation (tcvdb.ts "Primary key lookup: use documentIds").
    */
   private async _queryByIdAsync(rowId: string): Promise<Skill | null> {
     try {
@@ -812,7 +812,7 @@ export class TcvdbSkillStore implements ISkillStore {
     }
   }
 
-  /** Name 唯一性校验 (同 team + agent + name 且 is_head=1 且 status=active) */
+  /** Name uniqueness check (same team + agent + name, and is_head=1 and status=active) */
   private async _assertNameUnique(
     name: string,
     teamId: string,
@@ -853,10 +853,10 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * bm25 模式：TCVDB 无纯稀疏检索通道（/document/search 只做 dense；
-   * hybridSearch 的 ann 为必填）。skill collection 的服务端 embedding 恒开启，
-   * 故 bm25 模式在 Service 模式下降级为 hybrid（dense + sparse），
-   * 语义等价且检索质量不弱于纯 BM25。standalone(SQLite) 才是真正的纯 BM25。
+   * bm25 mode: TCVDB has no pure sparse retrieval channel (/document/search only does dense;
+   * hybridSearch's ann is required). The skill collection's server-side embedding is always on,
+   * so in Service mode bm25 mode degrades to hybrid (dense + sparse),
+   * semantically equivalent and with retrieval quality no weaker than pure BM25. Only standalone (SQLite) is true pure BM25.
    */
   private async _searchBm25Async(
     queryText: string,
@@ -870,9 +870,9 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * embedding 模式：dense-only。走 /document/search + embeddingItems，
-   * 由 VDB 服务端对 query 文本做 embedding（collection.embedding.field=content）。
-   * 注意：/document/search 不接受 ann/match，服务端 embedding 用 embeddingItems 传原始文本。
+   * embedding mode: dense-only. Goes through /document/search + embeddingItems,
+   * with the VDB server embedding the query text (collection.embedding.field=content).
+   * Note: /document/search does not accept ann/match; server-side embedding uses embeddingItems to pass the raw text.
    */
   private async _searchEmbeddingAsync(
     queryText: string,
@@ -891,13 +891,13 @@ export class TcvdbSkillStore implements ISkillStore {
   }
 
   /**
-   * hybrid 模式：dense(服务端 embedding) + sparse(BM25) + RRF 融合。
-   * 对齐 memory 生产实现 (tcvdb.ts searchL1HybridAsync)：
-   *   - ann / match 均为数组
-   *   - ann.fieldName = 服务端 embedding 源字段 "content"，data 传原始 query 文本
-   *   - query 侧稀疏向量用 encodeQueries（IDF 权重），与写入侧 encodeTexts（TF）区分
+   * hybrid mode: dense (server-side embedding) + sparse (BM25) + RRF fusion.
+   * Aligned with the memory production implementation (tcvdb.ts searchL1HybridAsync):
+   *   - ann / match are both arrays
+   *   - ann.fieldName = the server-side embedding source field "content", data carries the raw query text
+   *   - the query-side sparse vector uses encodeQueries (IDF weights), distinct from the write-side encodeTexts (TF)
    *   - rerank: { method: "rrf", k: 60 }
-   * 无 BM25 编码器时退化为 dense-only（embedding）。
+   * Without a BM25 encoder it degrades to dense-only (embedding).
    */
   private async _searchHybridAsync(
     queryText: string,
@@ -909,7 +909,7 @@ export class TcvdbSkillStore implements ISkillStore {
       sparse.length > 0 && sparse[0] && sparse[0].length > 0 ? sparse[0] : undefined;
 
     if (!sparseVec) {
-      // 无稀疏信号 → dense-only
+      // no sparse signal → dense-only
       return this._searchEmbeddingAsync(queryText, topK, filter);
     }
 
@@ -993,7 +993,7 @@ export class TcvdbSkillStore implements ISkillStore {
     };
   }
 
-  /** Skill → VDB doc (用于 update 时重写) */
+  /** Skill → VDB doc (for rewriting on update) */
   private _skillToDoc(skill: Skill): Record<string, unknown> {
     return {
       id: skill.row_id,

@@ -1,11 +1,11 @@
 /**
- * TAPD 外部任务来源 provider。
+ * TAPD external task source provider.
  *
- * 支持需求（story）/ 任务（task）/ 缺陷（bug）三类，均可按工作空间（项目）批量导入。
- * 认证用用户手工填入的长期令牌：太湖统一认证令牌（bearer）或 TAPD 个人令牌（custom），
- * 由调用方经 TaskSourceContext 注入。
+ * Supports three kinds -- story / task / bug -- all of which can be bulk-imported per workspace (project).
+ * Authentication uses a long-lived token entered manually by the user: a Taihu unified-auth token (bearer) or a TAPD personal token (custom),
+ * injected by the caller via TaskSourceContext.
  *
- * 所有端点与站点根来自部署配置（经 registry.contextFor 注入），本文件不内置任何域名。
+ * All endpoints and the site root come from deployment config (injected via registry.contextFor); this file embeds no domain names.
  */
 
 import { TaskSourceError, type CandidatePage, type ListCandidatesQuery, type RemoteTaskDetail, type RemoteTaskRef, type TaskSourceContext, type TaskSourceProvider, type TaskWorkspace } from "../../types.js";
@@ -27,7 +27,7 @@ const MAX_LIMIT = 100;
 const MAX_BATCH_SIZE = 50;
 
 function clientFor(ctx: TaskSourceContext): TapdMcpClient {
-  // custom 认证（TAPD 个人令牌）走专用 header；bearer（太湖令牌）走 Authorization。
+  // custom auth (TAPD personal token) uses a dedicated header; bearer (Taihu token) uses Authorization.
   const headerName =
     ctx.cred.kind === "custom" && typeof ctx.cred.extra?.header === "string"
       ? ctx.cred.extra.header
@@ -46,18 +46,18 @@ function asRows(raw: unknown): Array<Record<string, unknown>> {
 }
 
 /**
- * 脱敏诊断：workspaces 为空是「令牌无效/不完整/账号无项目」的典型表现，
- * 但接口本身返回 200，容易被误判成「面板没加载」。
+ * Sanitized diagnostics: an empty workspaces list is the typical symptom of "token invalid / incomplete / account has no projects",
+ * but the API itself returns 200, so it is easily misjudged as "the panel did not load".
  *
- * **只记种类与长度**，绝不写令牌明文 —— 连前缀也不记：结构化前缀（如令牌族标识）
- * 本身就能定位令牌类型/环境，等同于泄漏形态。
- * 端点属内网基础设施地址，同样只记「是否已配置」而不回显值。
+ * **Only log the kind and length**, never the token in plaintext -- not even the prefix: a structured prefix (e.g. a token family identifier)
+ * can by itself identify the token type/environment, which amounts to leaking its shape.
+ * The endpoint is an internal infrastructure address, so likewise only log "whether it is configured" without echoing the value.
  */
 function diagnosticLog(ctx: TaskSourceContext, raw: unknown): void {
   const rows = Array.isArray(raw) ? raw : [];
   if (rows.length > 0) return;
   console.warn(
-    "[task-source:tapd] listWorkspaces 返回空 — " +
+    "[task-source:tapd] listWorkspaces returned empty — " +
       `kind=${ctx.cred.kind} token.len=${ctx.cred.secret.length} ` +
       `endpointSet=${Boolean(ctx.endpoint)} ` +
       `rawType=${Array.isArray(raw) ? "array(0)" : typeof raw}`,
@@ -70,29 +70,29 @@ export const tapdProvider: TaskSourceProvider = {
   maxBatchSize: MAX_BATCH_SIZE,
   needsWorkspace: true,
   /**
-   * TAPD 走 MCP 且 task 类不返回详情链接，故两个都要：
-   *   - MCP_URL：MCP 端点
-   *   - SITE_BASE_URL：构造详情页 URL 的站点根
-   * 声明在这里而非 registry，接新来源时无需改动通用层。
+   * TAPD goes through MCP and the task kind does not return a detail link, so both are needed:
+   *   - MCP_URL: the MCP endpoint
+   *   - SITE_BASE_URL: the site root used to build detail page URLs
+   * Declared here rather than in the registry, so connecting a new source needs no change to the generic layer.
    */
   requiredEnv: ["MCP_URL", "SITE_BASE_URL"],
-  // 待办接口（user_todo_*_get）是 TAPD 特有能力，声明后前端才显示「待办」开关。
+  // The todo APIs (user_todo_*_get) are a TAPD-specific capability; the frontend only shows the "Todo" switch once declared.
   capabilities: { todo: true },
-  // 两种令牌打到同一端点，仅 header 名不同（实测确认）。
-  // 输入框下方**只显示**「如何获取令牌？」链接（tokenUrlEnv 下发），
-  // 不再附带任何说明文案 —— 文案曾诱导用户把示例当内容填（直接填了示例字面量）。
+  // Both token kinds hit the same endpoint, differing only in header name (confirmed empirically).
+  // Below the input box **only** the "How do I get a token?" link is shown (delivered via tokenUrlEnv),
+  // with no additional explanatory text -- such text once misled users into filling in the example as content (they typed the example literal).
   authSchemes: [
     {
       kind: "bearer",
-      label: "太湖统一认证令牌",
-      // 申请页在太湖（与 TAPD 不同域），且 iWiki 也用同一个太湖 PAT 页 ——
-      // 故指向**全局共用**的 TAI_PAT_URL（完整 URL），改地址只改一处。
+      label: "Taihu unified auth token",
+      // The application page is on Taihu (a different domain from TAPD), and iWiki uses the same Taihu PAT page --
+      // so it points to the **globally shared** TAI_PAT_URL (a full URL); changing the address only requires changing one place.
       tokenUrlEnv: "TAI_PAT_URL",
     },
     {
       kind: "custom",
       headerName: "x-tapd-access-token",
-      label: "TAPD 个人令牌",
+      label: "TAPD personal token",
       tokenUrlEnv: "TASK_SOURCE_TAPD_PERSONAL_TOKEN_URL",
     },
   ],
@@ -100,9 +100,9 @@ export const tapdProvider: TaskSourceProvider = {
   async listWorkspaces(ctx: TaskSourceContext): Promise<TaskWorkspace[]> {
     const client = clientFor(ctx);
     const raw = await client.call("user_participant_workspace_get", {});
-    // 脱敏诊断：只记种类/长度/前缀，绝不记令牌明文。
-    // 项目列表来自「我参与的项目」，与令牌所属账号强相关 —— 为空时需先确认令牌是否
-    // 完整且属于有项目权限的账号。
+    // Sanitized diagnostics: only log kind/length/prefix, never the token in plaintext.
+    // The project list comes from "projects I participate in" and is strongly tied to the account owning the token -- when empty, first confirm the token is
+    // complete and belongs to an account with project permissions.
     diagnosticLog(ctx, raw);
     return asRows(raw)
       .filter((r) => (r["status"] === undefined || r["status"] === "normal"))
@@ -114,9 +114,9 @@ export const tapdProvider: TaskSourceProvider = {
   },
 
   async listCandidates(ctx: TaskSourceContext, q: ListCandidatesQuery): Promise<CandidatePage> {
-    // workspace_id 是常规列表接口的强制入参（stories_get / tasks_get / bugs_get 都要求），
-    // 但**待办接口是可选的**：不传 = 跨项目的全部待办，传了 = 只看该项目。
-    // 因此强制校验只在非待办模式下生效。
+    // workspace_id is a mandatory input of the regular list APIs (stories_get / tasks_get / bugs_get all require it),
+    // but **the todo APIs treat it as optional**: omitted = all todos across projects, provided = only that project.
+    // So mandatory validation only applies in non-todo mode.
     if (!q.onlyTodo && !q.scope) {
       throw new TaskSourceError("missing_scope", "TAPD requires workspace_id");
     }
@@ -131,11 +131,11 @@ export const tapdProvider: TaskSourceProvider = {
     const page = Number.isFinite(q.page) && (q.page ?? 0) > 0 ? Math.floor(q.page as number) : 1;
     const client = clientFor(ctx);
 
-    // 待办模式：接口**只接受 workspace_id**（其余参数传入即被拒），且不支持服务端分页 ——
-    // 全量拉回后本地切片。关键字/处理人/状态条件在待办模式下无效（服务端会拒参）。
+    // Todo mode: the API **only accepts workspace_id** (any other parameter is rejected) and does not support server-side pagination --
+    // pull everything back and slice locally. Keyword/handler/status filters are ineffective in todo mode (the server rejects the parameters).
     if (q.onlyTodo) {
-      // scope 为空 → 不传 workspace_id，取当前用户跨项目的全部待办；
-      // 非空 → 只看该项目。每行自带 workspace_id，用它取代请求级 scope 定位。
+      // scope empty -> do not pass workspace_id, fetch all of the current user's todos across projects;
+      // non-empty -> only that project. Each row carries its own workspace_id, which replaces the request-level scope for locating.
       const todoArgs = q.scope ? { workspace_id: q.scope } : {};
       const perType = await Promise.all(
         types.map(async (itemType) => {
@@ -144,8 +144,8 @@ export const tapdProvider: TaskSourceProvider = {
           return { itemType, rows };
         }),
       );
-      // 状态中文：**只有指定项目时**待办接口才返回中文（实测跨项目返回 new/status_6
-      // 这类原始码）。跨项目时按行内 workspace_id 分组补查映射表，让展示保持一致。
+      // Localized status (Chinese): **only when a project is specified** do the todo APIs return Chinese (empirically, cross-project returns raw codes
+      // such as new/status_6). In cross-project mode, group by the in-row workspace_id and look up the mapping table to keep the display consistent.
       const statusMaps = q.scope
         ? {}
         : await loadTodoStatusMaps(client, rowsByScope(perType));
@@ -153,8 +153,8 @@ export const tapdProvider: TaskSourceProvider = {
       const items: RemoteTaskRef[] = perType
         .flatMap(({ itemType, rows }) =>
           rows.map((r) => {
-            // 跨项目模式下 scope 只能从行内取：行内是 number，需显式转换，
-            // 否则详情页 URL 会拼出 `tapd_fe//story/...` 这种空段路径。
+            // In cross-project mode scope can only be taken from the row: it is a number in the row and must be converted explicitly,
+            // otherwise the detail page URL would be built with an empty segment such as `tapd_fe//story/...`.
             const scope = rowScope(r, q.scope ?? "");
             return toRef(r, itemType, ctx.siteBaseUrl, scope, undefined, statusMaps[`${scope}:${itemType}`]);
           }),
@@ -165,25 +165,25 @@ export const tapdProvider: TaskSourceProvider = {
       return { items: items.slice(start, start + limit), total, hasMore: start + limit < total };
     }
 
-    // 各类型并发拉取后合并：TAPD 没有跨类型统一列表接口。
+    // Fetch each type concurrently and then merge: TAPD has no unified cross-type list API.
     const perType = await Promise.all(
       types.map(async (itemType) => {
         const args: Record<string, unknown> = { workspace_id: q.scope, limit, page };
         if (q.keyword) args[keywordField(itemType)] = q.keyword;
-        // 处理人字段名按类型区分：bug 是 current_owner，story/task 是 owner。
-        // 用错会触发服务端「参数X不存在于工具Y的参数定义中」错误文本。
+        // The handler field name differs by type: bug uses current_owner, story/task use owner.
+        // Using the wrong one triggers the server error text "parameter X does not exist in the parameter definition of tool Y".
         if (q.owner) args[ownerField(itemType)] = q.owner;
         if (q.status) args["status"] = q.status;
-        // 中文状态：仅 story 支持，其余类型下发会被服务端拒绝（见 mapper.supportsVStatus）。
+        // Localized status (Chinese): only story supports it; other types are rejected by the server when it is sent (see mapper.supportsVStatus).
         if (supportsVStatus(itemType)) args["with_v_status"] = "1";
-        // 一次调用同时拿到分页包络（total）与数据行（data）。
+        // One call gets both the pagination envelope (total) and the data rows (data).
         const raw = await client.callRaw(toolFor(itemType), args);
         const rows = asRows(unwrapData(raw));
         return { itemType, rows, total: totalOf(raw, rows.length) };
       }),
     );
 
-    // task / bug 不支持 with_v_status，需要另取状态中文映射表。
+    // task / bug do not support with_v_status, so a separate Chinese status mapping table must be fetched.
     const statusMaps = await loadStatusLabelMaps(client, types, q.scope as string);
 
     const items: RemoteTaskRef[] = perType
@@ -194,13 +194,13 @@ export const tapdProvider: TaskSourceProvider = {
       )
       .filter((r) => r.externalId);
 
-    // 排序沿用 TAPD 返回顺序（服务端默认 created desc，实测三类一致）。
+    // Ordering follows the TAPD return order (server default is created desc; empirically consistent across all three kinds).
     //
-    // 注意：此处**不**再本地按 updatedAt 重排。分页发生在服务端且基准是 created，
-    // 若本地按 modified 重排会导致「第 2 页出现比第 1 页更新的条目」这类翻页错乱。
-    // 各类型并发拉取时，每类各返回 limit 条，合并后最多 limit × 类型数 ——
-    // 若直接返回会让前端一页显示远超 PAGE_SIZE 的行（表现为「一页显示了所有」），
-    // 故合并后统一截断到 limit，保持与单页大小一致。
+    // Note: do **not** re-sort locally by updatedAt here. Pagination happens server-side and is based on created;
+    // re-sorting locally by modified would cause pagination glitches such as "page 2 contains items newer than page 1".
+    // When types are fetched concurrently, each returns limit rows, so after merging there are at most limit x number-of-types --
+    // returning them directly would make the frontend show far more than PAGE_SIZE rows on a page (appearing as "one page shows everything"),
+    // so after merging, truncate uniformly to limit to stay consistent with the page size.
     const paged = items.slice(0, limit);
     const total = perType.reduce((sum, t) => sum + t.total, 0);
     return { items: paged, total, hasMore: page * limit < total };
@@ -216,7 +216,7 @@ export const tapdProvider: TaskSourceProvider = {
       throw new TaskSourceError("invalid_item_type", `unsupported TAPD item type: ${itemType}`);
     }
     const client = clientFor(ctx);
-    // 详情接口才返回 description（列表模式该字段为 null / 缺失）。
+    // Only the detail API returns description (in list mode the field is null / missing).
     const raw = await client.call(toolFor(itemType), {
       workspace_id: scope,
       id: externalId,
@@ -239,11 +239,11 @@ function clampLimit(limit?: number): number {
 }
 
 /**
- * 取各类型的状态中文映射表（仅对不支持 with_v_status 的类型才需要）。
+ * Fetch the Chinese status mapping table for each type (only needed for types that do not support with_v_status).
  *
- * `tapd_field_detail_get(object_type, field_names="status")` 返回
- * `{ status: { options: { "new": "新", "in_progress": "接受/处理", ... } } }`。
- * 失败时静默回落到英文码 —— 状态展示降级不应阻断列表查询。
+ * `tapd_field_detail_get(object_type, field_names="status")` returns
+ * `{ status: { options: { "new": "新", "in_progress": "接受/处理", ... } } }` (values are Chinese labels such as "New", "Accepted/In progress").
+ * On failure it silently falls back to the English codes -- degraded status display should not block list queries.
  */
 async function loadStatusLabelMaps(
   client: TapdMcpClient,
@@ -263,7 +263,7 @@ async function loadStatusLabelMaps(
         const opts = (raw as { status?: { options?: Record<string, string> } })?.status?.options;
         return [itemType, opts && typeof opts === "object" ? opts : {}] as const;
       } catch {
-        // 取不到映射就显示原始状态码，不阻断查询。
+        // If the mapping cannot be obtained, show the raw status code and do not block the query.
         return [itemType, {}] as const;
       }
     }),
@@ -271,7 +271,7 @@ async function loadStatusLabelMaps(
   return Object.fromEntries(entries);
 }
 
-/** 待办结果按「行内 workspace_id → 类型」归纳，用于跨项目补查状态映射。 */
+/** Todo results grouped by "in-row workspace_id -> type", used for cross-project status mapping lookups. */
 function rowsByScope(perType: Array<{ itemType: string; rows: Array<Record<string, unknown>> }>): Array<{
   scope: string;
   itemType: string;
@@ -292,13 +292,13 @@ function rowsByScope(perType: Array<{ itemType: string; rows: Array<Record<strin
 }
 
 /**
- * 跨项目待办的状态中文映射（按 project × type 分组查）。
+ * Chinese status mapping for cross-project todos (queried grouped by project x type).
  *
- * 实测：待办接口**指定 workspace_id 时**状态直接是中文，但**跨项目时**返回
- * `new` / `status_6` 这类原始码。为让两种模式展示一致，这里按行内 workspace
- * 补一次 tapd_field_detail_get。
+ * Empirically: the todo API returns Chinese status directly **when workspace_id is specified**, but returns raw codes such as
+ * `new` / `status_6` **when cross-project**. To keep both modes displaying consistently, here we additionally
+ * call tapd_field_detail_get per in-row workspace.
  *
- * 项目数通常很小（实测 2~3 个），查询可控；失败静默回落到原始码，不阻断列表。
+ * The number of projects is usually small (empirically 2-3), so queries are manageable; failures silently fall back to raw codes without blocking the list.
  */
 async function loadTodoStatusMaps(
   client: TapdMcpClient,

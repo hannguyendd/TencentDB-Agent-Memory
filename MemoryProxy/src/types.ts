@@ -33,8 +33,8 @@ export interface CostGuardConfig {
    */
   agentProfile?: string;
   /**
-   * Anthropic-specific upstream override（用于 anthropic 协议请求的全局兜底上游）。
-   * Per-agent override（upstream.agents[agent].url）优先级更高。
+   * Anthropic-specific upstream override (global fallback upstream for anthropic-protocol requests).
+   * Per-agent override (upstream.agents[agent].url) takes higher priority.
    */
   anthropicUpstream?: {
     url: string;
@@ -51,63 +51,63 @@ export interface CostGuardConfig {
 }
 
 /**
- * ProxyStorage configuration —— injection/skill 数据从 Redis 迁到 COS/SQLite/FS
- * 的统一存储抽象层。见 docs/design/2026-07-10-cos-ttl-nottl-split-plan.md
+ * ProxyStorage configuration -- a unified storage abstraction layer that moves injection/skill data from Redis to COS/SQLite/FS.
+ * See docs/design/2026-07-10-cos-ttl-nottl-split-plan.md
  *
- * 当 `enabled: true` 时，注入层与 Skill 层会用 ProxyStorage 替换 Redis repo；
- * 否则完全走原 Redis 路径。CostGuard 的 `cg:sess:*` 不受影响。
+ * When `enabled: true`, the injection layer and Skill layer use ProxyStorage in place of the Redis repo;
+ * otherwise the original Redis path is used entirely. CostGuard's `cg:sess:*` is unaffected.
  *
- * 存储 key 前缀分两档：
- *   - `ttl/` —— 热缓存（Session Init State / Injection Hook 预热），配 COS
- *     lifecycle rule `ttlDays` 天未修改自动删。丢了能重建，业务无感。
- *   - `nottl/` —— 业务态（Binding / Skill 抽取 / Skill 版本锁），**不配** rule，
- *     永久保留。
+ * Storage key prefixes come in two tiers:
+ *   - `ttl/` -- hot cache (Session Init State / Injection Hook prewarm), paired with a COS
+ *     lifecycle rule that auto-deletes objects unmodified for `ttlDays` days. Can be rebuilt if lost, invisible to the business.
+ *   - `nottl/` -- business state (Binding / Skill extraction / Skill version lock), **no** rule configured,
+ *     retained permanently.
  */
 export interface StorageConfig {
-  /** 总开关。false = 完全走原 Redis 路径，本次迁移代码等同于未加载。 */
+  /** Master switch. false = use the original Redis path entirely; this migration code is equivalent to not loaded. */
   enabled: boolean;
-  /** 优选后端；init 失败按 cos → sqlite → fs → memory 顺序降级。 */
+  /** Preferred backend; if init fails, degrade in the order cos -> sqlite -> fs -> memory. */
   backend: "cos" | "sqlite" | "fs" | "memory";
   /**
-   * `ttl/` 前缀下对象的生存期（天）。只对 ttl 前缀生效，nottl 完全不受影响。
-   * 默认 7 天，与 COS lifecycle rule 的粒度对齐（COS 天级扫描）。
+   * Lifetime (days) of objects under the `ttl/` prefix. Applies only to the ttl prefix; nottl is entirely unaffected.
+   * Defaults to 7 days, aligned with the granularity of COS lifecycle rules (COS scans daily).
    */
   ttlDays: number;
 
   cos: {
     /**
-     * 业务命名空间前缀（跟 core 的 memory_v2/cos_data 隔离）。
-     * bucket/region/endpointDomain 都由 Shark 返回的 CosUrl 解析，不用配。
+     * Business namespace prefix (isolated from core's memory_v2/cos_data).
+     * bucket/region/endpointDomain are all parsed from the CosUrl returned by Shark; no configuration needed.
      */
     rootPrefix: string;
     /**
-     * 可选：强制走 VPC 内网 / 自定义域名（例：`cos.example.com`）。
-     * 空则用 Shark 返回 CosUrl 里的 host。
+     * Optional: force use of VPC intranet / a custom domain (e.g. `cos.example.com`).
+     * If empty, use the host in the CosUrl returned by Shark.
      */
     endpointDomain?: string;
     /**
-     * Shark 拉临时凭证 —— 每个 spaceId 独立 STS，权限严格绑到
-     * `proxy_cache/{ttl|nottl}/{spaceId}/*` 两个前缀。
-     * 见 docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.1。
+     * Fetch temporary credentials from Shark -- each spaceId gets its own STS, with permissions strictly bound to
+     * the two prefixes `proxy_cache/{ttl|nottl}/{spaceId}/*`.
+     * See docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.1.
      */
     shark: {
-      /** Shark base URL，例如 `http://gateway.example.com:8000`。 */
+      /** Shark base URL, e.g. `http://gateway.example.com:8000`. */
       baseUrl: string;
-      /** shark HTTP 请求超时。默认 10s。 */
+      /** shark HTTP request timeout. Default 10s. */
       timeoutMs: number;
-      /** 5xx / 429 / 网络错 / 超时的重试次数。默认 2。 */
+      /** Retry count for 5xx / 429 / network errors / timeouts. Default 2. */
       retryCount: number;
-      /** STS 到期前多少 ms 提前刷新。默认 2min。 */
+      /** How many ms before STS expiry to refresh early. Default 2min. */
       refreshBufferMs: number;
-      /** per-spaceId backend 池上限（LRU）。默认 100。 */
+      /** Upper limit of the per-spaceId backend pool (LRU). Default 100. */
       maxSpaces: number;
-      /** LRU evict 时延迟关闭旧 backend 的 ms。默认 30_000。 */
+      /** Delay in ms before closing the old backend on LRU evict. Default 30_000. */
       graceCloseDelayMs: number;
     };
   };
 
   sqlite: {
-    /** 空 = 用 PROXY_DB_PATH 或 ~/.tdai-memory-proxy/proxy.db。 */
+    /** Empty = use PROXY_DB_PATH or ~/.tdai-memory-proxy/proxy.db. */
     dbPath: string;
   };
 
@@ -156,45 +156,45 @@ export interface RateLimitConfig {
 /**
  * Langfuse LLM observability configuration.
  *
- * 通过 Langfuse 官方 SDK 上报。一个 trace = 一个 turn（一次用户输入），
- * 同一 turn 内的工具循环请求归并到同一个 trace 下的多个 generation。
+ * Reported via the official Langfuse SDK. One trace = one turn (one user input);
+ * tool-loop requests within the same turn are merged into multiple generations under the same trace.
  */
 export interface LangfuseConfig {
   enabled: boolean;
-  /** Langfuse 实例 base URL，例如 http://localhost:3000。 */
+  /** Langfuse instance base URL, e.g. http://localhost:3000. */
   host: string;
-  /** Langfuse public key（pk-lf-...）。 */
+  /** Langfuse public key (pk-lf-...). */
   publicKey: string;
-  /** Langfuse secret key（sk-lf-...）。 */
+  /** Langfuse secret key (sk-lf-...). */
   secretKey: string;
   /**
-   * Debug 模式：上报 generation 时保留原始 Anthropic body 结构
-   * （含 `cache_control` marker / `thinking` block / tool_use 原生形态），
-   * 而不是走 `flattenAnthropicMessagesForOpik` 压平。
+   * Debug mode: when reporting generations, keep the original Anthropic body structure
+   * (including `cache_control` markers / `thinking` blocks / native tool_use form),
+   * instead of flattening via `flattenAnthropicMessagesForOpik`.
    *
-   * 用途：排查请求分类（Fork vs SideQuery vs Main）、cache 命中率、
-   *      thinking 签名合法性等需要看原生结构才能判断的问题。
+   * Use: troubleshooting issues that require seeing the native structure, such as request classification (Fork vs SideQuery vs Main), cache hit rate,
+   *      and validity of thinking signatures.
    *
-   * 代价：上报体积增大 2-5x（cache_control block、thinking block 全带过去），
-   *      Langfuse 存储成本增加。**线上默认关闭**，只在排障时打开。
+   * Cost: report size grows 2-5x (cache_control blocks and thinking blocks are all carried over),
+   *      and Langfuse storage cost increases. **Off by default in production**; turn on only when troubleshooting.
    */
   debug?: boolean;
 
-  // ── 批量上报调优（防高并发丢 span）──
+  // -- Batch reporting tuning (prevents span loss under high concurrency) --
 
   /**
-   * 内存队列最大深度（超出即丢弃）。
-   * 映射 OTel BatchSpanProcessor 的 maxQueueSize。默认 8192。
+   * Maximum depth of the in-memory queue (excess is dropped).
+   * Maps to OTel BatchSpanProcessor's maxQueueSize. Default 8192.
    */
   maxQueueSize: number;
   /**
-   * 每批导出的最大 span 数。
-   * 映射 LangfuseSpanProcessor 的 flushAt / OTel maxExportBatchSize。默认 256。
+   * Maximum number of spans exported per batch.
+   * Maps to LangfuseSpanProcessor's flushAt / OTel maxExportBatchSize. Default 256.
    */
   flushAt: number;
   /**
-   * 定时 flush 间隔（秒）。
-   * 映射 LangfuseSpanProcessor 的 flushInterval / OTel scheduledDelayMillis。默认 2。
+   * Scheduled flush interval (seconds).
+   * Maps to LangfuseSpanProcessor's flushInterval / OTel scheduledDelayMillis. Default 2.
    */
   flushInterval: number;
 }
@@ -245,61 +245,61 @@ export interface SessionInitConfig {
     task_id?: string;
   };
   /**
-   * DEBUG：把请求识别到的 userId（来自 auth verify / x-user-id 头等）强制
-   * 覆盖为指定值。用于本地联调时——客户端传的 tokenhub-uid 与 kernel-uid 不一致
-   * （kernel 侧资产挂在另一个真实 user_id 下），无法通过 kernel /team/list 拉到
-   * 资产，导致 CB 状态机走 "no active agents, passing through" bypass。
+   * DEBUG: force the userId identified from the request (from auth verify / x-user-id header etc.)
+   * to be overridden with the specified value. Used for local integration debugging -- when the client-sent tokenhub-uid does not match the kernel-uid
+   * (kernel-side assets hang under a different real user_id), so assets cannot be fetched via kernel /team/list,
+   * causing the CB state machine to take the "no active agents, passing through" bypass.
    *
-   * 配置此字段后，handler 层会用此 user_id 替换识别结果，让 CB 状态机以真实
-   * kernel 用户身份拉资产列表，弹出完整 team→agent→task 表单流程。
+   * With this field configured, the handler layer replaces the identified user_id with this one, so the CB state machine
+   * fetches the asset list as the real kernel user, and the full team->agent->task form flow pops up.
    *
-   * 仅供本地/e2e 联调，生产环境务必留空。
+   * For local/e2e integration only; be sure to leave empty in production.
    */
   debugForceUserId?: string;
   /**
-   * DEBUG：开启详细诊断日志（包括请求 tools schema、system prompt 摘要、
-   * 用户输入文本等）。仅用于本地联调排查 session-init 表单交互问题。
-   * 生产环境务必保持 false 或不配置（默认关闭）。
+   * DEBUG: enable verbose diagnostic logs (including the request tools schema, system prompt summary,
+   * user input text, etc.). Only for local integration debugging of session-init form interaction issues.
+   * Be sure to keep false or unset in production (off by default).
    */
   debugVerboseLogging?: boolean;
   /**
-   * 从请求头自动预选 team/agent/task 身份。
+   * Automatically preselect team/agent/task identity from request headers.
    *
-   * 当首轮请求头已带上身份字段时，先去（当前认证用户可见的）team/agent/task
-   * 列表里校验其是否存在：命中则跳过对应的交互式选择步骤，缺失/校验失败时按
-   * `onMismatch` 处理。与 control-plane token 反查并存 —— header 只是「快捷路径」，
-   * 不改变原有的表单/反查流程。
+   * When the first-round request headers already carry identity fields, first validate whether they exist in the team/agent/task
+   * lists (visible to the currently authenticated user): on a hit, skip the corresponding interactive selection step; on missing/failed validation, handle per
+   * `onMismatch`. Coexists with control-plane token reverse lookup -- the header is only a "shortcut path"
+   * and does not change the original form/reverse-lookup flow.
    *
-   * 决策规则（见 session/preset.ts）：
-   * - 只命中 team（未带 agent）           → 跳到 agent 选择阶段
-   * - 命中 team + agent（task 可选）        → 直接登记，跳过所有表单
-   * - 任一「已提供」的字段在列表中查不到     → 视为 mismatch，按 onMismatch 处理
-   * - 未带 team header                      → 完全走原有流程（零行为变化）
+   * Decision rules (see session/preset.ts):
+   * - Only team hit (no agent)           -> jump to the agent selection stage
+   * - team + agent hit (task optional)   -> register directly, skip all forms
+   * - Any "provided" field not found in the list -> treated as mismatch, handled per onMismatch
+   * - No team header                      -> follow the original flow entirely (zero behavior change)
    */
   /**
-   * 当用户在 task_select 阶段选择"跳过"时，使用此 task_id 作为默认关联。
-   * 该 task_id 不需要在控制面元数据中真实存在——仅作为标签记录，不影响
-   * 检索隔离（主维度为 team/user/agent/session）。
+   * When the user chooses "skip" in the task_select stage, this task_id is used as the default association.
+   * This task_id need not actually exist in the control-plane metadata -- it is only recorded as a label and does not affect
+   * retrieval isolation (primary dimensions are team/user/agent/session).
    *
-   * 默认 "default"（开启）。若想关闭，在 YAML 中配为空字符串 `defaultTaskId: ""`。
+   * Default "default" (enabled). To disable, set it to an empty string in YAML: `defaultTaskId: ""`.
    */
   defaultTaskId?: string;
   /**
-   * 跳过 asset_confirm 前置对话框，默认视为用户选了"是，关联团队资产"。
-   * 开启后首轮直接进入 team → agent → task 选择流程（或 auto-select 级联）。
-   * 默认 false（保持原有行为，弹 asset_confirm 对话框）。
+   * Skip the asset_confirm pre-dialog; by default treat the user as having chosen "Yes, associate team assets".
+   * When enabled, the first round goes directly into the team -> agent -> task selection flow (or auto-select cascade).
+   * Default false (keep original behavior, pop up the asset_confirm dialog).
    */
   skipAssetConfirm?: boolean;
   headerAutoSelect?: {
-    /** 是否启用 header 自动预选。默认 true。 */
+    /** Whether to enable header auto-preselect. Default true. */
     enabled: boolean;
-    /** 携带 team_id 的请求头名（小写）。默认 "x-team-id"。 */
+    /** Header name (lowercase) carrying team_id. Default "x-team-id". */
     teamHeader: string;
-    /** 携带 agent_id 的请求头名（小写）。默认 "x-agent-id"。 */
+    /** Header name (lowercase) carrying agent_id. Default "x-agent-id". */
     agentHeader: string;
-    /** 携带 task_id 的请求头名（小写）。默认 "x-task-id"。 */
+    /** Header name (lowercase) carrying task_id. Default "x-task-id". */
     taskHeader: string;
-    /** header 值在用户可见列表中查不到时：'form' 回退交互表单（默认）| 'bypass' 直接跳过 session init。 */
+    /** When the header value is not found in the user-visible list: 'form' falls back to the interactive form (default) | 'bypass' skips session init directly. */
     onMismatch: "form" | "bypass";
   };
 }
@@ -345,21 +345,21 @@ export interface CoreSkillConfig {
 }
 
 /**
- * Instance-upstream 配置缓存(自定义模型分流的每实例配置)。
+ * Instance-upstream config cache (per-instance config for custom model routing).
  *
- * proxy 每次 handler 会走 skill.endpoint + /v3/internal/meta/instance-upstream/list
- * 拉本 spaceId 的模型分组配置(default / custom / extraction 三类行),结果按 spaceId
- * 缓存在进程内。缓存内部固定语义(hard expiry + stale-if-error + 256 LRU +
- * 空数组零行 fallback = official),此配置仅暴露唯一可调项 TTL。
+ * On each handler call the proxy uses skill.endpoint + /v3/internal/meta/instance-upstream/list
+ * to fetch this spaceId's model group config (three kinds of rows: default / custom / extraction), and caches the result in-process
+ * by spaceId. The cache's internal semantics are fixed (hard expiry + stale-if-error + 256 LRU +
+ * empty array zero-row fallback = official); this config exposes only one tunable: TTL.
  *
- * 详见 `docs/design/2026-08-25-instance-upstream-config.md` §7.1。
+ * See `docs/design/2026-08-25-instance-upstream-config.md` §7.1.
  */
 export interface InstanceUpstreamConfig {
   /**
-   * 缓存 TTL(秒)。默认 30。决定"Panel 改完自定义模型 → proxy 生效"的最长延迟。
+   * Cache TTL (seconds). Default 30. Determines the maximum delay for "Panel changes custom model -> proxy takes effect".
    *
-   * 只接受正整数;非法/负数/0/NaN/小数一律回退默认 30s + warn 一行。
-   * 别调到 <5s:会把 core /v3/internal/meta/instance-upstream/list 打成热点。
+   * Only positive integers accepted; invalid/negative/0/NaN/fractional values all fall back to the default 30s with one warn line.
+   * Do not set below 5s: it would turn core /v3/internal/meta/instance-upstream/list into a hotspot.
    */
   cacheTtlSec: number;
 }
@@ -384,23 +384,23 @@ export interface KnowledgeConfig {
 /** Skill runtime-side configuration. */
 export interface SkillRuntimeConfig {
   /**
-   * 是否允许主模型创建/修改 skill。默认 false。
-   * 主模型的质量不可控，默认关闭写入能力以避免低质量 skill 被创建。
-   * 显式设为 true 后：
-   *   - <skill_tools> 注入全部 10 个工具（含写操作）
-   *   - /skill-bridge 放行写操作（create/update/patch/delete/files_write/files_remove）
-   * false 时：
-   *   - <skill_tools> 只注入只读工具（search/list/view/files_read）
-   *   - /skill-bridge 拒绝写操作返回 403
+   * Whether the main model is allowed to create/modify skills. Default false.
+   * The quality of the main model is uncontrollable, so write capability is off by default to avoid low-quality skills being created.
+   * When explicitly set to true:
+   *   - <skill_tools> injects all 10 tools (including write operations)
+   *   - /skill-bridge allows write operations (create/update/patch/delete/files_write/files_remove)
+   * When false:
+   *   - <skill_tools> injects only read-only tools (search/list/view/files_read)
+   *   - /skill-bridge rejects write operations with 403
    */
   allowLlmWrite: boolean;
 
-  // 历史字段 (已删除):
+  // Historical fields (removed):
   //   extractToolCallThreshold / maxBucketCount:
-  //     老链路 SkillExtractTrigger 用来控制 proxy 自动 fire /v3/skill/extract 的阈值。
-  //     老链路整体已下线, core 侧接管归档时机 (自己按 tool_call ≥ 10 或 bytes ≥ 40KB 判)。
+  //     The old SkillExtractTrigger pipeline was used to control the threshold for the proxy to auto-fire /v3/skill/extract.
+  //     The old pipeline has been taken offline entirely; core now takes over archive timing (judging by itself on tool_call >= 10 or bytes >= 40KB).
   //   conversationAddEnabled:
-  //     曾经用作新老链路互斥灰度开关。现在永远走新链路 conversation/add, 该开关废弃。
+  //     Used to be a mutually exclusive gray-release switch between old and new pipelines. Now always uses the new pipeline conversation/add; this switch is deprecated.
 }
 
 /**
@@ -424,10 +424,10 @@ export interface SkillRuntimeConfig {
  * key and others on the client's own key from a single proxy config.
  *
  * Priority order (high → low):
- *   1. `costGuard`-provided `target.authHeaders`（cheap-model 兜底路由自带凭据）
+ *   1. `costGuard`-provided `target.authHeaders` (the cheap-model fallback route brings its own credentials)
  *   2. `upstream.agents[agent].url` + `upstream.agents[agent].apiKey`
- *   3. `costGuard.anthropicUpstream.url`（仅 Anthropic 协议）
- *   4. `upstream.url` + `upstream.apiKey`（未命中 agent 时的默认）
+ *   3. `costGuard.anthropicUpstream.url` (Anthropic protocol only)
+ *   4. `upstream.url` + `upstream.apiKey` (default when no agent matches)
  *
  * The same map serves both Anthropic and OpenAI protocols — the agent name
  * alone determines routing, matching how {@link ProxyConfig#upstream.url}
@@ -457,7 +457,7 @@ export interface ProxyConfig {
   };
   upstream: {
     url: string; // OpenAI-compatible upstream URL
-    apiKey: string; // 若非空则替换请求中的 API Key
+    apiKey: string; // if non-empty, replaces the API Key in the request
     /**
      * Per-agent overrides keyed by agent name (URL path prefix, e.g. "claude-code").
      * Empty / missing entry → agent falls back to `url` + `apiKey`.
@@ -521,93 +521,93 @@ export interface ProxyConfig {
    */
   systemUsers: SystemUserEntry[];
   /**
-   * 运维口 shared secret，仅供 `/v3/instance/proxy-destroy` 之类的管控接口。
+   * Ops-port shared secret, only for control interfaces such as `/v3/instance/proxy-destroy`.
    *
-   * 语义与 core gateway 的 `server.apiKey` 一致
-   * （`tdai-memory-openclaw-plugin/src/gateway/server.ts:1078`）：
-   *   - 空字符串（默认）= 鉴权关闭，路由公开可访问；启动时打 WARN 提醒
-   *   - 非空 = 请求必须带 `Authorization: Bearer <apiKey>`，用常量时间比对
+   * Semantics match the core gateway's `server.apiKey`
+   * (`tdai-memory-openclaw-plugin/src/gateway/server.ts:1078`):
+   *   - Empty string (default) = auth off, routes publicly accessible; a WARN is logged at startup as a reminder
+   *   - Non-empty = requests must carry `Authorization: Bearer <apiKey>`, compared in constant time
    *
-   * env 覆盖：`TDAI_PROXY_ADMIN_API_KEY`。
+   * Env override: `TDAI_PROXY_ADMIN_API_KEY`.
    *
-   * 注意：这个 key **不**参与租户 `verifyUserKey` 流程，跟 upstream.apiKey /
-   * tdai.apiKey 也没关系。仅门禁 proxy 侧的运维口。
+   * Note: this key does **not** participate in the tenant `verifyUserKey` flow, and is unrelated to upstream.apiKey /
+   * tdai.apiKey. It only gates the proxy-side ops port.
    */
   admin: {
     apiKey: string;
   };
   /**
-   * `mem:` 特殊命令配置。
+   * `mem:` special command configuration.
    *
-   * 命令拦截恒定启用（无配置开关）：handler 在 session init 之后检测最后一条 user
-   * message 是否为 mem: 命令，命中已知命令（sync/create-skill/help/create-task/
-   * update-task/session-reset）则执行对应操作并直接返回伪造 LLM 响应（不注入 /
-   * 不转发 / 不计费）；未知命令由 executeMemCommand 内置提示兜底。
+   * Command interception is always enabled (no config switch): after session init the handler checks whether the last user
+   * message is a mem: command; if it hits a known command (sync/create-skill/help/create-task/
+   * update-task/session-reset), it executes the corresponding action and directly returns a forged LLM response (no injection /
+   * no forwarding / no billing); unknown commands fall back to the built-in hint in executeMemCommand.
    *
-   * 结构仅承载 `taskDraft`（create-task / update-task 依赖的 LLM 草稿生成器）；
-   * 未配置时 task 命令族返回"未配置 task_draft"错误，其它命令不受影响。
+   * The structure only carries `taskDraft` (the LLM draft generator that create-task / update-task depend on);
+   * when not configured, the task command family returns a "task_draft not configured" error; other commands are unaffected.
    */
   memCommand: MemCommandConfig;
 
   /**
-   * CC 请求分流总开关。
+   * Master switch for CC request routing.
    *
-   * 启用时：根据 `cache_control` marker 位置 + tools/thinking 兜底将请求分为
-   *   main / fork / sidequery 三类，走差异化路径（fork/sidequery 跳过
-   *   session-init / mem 拦截 / injection / L0 / skill buffer，credit 仍上报）。
-   * 关闭时：所有请求视为 main，走原有一刀切链路，行为 100% 等价现状。
+   * When enabled: based on `cache_control` marker position + tools/thinking fallback, requests are divided into
+   *   main / fork / sidequery three categories, taking differentiated paths (fork/sidequery skip
+   *   session-init / mem interception / injection / L0 / skill buffer, credit still reported).
+   * When disabled: all requests are treated as main and take the original one-size-fits-all pipeline; behavior is 100% equivalent to the status quo.
    *
-   * 默认关闭。启用前建议先跑一段"分类识别但不改路径"的观察期，见方案 §7。
-   * 详见 docs/design/2026-07-30-cc-request-routing-plan.md
+   * Off by default. Before enabling, it is recommended to run an observation period of "classify but do not change the path"; see plan §7.
+   * See docs/design/2026-07-30-cc-request-routing-plan.md
    */
   ccRequestRouting: CcRequestRoutingConfig;
 
   /**
-   * WorkBuddy 请求分流总开关（运维 kill switch）。
+   * WorkBuddy request routing master switch (ops kill switch).
    *
-   * 启用时（默认）：调用 `classifyWorkbuddyRequest` 将请求分为 main / auxiliary
-   *   两类，auxiliary 请求直接 passthrough（跳过 session-init / injection / L0 /
-   *   skill 归档），credit 仍上报。
-   * 关闭时：所有请求视为 main，走完整业务链路 —— 等价于 aux 分流未启用的老链路，
-   *   用于 aux 分类规则出问题时快速回滚。
+   * When enabled (default): calls `classifyWorkbuddyRequest` to divide requests into main / auxiliary
+   *   two categories; auxiliary requests are passed through directly (skipping session-init / injection / L0 /
+   *   skill archive), credit still reported.
+   * When disabled: all requests are treated as main and take the full business pipeline -- equivalent to the old pipeline with aux routing not enabled,
+   *   used for quick rollback when aux classification rules go wrong.
    *
-   * 默认启用（与 CC 的 `ccRequestRouting.enabled` 默认 false 不同）：WB 的 aux
-   *   分流已在生产跑通并有日志验证，此开关是"保守回滚"保险而非"灰度上线"开关。
+   * Enabled by default (unlike CC's `ccRequestRouting.enabled`, which defaults to false): WB's aux
+   *   routing has run through in production with log verification; this switch is a "conservative rollback" safety rather than a "gray release" switch.
    */
   workbuddyRequestRouting: WorkbuddyRequestRoutingConfig;
 
   /**
-   * 本地 JSONL trace 归档配置。
+   * Local JSONL trace archive configuration.
    *
-   * 启用后，每个 trace + span 以 JSONL 行写入本地文件（按日期分文件），
-   * 可配合 crontab 定时压缩上传到 COS/S3 归档存储。
+   * When enabled, each trace + span is written as a JSONL line to a local file (one file per date),
+   * which can be combined with crontab to periodically compress and upload to COS/S3 archive storage.
    *
-   * 默认关闭。启用后不影响 Opik / Langfuse 等远程上报链路。
+   * Off by default. When enabled, it does not affect remote reporting paths such as Opik / Langfuse.
    */
   traceArchive: TraceArchiveConfig;
 }
 
 export interface TraceArchiveConfig {
-  /** 是否启用本地 JSONL trace 归档。默认 false（关闭）。 */
+  /** Whether to enable local JSONL trace archiving. Default false (off). */
   enabled: boolean;
-  /** 归档目录（相对于项目根目录或绝对路径）。默认 "logs/traces"。 */
+  /** Archive directory (relative to the project root or an absolute path). Default "logs/traces". */
   dir: string;
 }
 
 export interface CcRequestRoutingConfig {
-  /** 是否启用 CC 请求分流。默认 false —— 关闭时走完全等价原有行为的老链路。 */
+  /** Whether to enable CC request routing. Default false -- when off, uses the old pipeline fully equivalent to the original behavior. */
   enabled: boolean;
 }
 
 export interface WorkbuddyRequestRoutingConfig {
-  /** 是否启用 WB 请求分流。默认 true —— 关闭时所有请求视为 main，跳过 aux 分流。 */
+  /** Whether to enable WB request routing. Default true -- when off, all requests are treated as main and aux routing is skipped. */
   enabled: boolean;
 }
 
 export interface MemCommandConfig {
   /**
-   * mem:create-task / mem:update-task 使用的 LLM 草稿生成器配置。可选。
-   * 未配置或 enabled=false 时，task 命令族会返回"未配置 task_draft"错误。
+   * Configuration of the LLM draft generator used by mem:create-task / mem:update-task. Optional.
+   * When not configured or enabled=false, the task command family returns a "task_draft not configured" error.
    */
   taskDraft?: {
     enabled: boolean;
@@ -623,41 +623,41 @@ export interface InjectionConfig {
   enabled: boolean;
   injectors: string[];  // List of injector names to enable (e.g. ["skill", "knowledge", "tdai-memory"])
   /**
-   * 对外统一 gateway 地址。LLM 生成的 curl 示例（<skill_tools> /
-   * <tdai_memory_tools> 段里嵌的路径）都以这个 URL 为 base。
+   * Unified external gateway address. The curl examples generated by the LLM (paths embedded in the <skill_tools> /
+   * <tdai_memory_tools> sections) all use this URL as the base.
    *
-   * ⚠️ 多节点部署必配：未配时每个 pod 会用自身 `http://<hostIp>:<port>`
-   * 兜底，pods 互相覆盖 COS 里同一份 hook cache → md5 震荡 → 上游 Anthropic
-   * KV cache 每次 miss（费钱 + 首 token 慢）。
+   * ⚠️ Required for multi-node deployments: when unset, each pod falls back to its own `http://<hostIp>:<port>`,
+   * pods overwrite the same hook cache in COS -> md5 oscillation -> upstream Anthropic
+   * KV cache misses every time (costs money + slow first token).
    *
-   * 只需填 gateway 对外域名，**不带端口**（gateway 内部路由到 proxy 的端口
-   * 是 gateway ops 侧的事，跟这里无关）。示例：
+   * Just fill in the gateway's external domain, **without a port** (the port the gateway routes internally to the proxy
+   * is a matter for gateway ops and unrelated here). Example:
    *   externalGatewayUrl: "https://gateway.example.com"
    *
-   * gateway 侧必须把下面两个前缀原样透传到 proxy pod：
+   * The gateway side must pass the following two prefixes through to the proxy pod unchanged:
    *   `/skill-bridge/**`   → proxy /skill-bridge/**
    *   `/memory-bridge/**`  → proxy /memory-bridge/**
    *
-   * 未配置时 fallback 到 `http://<local hostIp>:<config.server.port>`（仅
-   * 单节点 / 本地开发场景可用），启动时 warn 一次。
+   * When unset, falls back to `http://<local hostIp>:<config.server.port>` (only usable in
+   * single-node / local development scenarios), warning once at startup.
    */
   externalGatewayUrl?: string;
   /**
-   * 资产反思模式（内部效果评估用）。**默认开启**——为了让运营方零配置即可
-   * 用 URL marker 观测资产注入效果。marker 本身仍是 opt-in：不带 `/analyse/`
-   * 段的请求完全无感。
+   * Asset reflection mode (for internal effect evaluation). **Enabled by default** -- so that operators can observe asset injection effects
+   * via URL marker with zero configuration. The marker itself is still opt-in: requests without the `/analyse/`
+   * segment are completely unaffected.
    *
-   * 开启后，请求路径带 `/analyse` marker（结构同 `/cost-guard`：夹在
-   * `/{agent}/{spaceId}` 之后，如 `/codebuddy/default/analyse/v1/messages`）
-   * 时，proxy 会在系统提示词末尾追加一个 `<asset_reflection>` 块，指导
-   * agent 在回答里点评「本轮调用过的云端资产工具是否起到作用」。
+   * When enabled, if the request path carries the `/analyse` marker (same structure as `/cost-guard`: sandwiched
+   * after `/{agent}/{spaceId}`, e.g. `/codebuddy/default/analyse/v1/messages`),
+   * the proxy appends an `<asset_reflection>` block at the end of the system prompt, guiding the
+   * agent to comment in its answer on "whether the cloud asset tools called this round were useful".
    *
-   * marker 段列表由本节点上实际注册的资产 injector 决定（skill /
-   * tdai-memory / knowledge），一个都没注册时 injector 不 emit 任何块。
+   * The marker segment list is determined by the asset injectors actually registered on this node (skill /
+   * tdai-memory / knowledge); when none is registered, the injector emits no block.
    *
-   * 姿势对齐 `costGuard.markerOptIn`，但 default 相反：
-   *   - `true`（默认）：injector register；仅当 URL 带 `/analyse/` 段时才 emit 块
-   *   - `false`：injector 不 register 且顶部 gate 把 `/analyse/` 段 404 拒
+   * Style aligned with `costGuard.markerOptIn`, but with the opposite default:
+   *   - `true` (default): injector registers; emits the block only when the URL carries the `/analyse/` segment
+   *   - `false`: injector does not register and the top gate rejects the `/analyse/` segment with 404
    */
   assetReflection?: {
     markerOptIn: boolean;
@@ -669,7 +669,7 @@ export interface InjectionConfig {
  *
  * Governs whether the proxy is allowed to write back per-turn artifacts to
  * the kernel: skill conversation (fire /v3/skill/conversation/add per round
- * — core-side buffer + archive threshold decide抽取时机) and TDAI L0
+ * -- core-side buffer + archive threshold decide when to extract) and TDAI L0
  * conversation memory (`addConversation` after each turn).
  *
  * Legacy behavior (yaml missing this section entirely) is preserved by
@@ -737,13 +737,13 @@ export interface CreditReportConfig {
 
 /** Credit pricing entry for a single model (Credit / 1K Token). */
 /**
- * 分档定价条目。按 input token 总量 (nonCacheInput + cacheRead) 命中对应档位，
- * 该请求全部 token 类型都按该档单价计费（整体定档，非分段累进）。
+ * Tiered pricing entry. A tier is matched by total input tokens (nonCacheInput + cacheRead),
+ * and all token types of that request are billed at that tier's unit price (whole-request tiering, not progressive).
  *
- * `tiers` 数组须按 `maxInputTokens` 升序排列，最后一档以 `null` 表示兜底（无上限）。
+ * The `tiers` array must be sorted ascending by `maxInputTokens`; the last tier uses `null` as the fallback (no upper limit).
  */
 export interface PricingTier {
-  /** 该档 input token 上限（包含）。null = 兜底档（无上限）。 */
+  /** Upper limit (inclusive) of input tokens for this tier. null = fallback tier (no upper limit). */
   maxInputTokens: number | null;
   /** Standard input tokens (non-cache) — credit per 1K tokens. */
   input: number;
@@ -792,19 +792,19 @@ export interface PricingRule {
 export interface CreditPricingEntry extends TieredPricing {
   /**
    * Model ID for matching (case-insensitive full-word match against usage.model).
-   * 语义是「唯一 ID」，如 `ep-pksklwtb` / `deepseek-v4-pro`。
+   * Semantics are a "unique ID", e.g. `ep-pksklwtb` / `deepseek-v4-pro`.
    */
   name: string;
   /**
    * Human-readable display name for UI/reports (e.g. "Claude Sonnet 4").
    * Optional. Falls back to `name` when absent or empty.
-   * 写入 usage_logs.model_name / usage_raw.model_name 供前端展示。
+   * Written to usage_logs.model_name / usage_raw.model_name for frontend display.
    */
   modelName?: string;
   /**
-   * 按 input token 总量 (nonCacheInput + cacheRead) 分档定价。
-   * 升序排列，最后一档 maxInputTokens 为 null（兜底）。
-   * 不配置时使用顶层 input/output/cacheRead/cacheWrite5m/cacheWrite1h 单价。
+   * Tiered pricing by total input tokens (nonCacheInput + cacheRead).
+   * Sorted ascending; the last tier's maxInputTokens is null (fallback).
+   * When not configured, use the top-level input/output/cacheRead/cacheWrite5m/cacheWrite1h unit prices.
    */
   rules?: PricingRule[];
 }
@@ -813,8 +813,8 @@ export interface CreditPricingEntry extends TieredPricing {
 export interface CreditPricingConfig {
   models: CreditPricingEntry[];
   /**
-   * IANA 时区名（如 "Asia/Shanghai"）用于 ClickHouse 按日分片时的时区锚点。
-   * 可选, 不传时沿用 ClickHouse server 的默认时区。只在测试里显式设置。
+   * IANA timezone name (e.g. "Asia/Shanghai") used as the timezone anchor when ClickHouse shards by day.
+   * Optional; when omitted, the ClickHouse server's default timezone is used. Only set explicitly in tests.
    */
   timezone?: string;
 }
@@ -943,7 +943,7 @@ export interface RawYamlConfig {
     injectAgentContext?: boolean;
     injectTaskContext?: boolean;
     defaultTaskId?: string;
-    /** 一步到位: 预选 team/agent 都命中时, 跳过 asset_confirm 直接 initialized。 */
+    /** One step: when both preselected team/agent hit, skip asset_confirm and go straight to initialized. */
     skipAssetConfirm?: boolean;
     debugForceIdentity?: {
       team_id?: string;
@@ -990,8 +990,8 @@ export interface RawYamlConfig {
     apiKey?: string;
   };
   /**
-   * mem: 命令族配置（含 create-task / update-task 的 LLM 草稿生成器）。
-   * 与 ProxyConfig.memCommand 对应；命令拦截恒定启用，taskDraft 未配置则 task 命令族按现有 fallback 行为。
+   * mem: command family config (including the LLM draft generator for create-task / update-task).
+   * Corresponds to ProxyConfig.memCommand; command interception is always enabled; if taskDraft is not configured, the task command family follows the existing fallback behavior.
    */
   memCommand?: {
     taskDraft?: {
@@ -1028,8 +1028,8 @@ export interface RequestLogEntry {
    */
   upstreamRequestId?: string;
   /**
-   * pipeline 内部的 traceId（uuidv7, 用于日志串联）；
-   * codex runner 把它塞进 request 事件便于跨协议 join。
+   * pipeline-internal traceId (uuidv7, for log correlation);
+   * the codex runner stuffs it into request events to ease cross-protocol joins.
    */
   traceId?: string;
 }

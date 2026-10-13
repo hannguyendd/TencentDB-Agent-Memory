@@ -1,7 +1,7 @@
 /**
- * WorkbenchPage — 任务看板页面
+ * WorkbenchPage -- task board page
  *
- * ConsoleLayout 已提供 Content + Content.Body 包裹，页面只需渲染内容。
+ * ConsoleLayout already provides the Content + Content.Body wrapper, so the page only needs to render the content.
  */
 import { useMemo } from 'react';
 import { useAuthStore } from '@/stores/auth';

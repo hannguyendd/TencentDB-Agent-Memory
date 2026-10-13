@@ -1,25 +1,25 @@
 /**
- * user_key → user_id 缓存解析器（telemetry 埋点用）。
+ * user_key -> user_id cache resolver (used for telemetry instrumentation).
  *
- * ## 为什么需要
- * `panel_api_call_logs.user_id` 靠 route handler 里 `resolveCallerUserId` 后
- * `c.set('resolvedUserId', ...)` 提供；但绝大多数 route（skill/*、meta/*、
- * knowledge/* 等 60+ 端点）没做这一步 → CH 里 user_id 恒空。
+ * ## Why it is needed
+ * `panel_api_call_logs.user_id` is supplied by `c.set('resolvedUserId', ...)` after `resolveCallerUserId` in the route handler;
+ * but the vast majority of routes (skill/*, meta/*, knowledge/*, and 60+ other endpoints) do not do this step -> user_id in CH is always empty.
+ * knowledge/*, and 60+ other endpoints) do not do this step -> user_id in CH is always empty.
  *
- * ## 设计
- * 中间件层集中兜底：`c.get('resolvedUserId') ?? resolver.get(userKey)`。
- * - **hit**：同步返回缓存的 user_id
- * - **miss**：返回 undefined + fire-and-forget 调 core `auth/verify` 填 cache；
- *   下一条同 user_key 的请求就能命中
- * - **TTL**：5 min（缺省），过期条目 lazy-evict + 主动 refresh
- * - **上限**：默认 5000 条 LRU-ish；超上限从最老开始丢
- * - **零阻塞**：任何路径不会 await 网络 → 埋点永远不影响业务
+ * ## Design
+ * Centralized fallback at the middleware layer: `c.get('resolvedUserId') ?? resolver.get(userKey)`.
+ * - **hit**: synchronously returns the cached user_id
+ * - **miss**: returns undefined + fire-and-forget calls core `auth/verify` to fill the cache;
+ *   the next request with the same user_key can hit
+ * - **TTL**: 5 min (default); expired entries are lazily evicted + actively refreshed
+ * - **Cap**: 5000 entries by default, LRU-ish; beyond the cap the oldest are dropped first
+ * - **Zero blocking**: no path awaits the network -> instrumentation never affects the business
  *
- * ## 对接点
- * - `panel-deps.ts` 里构造后塞进 PanelDeps
- * - `api-call-telemetry-middleware.ts` 兜底调用
- * - `chat-memory.ts` `/import` 等已 resolve 的 route 走 `c.set` 直接命中，
- *   同时可选调 `warm(userKey, userId)` 预热
+ * ## Integration points
+ * - constructed in `panel-deps.ts` and put into PanelDeps
+ * - fallback call in `api-call-telemetry-middleware.ts`
+ * - routes that already resolve, such as `chat-memory.ts` `/import`, hit directly via `c.set`,
+ *   and may optionally call `warm(userKey, userId)` to warm up
  */
 import type { MetaKernelPort } from '../kernel/ports/meta-kernel-port.js';
 import type { MetaCallContext } from '../kernel/types.js';
@@ -41,9 +41,9 @@ interface CacheEntry {
 }
 
 /**
- * 中间件用到时**必须提供 ctx**（instanceId + gateway 地址等）——
- * 因为 auth/verify 是 per-instance 调用，同一个 user_key 在不同 instance 下
- * 语义不同。resolver 用 `${instanceId}|${userKey}` 作 cache key。
+ * When the middleware uses it it **must provide ctx** (instanceId + gateway address, etc.) --
+ * because auth/verify is a per-instance call, and the same user_key has
+ * different semantics under different instances. The resolver uses `${instanceId}|${userKey}` as the cache key.
  */
 export interface UserIdResolveCtx {
   instanceId: string;
@@ -66,8 +66,8 @@ export class PanelUserIdResolver {
   }
 
   /**
-   * 同步查询：命中返回 user_id，miss 返回 undefined + 异步刷新。
-   * 永不抛异常，永不阻塞。
+   * Synchronous lookup: returns user_id on a hit; on a miss returns undefined + asynchronous refresh.
+   * Never throws, never blocks.
    */
   get(userKey: string, ctx: UserIdResolveCtx): string | undefined {
     if (!userKey) return undefined;
@@ -76,14 +76,14 @@ export class PanelUserIdResolver {
     if (entry && entry.expireAt > Date.now()) {
       return entry.userId;
     }
-    // miss 或过期 → fire-and-forget refresh
+    // miss or expired -> fire-and-forget refresh
     this.scheduleRefresh(userKey, ctx);
     return undefined;
   }
 
   /**
-   * 显式预热：route 已经调过 auth/verify 拿到 user_id 时，
-   * 顺手塞进来省一次 core 调用。
+   * Explicit warm-up: when a route has already called auth/verify and got the user_id,
+   * put it in here to save one core call.
    */
   warm(userKey: string, userId: string, instanceId: string): void {
     if (!userKey || !userId) return;
@@ -91,17 +91,17 @@ export class PanelUserIdResolver {
     this.putEntry(key, userId);
   }
 
-  /** 主动 evict（测试或用户撤销 user_key 时用）。 */
+  /** Actively evict (used in tests or when a user revokes a user_key). */
   invalidate(userKey: string, instanceId: string): void {
     this.cache.delete(this.makeKey(instanceId, userKey));
   }
 
-  /** 测试用：当前缓存大小。 */
+  /** For tests: current cache size. */
   size(): number {
     return this.cache.size;
   }
 
-  // ── 内部 ───────────────────────────────────────────────────────────────
+  // ── Internals ───────────────────────────────────────────────────────────────
 
   private makeKey(instanceId: string, userKey: string): string {
     return `${instanceId}|${userKey}`;
@@ -139,7 +139,7 @@ export class PanelUserIdResolver {
       if (typeof uid !== 'string' || uid.length === 0) return;
       this.putEntry(cacheKey, uid);
     } catch (err) {
-      // 不抛不停,埋点缺 user_id 而已
+      // Do not throw or stop; instrumentation merely lacks user_id
       this.logger.debug('[user-id-resolver] refresh failed', {
         error: (err as Error).message,
       });
@@ -149,7 +149,7 @@ export class PanelUserIdResolver {
   }
 
   private putEntry(cacheKey: string, userId: string): void {
-    // 超上限先丢最老的一条（Map iteration order = insertion order）
+    // When over the cap, drop the oldest first (Map iteration order = insertion order)
     if (this.cache.size >= this.options.maxSize && !this.cache.has(cacheKey)) {
       const oldest = this.cache.keys().next().value;
       if (oldest !== undefined) this.cache.delete(oldest);

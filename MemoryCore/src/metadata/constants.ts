@@ -1,5 +1,5 @@
-/** 单实例部署默认租户 ID（存量数据回填值）。 */
+/** Default tenant ID for single-instance deployments (backfill value for existing data). */
 export const DEFAULT_INSTANCE_ID = "default";
 
-/** 未指定 auth_provider 时的默认值（user_key / 本地 API 创建）。 */
+/** Default value when auth_provider is not specified (user_key / local API creation). */
 export const DEFAULT_AUTH_PROVIDER = "local";

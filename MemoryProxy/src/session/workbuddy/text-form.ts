@@ -1,21 +1,21 @@
 /**
- * text-form.ts — WorkBuddy 无 AskUserQuestion 工具时的文字模式渲染层.
+ * text-form.ts — text-mode rendering layer used when WorkBuddy has no AskUserQuestion tool.
  *
- * 场景：新版 WorkBuddy 官方 tools 集合里拿掉了 AskUserQuestion（能力探测已判定
- * `capabilities.askUserQuestion === false`），继续发 tool_calls SSE 客户端会收下
- * 但不知道怎么渲染 → 卡死。降级为：走 OpenAI chat.completions 的 **content chunk**
- * 流，把选项渲染成 markdown 让 LLM 客户端原样透传给用户看。
+ * Scenario: the new WorkBuddy official tools set dropped AskUserQuestion (capability probing determined
+ * `capabilities.askUserQuestion === false`); if tool_calls SSE were still sent, the client would accept it
+ * but not know how to render it → hang. Degraded to: go through the **content chunk**
+ * stream of OpenAI chat.completions, rendering the options as markdown for the LLM client to relay verbatim to the user.
  *
- * 排版原则：
- *   - **不用 emoji**（用户 rule）
- *   - 用 `====` 主标题分隔线、`----` 提示区分隔线、编号右对齐、空行分块
- *   - 视觉层次靠纯 ASCII，不依赖 markdown 渲染
+ * Layout principles:
+ *   - **No emoji** (user rule)
+ *   - Use a `====` major-title rule, a `----` hint-area rule, right-aligned numbering, and blank-line blocks
+ *   - Visual hierarchy relies on plain ASCII, not on markdown rendering
  *
- * 分页：使用独立的 `computeTextPagination`（每页 10 项，无 MORE 槽位）。
- * 用户翻页靠 `next / prev` 关键字，在 CP3 解析层识别（本文件只负责渲染）。
+ * Pagination: uses a standalone `computeTextPagination` (10 items per page, no MORE slot).
+ * The user pages with the `next / prev` keywords, recognized in the CP3 parsing layer (this file only renders).
  *
- * 传输：
- *   - stream=true  → SSE, 一次 role chunk + 一次 content chunk + finish + [DONE]
+ * Transport:
+ *   - stream=true  → SSE, one role chunk + one content chunk + finish + [DONE]
  *   - stream=false → OpenAI chat.completion JSON, choices[0].message.content = markdown
  */
 
@@ -25,21 +25,21 @@ import { computeTextPagination, TEXT_PAGE_SIZE } from "./text-pagination.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/** 主标题分隔线（视觉上等价于卡片模式的标题 emoji）。 */
+/** Major-title rule (visually equivalent to the title emoji in card mode). */
 const RULE_MAJOR = "================================================";
-/** 提示区分隔线（视觉上分隔选项列表和操作提示）。 */
+/** Hint-area rule (visually separates the option list from the action hints). */
 const RULE_MINOR = "------------------------------------------------";
 
-/** 4 个 stage 的标题（不含步骤号，步骤号动态拼）。 */
+/** Titles of the 4 stages (without step numbers; the step number is concatenated dynamically). */
 const STAGE_TITLES: Record<FormStage, string> = {
-  asset_confirm: "是否关联团队资产？",
-  team: "选择 Team",
-  agent_select: "选择 Agent",
-  task_select: "选择 Task",
-  agent_task: "选择 Agent 与 Task", // legacy, 文字模式不常用（WB 走 CC 拆分路径）
+  asset_confirm: "Associate team assets?",
+  team: "Select Team",
+  agent_select: "Select Agent",
+  task_select: "Select Task",
+  agent_task: "Select Agent and Task", // legacy, rarely used in text mode (WB goes through the CC split path)
 };
 
-/** 4 个 stage 的步骤号（用于"步骤 N/4"提示）。 */
+/** Step numbers of the 4 stages (used for the "Step N/4" hint). */
 const STAGE_STEP: Record<FormStage, number> = {
   asset_confirm: 1,
   team: 2,
@@ -48,54 +48,54 @@ const STAGE_STEP: Record<FormStage, number> = {
   agent_task: 3, // legacy
 };
 
-/** 每个 session-init 流程的总步骤数（用于"步骤 N/4"提示）。 */
+/** Total number of steps in each session-init flow (used for the "Step N/4" hint). */
 const TOTAL_STEPS = 4;
 
-// asset_confirm 的两个选项 label —— 必须跟 workbuddy/form.ts 的 ASSET_CONFIRM_YES/NO
-// 一致：CP3 解析层要把用户回复归一化成这两个字符串，注入 fake tool_result 后
-// CB extractor 才能识别。这里没 import 而是 re-declare，让 text-form 保持独立
-// 可测；如果 form.ts 那边改常量，测试会双写失败提醒同步。
-export const TEXT_ASSET_CONFIRM_YES_LABEL = "是，关联团队资产";
-export const TEXT_ASSET_CONFIRM_NO_LABEL = "否，本次不关联";
+// The two option labels of asset_confirm — must be identical to ASSET_CONFIRM_YES/NO in workbuddy/form.ts:
+// the CP3 parsing layer normalizes the user's reply into these two strings, and after injecting a fake tool_result
+// the CB extractor can recognize them. They are re-declared here rather than imported, to keep text-form independent
+// and testable; if the constants in form.ts change, the tests fail on both sides as a reminder to sync.
+export const TEXT_ASSET_CONFIRM_YES_LABEL = "Yes, associate team assets";
+export const TEXT_ASSET_CONFIRM_NO_LABEL = "No, do not associate this time";
 
 /**
- * 文字模式 content 里首行标记，用于回显时识别（未来若 injector 层想剔除自己
- * 上一轮发的初始化文本，可以通过这个前缀识别）。
+ * First-line marker in text-mode content, used for recognition on echo (if the injector layer later wants to strip the
+ * initialization text it sent in the previous round, it can recognize it via this prefix).
  */
-export const TEXT_FORM_MARKER = "[会话初始化]";
+export const TEXT_FORM_MARKER = "[Session Init]";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface RetryContext {
-  /** 用户上一轮的原始回复（用于回显 "未能识别你的回复 xxx"）。 */
+  /** The user's raw reply from the previous round (used to echo "Could not recognize your reply xxx"). */
   userReplyPreview?: string;
-  /** 已尝试次数（1-based，用于"第 N 次尝试"提示）。 */
+  /** Number of attempts so far (1-based, used for the "Attempt N" hint). */
   attemptCount?: number;
-  /** 剩余尝试次数（用于"再 M 次未识别将自动跳过"提示）。 */
+  /** Remaining attempts (used for the "will be skipped automatically after M more unrecognized replies" hint). */
   attemptsLeft?: number;
 }
 
 // ── Renderers per stage ────────────────────────────────────────────────────────
 
 /**
- * 渲染 asset_confirm 阶段的 markdown 文本。
+ * Render the markdown text of the asset_confirm stage.
  */
 export function renderAssetConfirmText(retry?: RetryContext): string {
   const header = renderHeader("asset_confirm", null, retry);
   const body = [
     "",
-    "   1.  是，关联团队资产",
-    "   2.  否，本次不关联",
+    "   1.  Yes, associate team assets",
+    "   2.  No, do not associate this time",
     "",
     RULE_MINOR,
-    "  回复方式：请输入 yes 或 no",
+    "  How to reply: enter yes or no",
     "",
   ].join("\n");
   return header + body;
 }
 
 /**
- * 渲染 team 阶段的 markdown 文本。
+ * Render the markdown text of the team stage.
  */
 export function renderTeamText(teams: readonly TeamOption[], pageIndex: number, retry?: RetryContext): string {
   const p = computeTextPagination(teams, pageIndex);
@@ -109,12 +109,12 @@ export function renderTeamText(teams: readonly TeamOption[], pageIndex: number, 
 }
 
 /**
- * 渲染 agent_select 阶段的 markdown 文本。
+ * Render the markdown text of the agent_select stage.
  *
- * @param teams          全量 teams（用于从 selectedTeamId 取 agents）
- * @param selectedTeamId 已选 team 的 id
- * @param pageIndex      当前页码
- * @param retry          可选，retry 上下文
+ * @param teams          full list of teams (used to get agents from selectedTeamId)
+ * @param selectedTeamId id of the selected team
+ * @param pageIndex      current page index
+ * @param retry          optional, retry context
  */
 export function renderAgentText(
   teams: readonly TeamOption[],
@@ -136,7 +136,7 @@ export function renderAgentText(
 }
 
 /**
- * 渲染 task_select 阶段的 markdown 文本。
+ * Render the markdown text of the task_select stage.
  */
 export function renderTaskText(
   teams: readonly TeamOption[],
@@ -150,8 +150,8 @@ export function renderTaskText(
   const header = renderHeader("task_select", p, retry);
   const body = renderOptionList(p.currentPageItems, p.offset, (t) => ({
     primary: t.task_name ?? t.task_id,
-    secondary: t.task_id || "(无 task-id)",
-    tertiary: t.isDefault ? "默认任务" : undefined,
+    secondary: t.task_id || "(no task-id)",
+    tertiary: t.isDefault ? "Default task" : undefined,
   }));
   const footer = renderFooter(p, "task", tasks.length);
   return header + "\n" + body + "\n" + footer;
@@ -160,18 +160,18 @@ export function renderTaskText(
 // ── Bypass notice ──────────────────────────────────────────────────────────────
 
 /**
- * 3 次连续无法识别后的兜底提示文案（CP4 会调用）。
+ * Fallback notice after 3 consecutive unrecognized replies (called by CP4).
  */
 export function renderBypassNotice(): string {
   return [
     RULE_MAJOR,
-    `  ${TEXT_FORM_MARKER} 已跳过团队资产关联`,
+    `  ${TEXT_FORM_MARKER} Team asset association skipped`,
     RULE_MAJOR,
     "",
-    "  尝试 3 次仍未识别选择，本次会话将不关联团队资产，",
-    "  直接放行后续对话。",
+    "  The selection was not recognized after 3 attempts; this session will not be associated with team assets,",
+    "  and subsequent conversation passes through directly.",
     "",
-    "  如需重新初始化，请发送 `mem:session-reset`。",
+    "  To re-initialize, send `mem:session-reset`.",
     "",
   ].join("\n");
 }
@@ -179,12 +179,12 @@ export function renderBypassNotice(): string {
 // ── Main dispatcher ────────────────────────────────────────────────────────────
 
 export interface BuildTextFormOptions {
-  /** retry 上下文（可选），非 retry 情况下传 undefined。 */
+  /** Retry context (optional); pass undefined when it is not a retry. */
   retry?: RetryContext;
 }
 
 /**
- * 根据 formData.stage 分派到对应渲染函数，输出完整 markdown 字符串。
+ * Dispatch to the corresponding render function by formData.stage and output the complete markdown string.
  */
 export function renderTextForm(data: FormData, options: BuildTextFormOptions = {}): string {
   const retry = options.retry;
@@ -196,7 +196,7 @@ export function renderTextForm(data: FormData, options: BuildTextFormOptions = {
     case "team":
       return renderTeamText(data.teams, pageIndex, retry);
     case "agent_select":
-    case "agent_task": // legacy: 也当 agent 渲染
+    case "agent_task": // legacy: also rendered as agent
       return renderAgentText(data.teams, data.selectedTeamId, pageIndex, retry);
     case "task_select":
       return renderTaskText(data.teams, data.selectedTeamId, pageIndex, retry);
@@ -207,8 +207,8 @@ export function renderTextForm(data: FormData, options: BuildTextFormOptions = {
 }
 
 /**
- * 构造完整的 HTTP Response（stream 或 non-stream），把 renderTextForm 的 markdown
- * 塞到 OpenAI chat.completions 的 content 字段里。
+ * Build the complete HTTP Response (stream or non-stream), putting the markdown of renderTextForm
+ * into the content field of OpenAI chat.completions.
  */
 export function buildWorkBuddyTextFormResponse(
   data: FormData,
@@ -219,7 +219,7 @@ export function buildWorkBuddyTextFormResponse(
 }
 
 /**
- * 构造 bypass 场景的 Response（3 次 retry 后的兜底文案，CP4 会用）。
+ * Build the Response for the bypass scenario (fallback text after 3 retries; used by CP4).
  */
 export function buildBypassNoticeResponse(modelId?: string, stream = false): Response {
   return buildTextContentResponse(renderBypassNotice(), modelId, stream);
@@ -288,7 +288,7 @@ function buildStreamingContent(id: string, created: number, model: string, conte
         ),
       );
 
-      // Chunk 2: content（整体一次性发出；不必按 token 拆分，客户端只需要能读到完整文本）
+      // Chunk 2: content (sent all at once; no need to split by token, the client only needs to read the complete text)
       controller.enqueue(
         encoder.encode(
           `data: ${JSON.stringify({
@@ -351,7 +351,7 @@ interface OptionLine {
 }
 
 /**
- * 渲染标题区块（含分隔线 + 步骤号 + 副标题分页信息 / retry 信息）。
+ * Render the title block (rule + step number + subtitle pagination info / retry info).
  */
 function renderHeader(stage: FormStage, pagination: ReturnType<typeof computeTextPagination> | null, retry?: RetryContext): string {
   const step = STAGE_STEP[stage];
@@ -362,26 +362,26 @@ function renderHeader(stage: FormStage, pagination: ReturnType<typeof computeTex
   lines.push(RULE_MAJOR);
 
   if (isRetry) {
-    // Retry 标题：突出"未能识别"
+    // Retry title: highlight "could not recognize"
     const preview = truncatePreview(retry?.userReplyPreview);
-    lines.push(`  ${TEXT_FORM_MARKER} 未能识别你的回复${preview ? ` "${preview}"` : ""}`);
+    lines.push(`  ${TEXT_FORM_MARKER} Could not recognize your reply${preview ? ` "${preview}"` : ""}`);
     if (typeof retry?.attemptCount === "number") {
       const left = retry.attemptsLeft;
       const leftPart = typeof left === "number" && left > 0
-        ? `，再 ${left} 次未识别将自动跳过`
+        ? `, will be skipped automatically after ${left} more unrecognized reply(ies)`
         : "";
-      lines.push(`  第 ${retry.attemptCount} 次尝试${leftPart}`);
+      lines.push(`  Attempt ${retry.attemptCount}${leftPart}`);
     }
     lines.push(RULE_MAJOR);
     lines.push("");
-    lines.push(`  ${TEXT_FORM_MARKER} 步骤 ${step}/${TOTAL_STEPS}：${title}`);
+    lines.push(`  ${TEXT_FORM_MARKER} Step ${step}/${TOTAL_STEPS}: ${title}`);
     if (pagination && !pagination.isEmpty) {
-      lines.push(`  第 ${pagination.currentPageIndex + 1} 页 / 共 ${pagination.totalPages} 页`);
+      lines.push(`  Page ${pagination.currentPageIndex + 1} of ${pagination.totalPages}`);
     }
   } else {
-    lines.push(`  ${TEXT_FORM_MARKER} 步骤 ${step}/${TOTAL_STEPS}：${title}`);
+    lines.push(`  ${TEXT_FORM_MARKER} Step ${step}/${TOTAL_STEPS}: ${title}`);
     if (pagination && !pagination.isEmpty) {
-      lines.push(`  第 ${pagination.currentPageIndex + 1} 页 / 共 ${pagination.totalPages} 页`);
+      lines.push(`  Page ${pagination.currentPageIndex + 1} of ${pagination.totalPages}`);
     }
     lines.push(RULE_MAJOR);
   }
@@ -390,15 +390,15 @@ function renderHeader(stage: FormStage, pagination: ReturnType<typeof computeTex
 }
 
 /**
- * 渲染选项列表。编号右对齐（1..99 都能对齐）。
+ * Render the option list. Numbers are right-aligned (1..99 all align).
  *
- * ⚠️ 显式包一层 ```plaintext code fence：
- *   我们的选项行本身用 "  N.  xxx" 前缀（缩进 3~4 空格）—— 落到 markdown
- *   renderer 眼里，1~9 行是 4 空格缩进（触发 indented-code-block），10+ 行
- *   缩进减少一位掉出 code block；且 tertiary（description）副行也是不同缩进。
- *   结果是 workbuddy 客户端把 1~9 项包在 code chip 里、10+ 项和描述行掉出来
- *   变成裸文本（图 1 现象）。主动包 ```plaintext fence 后，整段以 fenced
- *   code-block 语义渲染，行内空格数就完全无所谓了，视觉一致。
+ * ⚠️ Explicitly wrap it in a ```plaintext code fence:
+ *   Our option lines themselves use an "  N.  xxx" prefix (3-4 spaces of indentation) — to the markdown
+ *   renderer, lines 1-9 are indented by 4 spaces (triggering an indented-code-block), while lines 10+ have
+ *   one less space of indentation and fall out of the code block; and the tertiary (description) sub-lines have a different indentation too.
+ *   The result is that the workbuddy client wraps items 1-9 in a code chip while items 10+ and the description lines fall out
+ *   as naked text (the "figure 1" symptom). After actively wrapping a ```plaintext fence, the whole segment is rendered with fenced
+ *   code-block semantics, the number of in-line spaces no longer matters at all, and the look is consistent.
  */
 function renderOptionList<T>(
   items: readonly T[],
@@ -406,18 +406,18 @@ function renderOptionList<T>(
   extract: (item: T) => OptionLine,
 ): string {
   if (items.length === 0) {
-    return "\n```plaintext\n  (当前列表为空)\n```\n";
+    return "\n```plaintext\n  (the current list is empty)\n```\n";
   }
 
   const lines: string[] = ["", "```plaintext"];
   items.forEach((item, i) => {
-    const absoluteIdx = offset + i + 1; // 1-based 显示序号
+    const absoluteIdx = offset + i + 1; // 1-based display index
     const line = extract(item);
     const numStr = `${absoluteIdx}.`.padStart(4, " ");
-    // 主行：编号 + 主标签 + ID（用 " · " 分隔）
+    // Main line: number + main label + ID (separated by " · ")
     const idPart = line.secondary ? `  ·  ${line.secondary}` : "";
     lines.push(`  ${numStr}  ${line.primary}${idPart}`);
-    // 副行：描述或标签（缩进对齐）
+    // Sub-line: description or label (indentation aligned)
     if (line.tertiary) {
       lines.push(`         ${line.tertiary}`);
     }
@@ -427,11 +427,11 @@ function renderOptionList<T>(
 }
 
 /**
- * 渲染操作提示区（回复方式说明 + next/prev/skip 关键字）。
+ * Render the action-hint area (reply instructions + the next/prev/skip keywords).
  *
- * 数字寻址按**全表 1-based 序号**（跟 renderOptionList 的 absoluteIdx 一致），
- * 所以范围提示要用 `totalItems`（全表长度），不是 `currentPageItems.length`。
- * 例：task_select 共 28 项分 3 页，无论用户翻到哪页，回复提示都写 "1..28"。
+ * Numeric addressing uses the **1-based index in the full list** (consistent with absoluteIdx in renderOptionList),
+ * so the range hint must use `totalItems` (the full list length), not `currentPageItems.length`.
+ * Example: task_select has 28 items over 3 pages; whichever page the user is on, the reply hint says "1..28".
  */
 function renderFooter(
   pagination: ReturnType<typeof computeTextPagination>,
@@ -440,18 +440,18 @@ function renderFooter(
 ): string {
   const lines: string[] = [];
   lines.push(RULE_MINOR);
-  lines.push("  回复方式：");
+  lines.push("  How to reply:");
   const pageRange = pagination.isEmpty
-    ? "(空)"
+    ? "(empty)"
     : `1..${totalItems}`;
-  lines.push(`    - 数字（如 ${pagination.isEmpty ? "1" : "2"}，范围 ${pageRange}）`);
+  lines.push(`    - a number (e.g. ${pagination.isEmpty ? "1" : "2"}, range ${pageRange})`);
   if (pagination.hasNext) {
-    lines.push("    - next / 下一页  —— 查看更多");
+    lines.push("    - next  --  show more");
   }
   if (pagination.hasPrev) {
-    lines.push("    - prev / 上一页  —— 返回上一页");
+    lines.push("    - prev  --  go back to the previous page");
   }
-  lines.push("    - skip / 跳过    —— 不关联团队资产");
+    lines.push("    - skip  --  do not associate team assets");
   lines.push("");
   return lines.join("\n");
 }

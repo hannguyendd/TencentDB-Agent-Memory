@@ -1,24 +1,24 @@
 /**
- * WikiSourceRegistry —— wiki provider 注册中心。
+ * WikiSourceRegistry — wiki provider registry.
  *
- * 与 CodeSourceRegistry 对称：注册中心不感知任何具体平台，
- * 平台差异只在 `providers/<id>/` 里。
+ * Symmetric with CodeSourceRegistry: the registry is unaware of any concrete platform;
+ * platform differences live only in `providers/<id>/`.
  *
- * 部署配置（同名模式）：
+ * Deployment config (same-name pattern):
  *   WIKI_SOURCE_ENABLED=iwiki
- *   WIKI_SOURCE_<UPPER_ID>_<ENDPOINT_SUFFIX>=https://...  # 服务端点（后缀由 provider 声明，默认 MCP_URL）
- *   WIKI_SOURCE_<UPPER_ID>_SITE_BASE_URL=https://.../     # 站点根（拼令牌页）
+ *   WIKI_SOURCE_<UPPER_ID>_<ENDPOINT_SUFFIX>=https://...  # service endpoint (suffix declared by the provider, default MCP_URL)
+ *   WIKI_SOURCE_<UPPER_ID>_SITE_BASE_URL=https://.../     # site root (used to build the token page)
  *
- * 展示名不做成配置：前端按 `wiki.source.<id>` 走 i18n。
+ * The display name is not made configurable: the frontend uses i18n via `wiki.source.<id>`.
  *
- * 注册中心**不感知任何具体平台**：内置清单来自 providers/index.ts，
- * 端点配置名由 provider 自行声明 → 接入 REST 型平台无需改本文件。
+ * The registry is **unaware of any concrete platform**: the built-in list comes from providers/index.ts,
+ * and the endpoint config name is declared by the provider itself → onboarding a REST-style platform needs no change to this file.
  */
 
 import type { SourceContext, WikiSourceMeta, WikiSourceProvider } from "./types.js";
 import { BUILTIN_PROVIDERS } from "./providers/index.js";
 
-/** 端点配置名后缀的默认值：MCP 协议型。 */
+/** Default value of the endpoint config name suffix: MCP protocol type. */
 const DEFAULT_ENDPOINT_SUFFIX = "MCP_URL";
 
 function env(key: string): string | undefined {
@@ -44,19 +44,19 @@ function enabledIds(): string[] {
 }
 
 /**
- * 解析令牌申请页地址。
+ * Resolve the token application page address.
  *
- * - provider 声明 `tokenUrlEnv` → **直接用该 env 的完整 URL**，不拼接。
- *   该 env 名是**全局的**（如 `TAI_PAT_URL`），不按来源加前缀 ——
- *   这样多个来源可以指向同一个令牌页，改地址只改一处。
- * - provider 声明 `path` → 拼到部署配的 `WIKI_SOURCE_<ID>_SITE_BASE_URL`。
+ * - Provider declares `tokenUrlEnv` → **use that env's full URL directly**, without concatenation.
+ *   That env name is **global** (e.g. `TAI_PAT_URL`) and is not prefixed per source —
+ *   so multiple sources can point to the same token page, and changing the address means changing only one place.
+ * - Provider declares `path` → append it to the deployment-configured `WIKI_SOURCE_<ID>_SITE_BASE_URL`.
  *
- * 地址一律来自部署配置：**不在代码里硬编码内网域名**。
+ * Addresses always come from deployment config: **no intranet domain is hard-coded in code**.
  */
 function resolveTokenDocUrl(provider: WikiSourceProvider): string | undefined {
   const tokenDoc = provider.sitePaths.tokenDoc;
 
-  // 完整 URL（不拼接）：多个来源共用同一令牌页时用它。
+  // Full URL (no concatenation): used when multiple sources share the same token page.
   if (tokenDoc && "tokenUrlEnv" in tokenDoc) return env(tokenDoc.tokenUrlEnv);
 
   if (tokenDoc && "path" in tokenDoc) {
@@ -84,7 +84,7 @@ export class WikiSourceRegistry {
   ) {
     const enabledSet = new Set(ids ?? enabledIds());
     const known = new Set(builtins.map((p) => p.id));
-    // 启用未内置的 id 属配置错误：立即抛错，不静默塞占位
+    // Enabling an id that is not built in is a config error: throw immediately, do not silently stuff in a placeholder
     const unknown = [...enabledSet].filter((id) => !known.has(id));
     if (unknown.length > 0) {
       throw new Error(
@@ -110,12 +110,12 @@ export class WikiSourceRegistry {
   }
 
   /**
-   * 构造拉取上下文：把部署配的服务端点 + 传入凭据组合成 SourceContext。
+   * Build the fetch context: combine the deployment-configured service endpoint + the passed-in credential into a SourceContext.
    *
-   * 端点配置名由 provider 声明（`endpointEnvSuffix`，默认 `MCP_URL`），
-   * 因此 MCP 型与 REST 型平台都适用，注册中心不假设具体协议。
+   * The endpoint config name is declared by the provider (`endpointEnvSuffix`, default `MCP_URL`),
+   * so it applies to both MCP-style and REST-style platforms; the registry assumes no specific protocol.
    *
-   * 未配端点 → 抛错（内网基础设施必须显式配置，无内置默认）。
+   * No endpoint configured → throw (intranet infrastructure must be configured explicitly, no built-in default).
    */
   contextFor(
     id: string,

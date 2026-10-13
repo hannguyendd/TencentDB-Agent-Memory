@@ -1,12 +1,12 @@
 /**
- * Wiki Source Manager — 管理文档源的注册、扫描、索引、查询生命周期
+ * Wiki Source Manager — manages the document source lifecycle: registration, scanning, indexing, querying
  *
- * 摄取走 ingest-v2/ 引擎。
+ * Ingest goes through the ingest-v2/ engine.
  *
- * 索引存储（设计 006）：BM25 全文检索、知识图谱、页元数据不再常驻内存，改存每个
- * wiki 私有的 `index.db`（SQLite：wiki_fts + page_meta + graph_edge）。写走独立事务连接
- * （重建三表），读走 LRU 连接池；内存与 wiki 总数解耦，根治 MiniSearch 全量常驻的 OOM。
- * 图谱小，查询时从 graph_edge 临时构建内存 graphology 实例做多跳 BFS（复用现有算法）。
+ * Index storage (design 006): BM25 full-text search, knowledge graph, and page metadata no longer stay resident in memory; instead they are stored in each
+ * wiki's private `index.db` (SQLite: wiki_fts + page_meta + graph_edge). Writes go through a dedicated transaction connection
+ * (rebuilding the three tables), reads go through an LRU connection pool; memory is decoupled from the total wiki count, eliminating the OOM caused by MiniSearch keeping everything resident.
+ * The graph is small; at query time an in-memory graphology instance is built on the fly from graph_edge for multi-hop BFS (reusing the existing algorithm).
  */
 
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "fs";
@@ -47,7 +47,7 @@ import { DEFAULT_SCHEMA, DEFAULT_PURPOSE } from "./ingest-v2/template.js";
 
 const log = createLogger("wiki-mgr");
 
-// ── 内联 frontmatter/wikilink 解析（不依赖外部模块，确保可编译） ──
+// ── Inline frontmatter/wikilink parsing (no external module dependency, ensures it compiles) ──
 
 function extractFrontmatter(content: string): { title: string; type: string; sources: string[]; description: string } {
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
@@ -105,7 +105,7 @@ export interface SearchOptions {
   minScore?: number;
 }
 
-/** ingest 进度回调载荷（KS → Panel）。 */
+/** ingest progress callback payload (KS → Panel). */
 export interface IngestProgress {
   phase: "extracting" | "merging" | "indexing";
   total: number;
@@ -117,12 +117,12 @@ export interface IngestProgress {
 
 export type ProgressFn = (progress: IngestProgress) => void;
 
-/** extracting 同阶段节流间隔；阶段切换（merging/indexing）始终立即上报。 */
+/** Throttle interval within the extracting phase; phase switches (merging/indexing) are always reported immediately. */
 export const PROGRESS_THROTTLE_MS = 500;
 
 /**
- * 节流 onProgress：阶段切换立即发；同阶段仅在 percent 上升且距上次 ≥ minIntervalMs
- * （或已到 extracting 末段 percent≥90）时发送，避免多源并发打爆 Panel。
+ * Throttle onProgress: phase switches are emitted immediately; within the same phase, emit only when percent rises and at least minIntervalMs has passed since the last emit
+ * (or the extracting tail percent≥90 is reached), to avoid concurrent multi-source runs flooding the Panel.
  */
 export function createThrottledProgressFn(
   onProgress: ProgressFn | undefined,
@@ -166,10 +166,10 @@ export interface WikiSourceManager {
   ingest(name: string, llmConfig: any, opts?: IngestExecOptions): Promise<any[]>;
 }
 
-/** 图谱中不参与建边/展示的页类型（如内部 query 页）。 */
+/** Page types excluded from edge building/display in the graph (e.g. internal query pages). */
 const HIDDEN_TYPES = new Set(["query"]);
 
-// ── 图谱缓存结构（读时从 index.db 的 graph_edge 临时构建） ──
+// ── Graph cache structure (built on the fly from index.db's graph_edge at read time) ──
 
 export interface PageGraph {
   /** Public view (filtered, with linkCount/community). */
@@ -184,7 +184,7 @@ export interface PageGraph {
   degree: Map<string, number>;
 }
 
-/** 页元数据（读模型；正文不在库，snippet 为写入时预生成的静态摘要）。 */
+/** Page metadata (read model; the body is not in the DB, snippet is a static summary pre-generated at write time). */
 interface PageMeta {
   id: string;
   title: string;
@@ -194,8 +194,8 @@ interface PageMeta {
 }
 
 /**
- * 解析页间 wikilink，产出有向边（source → target）用于写入 graph_edge。
- * 只在 visible（非 hidden 类型）页之间建边，过滤自环与无法解析的坏链接，(source,target) 去重。
+ * Parse inter-page wikilinks and produce directed edges (source → target) to be written to graph_edge.
+ * Edges are built only between visible (non-hidden type) pages; self-loops and unresolvable broken links are filtered, and (source,target) is deduplicated.
  */
 function resolveEdges(pages: WikiPage[]): Array<{ source: string; target: string }> {
   const visible = pages.filter((p) => !HIDDEN_TYPES.has(p.type));
@@ -203,7 +203,7 @@ function resolveEdges(pages: WikiPage[]): Array<{ source: string; target: string
   if (visible.length === 0) return out;
 
   const nodeIds = new Set(visible.map((p) => p.id));
-  // title 的 slug → page id 映射：支持 wikilink 以页面标题（而非文件名）引用。
+  // title slug → page id mapping: supports wikilinks that reference pages by title (rather than filename).
   const titleSlugToId = new Map<string, string>();
   for (const p of visible) {
     const ts = slugify(p.title);
@@ -225,8 +225,8 @@ function resolveEdges(pages: WikiPage[]): Array<{ source: string; target: string
 }
 
 /**
- * 从 page_meta + graph_edge 构建内存 PageGraph（读路径）。
- * 节点 = 非 hidden 类型的页；边 = graph_edge 有向边，公共 view 无向去重。
+ * Build the in-memory PageGraph from page_meta + graph_edge (read path).
+ * Nodes = pages of non-hidden types; edges = directed graph_edge edges, deduplicated as undirected for the public view.
  */
 function buildPageGraphFromDb(
   metaById: Map<string, PageMeta>,
@@ -252,7 +252,7 @@ function buildPageGraphFromDb(
   const seenEdges = new Set<string>();
   const edges: GraphEdge[] = [];
   for (const { source_id: s, target_id: t } of edgeRows) {
-    // 端点必须都是 visible 节点（写库时已保证；读侧防御坏数据）。
+    // Endpoints must both be visible nodes (guaranteed at write time; defensive against bad data on the read side).
     if (!outAdj.has(s) || !inAdj.has(t)) continue;
     outAdj.get(s)!.add(t);
     inAdj.get(t)!.add(s);
@@ -284,10 +284,10 @@ function resolveTarget(
 ): string | null {
   if (nodeIds.has(raw)) return raw;
 
-  // wikilink 目标可能是各种花式写法（带 .md 后缀、带斜杠路径、中英混合、大小写不一）。
-  // 统一用与文件名同源的 slugify 归一后比对 page id 的 basename（单一事实源，
-  // 避免在此重复造一套归一逻辑）。slugify 把 `/`、空格、标点都当段边界，
-  // 故 "/v3/wiki/create 接口" 与 "v3-wiki-create-接口" 归一后一致。
+  // wikilink targets can be written in all sorts of ways (with .md suffix, with slash paths, mixed Chinese/English, inconsistent case).
+  // Normalize uniformly with the same-origin slugify as filenames, then compare against the basename of page id (single source of truth,
+  // avoiding a duplicate normalization logic here). slugify treats `/`, spaces, and punctuation as segment boundaries,
+  // so "/v3/wiki/create 接口" and "v3-wiki-create-接口" are equal after normalization.
   const target = slugify(raw.replace(/\.md$/i, ""));
   if (!target) return null;
 
@@ -297,7 +297,7 @@ function resolveTarget(
     const idBasename = id.split("/").pop() ?? id;
     if (slugify(idBasename) === target) return id;
   }
-  // 回退：按页面标题的 slug 命中（wikilink 用页面标题而非文件名引用时）。
+  // Fallback: match by the page title's slug (when the wikilink references by page title rather than filename).
   const byTitle = titleSlugToId.get(target);
   if (byTitle) return byTitle;
   return null;
@@ -316,9 +316,9 @@ const STOP_WORDS = new Set([
 const SNIPPET_CONTEXT = 80;
 
 /**
- * 预生成页摘要（写入 page_meta.snippet）：优先 frontmatter description，
- * 否则取正文（去 frontmatter/标题）前 SNIPPET_CONTEXT 个字符。
- * 正文不入库，检索时直接返回该静态摘要（消费者主要是 AI，无需按 query 动态高亮）。
+ * Pre-generate the page snippet (written to page_meta.snippet): prefer the frontmatter description,
+ * otherwise take the first SNIPPET_CONTEXT characters of the body (minus frontmatter/headings).
+ * The body is not stored in the DB; search returns this static snippet directly (consumers are mainly AI, no need for query-based dynamic highlighting).
  */
 function makeSnippet(page: WikiPage): string {
   if (page.description) return page.description;
@@ -330,12 +330,12 @@ function makeSnippet(page: WikiPage): string {
 }
 
 /**
- * 分词器：中英文混合处理。
- * - 英文：按空格/标点切分，保留完整单词，过滤 stop words
- * - 中文：bigram + 单字
+ * Tokenizer: mixed Chinese/English handling.
+ * - English: split on spaces/punctuation, keep whole words, filter stop words
+ * - Chinese: bigram + single characters
  *
- * 导出供 FTS5 预分词复用（006）与 bm25 评测：写入 FTS5 时把 content/title
- * 经此函数分词后以空格拼接存入，查询时对 query 用同一分词，保证中文逻辑一致。
+ * Exported for reuse by FTS5 pre-tokenization (006) and bm25 evaluation: when writing to FTS5, content/title
+ * are tokenized by this function and stored joined with spaces; the query is tokenized the same way at search time, keeping the Chinese logic consistent.
  */
 export function tokenize(text: string): string[] {
   const rawTokens = text
@@ -349,7 +349,7 @@ export function tokenize(text: string): string[] {
     const hasLatin = /[a-z]/.test(token);
 
     if (hasCJK && hasLatin) {
-      // 混合 token（如 "l0录入"）：拆分中英文部分分别处理
+      // Mixed token (e.g. "l0intake"): split the Chinese and English parts and handle each separately
       const parts = token.split(/(?<=[a-z0-9])(?=[\u4e00-\u9fff])|(?<=[\u4e00-\u9fff])(?=[a-z0-9])/);
       for (const part of parts) {
         if (/[\u4e00-\u9fff]/.test(part) && part.length > 1) {
@@ -361,12 +361,12 @@ export function tokenize(text: string): string[] {
         }
       }
     } else if (hasCJK && token.length > 1) {
-      // 纯中文：bigram
+      // Pure Chinese: bigram
       const chars = [...token];
       for (let i = 0; i < chars.length - 1; i++) result.push(chars[i] + chars[i + 1]);
       result.push(token);
     } else if (!STOP_WORDS.has(token) && token.length > 0) {
-      // 纯英文/数字：保留完整 token
+      // Pure English/digits: keep the whole token
       result.push(token);
     }
   }
@@ -374,9 +374,9 @@ export function tokenize(text: string): string[] {
 }
 
 /**
- * FTS5 检索：query → tokenize → 每 token 加 `*` 前缀 → OR 连接 → MATCH。
- * bm25() 越负越相关，取负转成"越大越相关"的正分，供图扩展的 decay/minScore 使用。
- * title_tok 权重 5.0、content_tok 1.0（对齐原 MiniSearch boost title×5）。
+ * FTS5 search: query → tokenize → prefix each token with `*` → join with OR → MATCH.
+ * bm25() is more negative the more relevant; negate it into a positive score where larger means more relevant, for the graph expansion's decay/minScore.
+ * title_tok weight 5.0, content_tok 1.0 (aligned with the original MiniSearch boost title×5).
  */
 function ftsSearch(db: DatabaseType.Database, query: string, limit: number): Array<{ id: string; score: number }> {
   const toks = tokenize(query);
@@ -390,7 +390,7 @@ function ftsSearch(db: DatabaseType.Database, query: string, limit: number): Arr
   return rows.map((r) => ({ id: r.page_id, score: -r.score }));
 }
 
-/** 事务内重建三张索引表（wiki_fts + page_meta + graph_edge）。由 withWriteDb 调用。 */
+/** Rebuild the three index tables within a transaction (wiki_fts + page_meta + graph_edge). Called by withWriteDb. */
 function writeIndex(db: DatabaseType.Database, pages: WikiPage[]): void {
   db.prepare("DELETE FROM wiki_fts").run();
   db.prepare("DELETE FROM page_meta").run();
@@ -403,15 +403,15 @@ function writeIndex(db: DatabaseType.Database, pages: WikiPage[]): void {
   const insEdge = db.prepare("INSERT OR IGNORE INTO graph_edge(source_id, target_id) VALUES (?,?)");
 
   for (const p of pages) {
-    // wiki_fts + page_meta 收录所有页（含 hidden 类型，供检索）。
+    // wiki_fts + page_meta include all pages (including hidden types, for search).
     insFts.run(p.id, tokenize(p.title).join(" "), tokenize(p.content).join(" "));
     insMeta.run(p.id, p.title, p.type, p.relPath, makeSnippet(p));
   }
-  // graph_edge 只在 visible 页间。
+  // graph_edge only between visible pages.
   for (const e of resolveEdges(pages)) insEdge.run(e.source, e.target);
 }
 
-/** 从读连接加载读模型：页元数据表 + 图（graph_edge 构建的内存图）。 */
+/** Load the read model from a read connection: page metadata table + graph (in-memory graph built from graph_edge). */
 function loadReadModel(db: DatabaseType.Database): { pg: PageGraph; metaById: Map<string, PageMeta> } {
   const metaRows = db
     .prepare("SELECT page_id, title, type, rel_path, snippet FROM page_meta ORDER BY page_id")
@@ -514,7 +514,7 @@ function buildResultLinks(resultIds: string[], pg: PageGraph, metaById: Map<stri
   return links;
 }
 
-// ── 初始化模板 ──
+// ── Init templates ──
 
 function initWikiProject(projectPath: string): void {
   const dirs = ["raw/sources", "wiki/entities", "wiki/concepts", "wiki/sources", "wiki/comparisons", "wiki/synthesis", ".llm-wiki"];
@@ -530,9 +530,9 @@ function initWikiProject(projectPath: string): void {
   }
 }
 
-// ── Ingest（ingest-v2；增量抽取见设计 003） ──
+// ── Ingest (ingest-v2; incremental extraction, see design 003) ──
 
-/** 单源抽取结果（用于事务内登记 source.status）。 */
+/** Single-source extraction result (used to register source.status within a transaction). */
 interface ProcessedSource {
   filename: string;
   sha256: string;
@@ -542,21 +542,21 @@ interface ProcessedSource {
 }
 
 interface IngestOutcome {
-  /** 兼容旧返回：每个被抽取源的 {source, filesWritten, error}。 */
+  /** Backward-compatible return: {source, filesWritten, error} for each extracted source. */
   results: any[];
-  /** 本次尝试抽取的源结果（登记 source 状态用）。 */
+  /** Results of sources attempted for extraction this time (used to register source status). */
   processed: ProcessedSource[];
-  /** 表中有但磁盘已无 → 待删 source 行。 */
+  /** In the table but no longer on disk → source rows to delete. */
   deletedSources: string[];
 }
 
 /**
- * 增量抽取（设计 003 §3.6 + wiki-ingest-optimization）：
- * 阶段1 并行 LLM 抽取 → 已删源级联清理 → 阶段2 串行 merge 落盘 → overview。
- * 不在此更新 source 表 / 不重建索引——那些交由 ingest() 在同一事务内完成（强一致）。
- * 全部失败检测不在此 throw，由上层 WikiSourceManager.ingest 写事务后判定。
+ * Incremental extraction (design 003 §3.6 + wiki-ingest-optimization):
+ * Phase 1 parallel LLM extraction → cascade cleanup of deleted sources → Phase 2 serial merge and write to disk → overview.
+ * Does not update the source table / rebuild the index here — ingest() does those within the same transaction (strong consistency).
+ * All-failed detection does not throw here; the upper-level WikiSourceManager.ingest decides after the write transaction.
  *
- * 导出供编排层单测（进度相位 / skipped / 全失败不 throw）。
+ * Exported for orchestration-layer unit tests (progress phases / skipped / all-failed does not throw).
  */
 export async function runIngestIncremental(
   projectPath: string,
@@ -569,11 +569,11 @@ export async function runIngestIncremental(
   const report = createThrottledProgressFn(onProgress);
   const sourcesDir = join(projectPath, "raw", "sources");
   if (!existsSync(sourcesDir)) {
-    log.warn("runIngest: raw/sources 不存在，跳过", { projectPath });
+    log.warn("runIngest: raw/sources does not exist, skipping", { projectPath });
     return { results: [], processed: [], deletedSources: [...oldStates.keys()] };
   }
 
-  // 扫描磁盘源，算 sha。filename = 相对 sourcesDir 的 posix 路径（与 rawWrite 的 filename 对齐）。
+  // Scan on-disk sources and compute sha. filename = posix path relative to sourcesDir (aligned with rawWrite's filename).
   const disk = findMdFiles(sourcesDir).map((abs) => {
     const content = readFileSync(abs, "utf-8");
     return {
@@ -588,7 +588,7 @@ export async function runIngestIncremental(
   const skippedCount = skipped.length;
   const toIngestSet = new Set(toIngest);
   const toIngestDisk = disk.filter((d) => toIngestSet.has(d.filename));
-  log.info("runIngest 增量分类", {
+  log.info("runIngest incremental classification", {
     projectPath,
     disk: disk.length,
     toIngest: toIngest.length,
@@ -600,7 +600,7 @@ export async function runIngestIncremental(
   const concurrency = getIngestConcurrency();
   const wikiLimit = pLimit(concurrency);
 
-  // ── 阶段1：并行 LLM 抽取 ──
+  // ── Phase 1: parallel LLM extraction ──
   report?.({
     phase: "extracting",
     total: toIngestDisk.length,
@@ -631,7 +631,7 @@ export async function runIngestIncremental(
           skipped: skippedCount,
           percent: Math.round(((completed + failed) / Math.max(toIngestDisk.length, 1)) * 90),
         });
-        log.info("runIngest 单源抽取完成", {
+        log.info("runIngest single-source extraction completed", {
           source: d.filename,
           candidates: candidates.size,
           ms: Date.now() - t0,
@@ -647,7 +647,7 @@ export async function runIngestIncremental(
           skipped: skippedCount,
           percent: Math.round(((completed + failed) / Math.max(toIngestDisk.length, 1)) * 90),
         });
-        log.error("runIngest 单源抽取失败", {
+        log.error("runIngest single-source extraction failed", {
           source: d.filename,
           ms: Date.now() - t0,
           error: String(err),
@@ -664,7 +664,7 @@ export async function runIngestIncremental(
 
   const extractResults = await Promise.all(tasks);
 
-  // ── 已删源级联清理（与现有逻辑对齐）──
+  // ── Cascade cleanup of deleted sources (aligned with existing logic) ──
   if (deleted.length > 0) {
     try {
       const { deleteSourceFiles } = await import("./ingest-v2/cascade.js");
@@ -674,11 +674,11 @@ export async function runIngestIncremental(
         { logReason: "wiki/ingest/removed-source" },
       );
     } catch (err) {
-      log.warn("已删源级联清理失败", { error: String(err) });
+      log.warn("cascade cleanup of deleted sources failed", { error: String(err) });
     }
   }
 
-  // ── 阶段2：串行落盘合并 ──
+  // ── Phase 2: serial merge and write to disk ──
   report?.({
     phase: "merging",
     total: toIngestDisk.length,
@@ -694,31 +694,31 @@ export async function runIngestIncremental(
     candidates: r.candidates,
   }));
 
-  // B-1：仅在有候选需 merge/overview 时建 client；失败不 throw，保证上层仍能写 source 状态。
-  // 纯 no-op（toIngest=0）或抽取全失败时不建 client（commit 只 rebuild index，不调 LLM）。
+  // B-1: create the client only when there are candidates needing merge/overview; failure does not throw, so the upper layer can still write source status.
+  // For a pure no-op (toIngest=0) or when extraction fully fails, no client is created (commit only rebuilds the index, no LLM call).
   let llm: import("./ingest-v2/llm.js").LlmClient | undefined;
   if (allCandidates.length > 0) {
     try {
       const { createLlmClient } = await import("./ingest-v2/llm.js");
       llm = createLlmClient(llmConfig);
     } catch (err) {
-      log.error("创建 LLM client 失败（阶段2 merge/overview 将降级，source 状态仍会落库）", {
+      log.error("failed to create LLM client (phase 2 merge/overview will degrade; source status is still persisted)", {
         error: String(err),
       });
     }
   }
 
-  // 无成功抽取时仍可能需要在级联删除后重建 index.md；skipLog 避免空 batch 日志
+  // With no successful extraction, index.md may still need rebuilding after cascade deletion; skipLog avoids empty batch logs
   const { written, mergeErrors } = await commitCandidates(projectPath, allCandidates, llm, {
     globalLlmLimit,
     skipLog: allCandidates.length === 0,
   });
 
   if (mergeErrors.length > 0) {
-    log.warn("阶段2 合并部分页失败", { count: mergeErrors.length, errors: mergeErrors });
+    log.warn("phase 2 failed to merge some pages", { count: mergeErrors.length, errors: mergeErrors });
   }
 
-  // ── 源状态判定（必须在 commitCandidates 之后）──
+  // ── Source status determination (must come after commitCandidates) ──
   const processed: ProcessedSource[] = extractResults.map((r) => {
     if (!r.ok) {
       return { filename: r.filename, sha256: r.sha256, size: r.size, ok: false, error: r.error };
@@ -737,7 +737,7 @@ export async function runIngestIncremental(
     };
   });
 
-  // ── 阶段3：overview（FTS 索引由上层 ingest 写事务完成）──
+  // ── Phase 3: overview (FTS index is built by the upper-level ingest write transaction) ──
   report?.({
     phase: "indexing",
     total: toIngestDisk.length,
@@ -749,14 +749,14 @@ export async function runIngestIncremental(
 
   if (successResults.length > 0) {
     if (!llm) {
-      log.warn("overview 跳过：LLM client 不可用（不影响摄取）");
+      log.warn("overview skipped: LLM client unavailable (does not affect ingest)");
     } else {
       try {
         const { generateOverview } = await import("./ingest-v2/overview.js");
         const runOverview = () => generateOverview(projectPath, llm);
         await (globalLlmLimit ? globalLlmLimit(runOverview) : runOverview());
       } catch (err) {
-        log.warn("overview 生成失败（不影响摄取）", { error: String(err) });
+        log.warn("overview generation failed (does not affect ingest)", { error: String(err) });
       }
     }
   }
@@ -769,14 +769,14 @@ export async function runIngestIncremental(
   });
 
   const okCount = processed.filter((p) => p.ok).length;
-  log.info("runIngest 全部完成", {
+  log.info("runIngest all completed", {
     total: results.length,
     ok: okCount,
     failed: results.length - okCount,
     written: written.length,
   });
 
-  // 全部失败检测：不在此处 throw（由上层写事务后判定，保证 source 状态已持久化）。
+  // All-failed detection: do not throw here (the upper layer decides after the write transaction, ensuring source status is already persisted).
   return { results, processed, deletedSources: deleted };
 }
 
@@ -838,13 +838,13 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     }
   }
 
-  /** 重建 wiki 的 index.db 索引（幂等建库 → 事务重建三表 → 驱逐读连接防 stale）。 */
+  /** Rebuild the wiki's index.db index (idempotently create the DB → rebuild the three tables in a transaction → evict read connections to prevent stale reads). */
   function rebuildIndex(name: string, pages: WikiPage[]) {
     const state = sources.get(name);
     if (!state) throw new Error(`rebuildIndex: unknown wiki ${name}`);
-    initIndexDb(state.path); // 幂等：首次注册即建库+4表；已存在则无操作
+    initIndexDb(state.path); // idempotent: creates the DB + 4 tables on first registration; no-op if it already exists
     withWriteDb(state.path, (db) => writeIndex(db, pages));
-    evictWikiDb(name); // 丢弃可能持有旧快照的读连接，下次查询重开
+    evictWikiDb(name); // discard read connections that may hold an old snapshot; reopened on the next query
   }
 
   function searchInternal(name: string, query: string, limit: number, options: SearchOptions): SearchResponse {
@@ -855,7 +855,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     try {
       db = getReadDb(name, state.path);
     } catch {
-      // 库不存在（wiki 未 ingest/未建索引）→ 返回空，与旧"无引擎"行为一致。
+      // DB does not exist (wiki not ingested / not indexed) → return empty, consistent with the old "no engine" behavior.
       return { results: [], links: [], count: 0 };
     }
 
@@ -906,9 +906,9 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
   }
 
   loadState();
-  // 启动时恢复 BM25 搜索索引（重建每个 ready wiki 的 index.db / pagesMap / searchEngines）。
-  // loadState 只恢复元数据（sources map）；索引数据虽持久，但为对齐磁盘正文并避免
-  // search / pages / graph 在重启后返回空，仍从磁盘扫描重建一次。
+  // Restore the BM25 search index at startup (rebuild index.db / pagesMap / searchEngines for each ready wiki).
+  // loadState only restores metadata (sources map); although index data is persistent, to align with on-disk bodies and avoid
+  // search / pages / graph returning empty after restart, we still rebuild once by scanning the disk.
   log.info("Restoring wiki indexes", { count: sources.size });
   let restored = 0;
   let failed = 0;
@@ -962,10 +962,10 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       const pages = scanWikiDir(state.path);
       rebuildIndex(name, pages);
       state.status = "ready"; state.pageCount = pages.length; state.lastSyncAt = new Date().toISOString(); state.error = undefined;
-      log.info("sync 完成（索引已重建）", { name, pageCount: pages.length, ms: Date.now() - t0 });
+      log.info("sync completed (index rebuilt)", { name, pageCount: pages.length, ms: Date.now() - t0 });
     } catch (err) {
       state.status = "error"; state.error = String(err);
-      log.error("sync 失败", { name, path: state.path, error: String(err) });
+      log.error("sync failed", { name, path: state.path, error: String(err) });
     }
     persist();
     return state;
@@ -980,14 +980,14 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     const state = sources.get(name);
     if (!state) throw new Error(`Not found: ${name}`);
     const projectPath = state.path;
-    initIndexDb(projectPath); // 确保 index.db 存在（register 通常已建，幂等）
+    initIndexDb(projectPath); // ensure index.db exists (register usually already created it; idempotent)
 
-    // 读上次 source 状态（增量判断基线）——须在抽取前读取。
+    // Read the last source status (baseline for incremental detection) — must be read before extraction.
     let oldStates = new Map<string, { sha256: string; status: SourceStatus }>();
     try {
       oldStates = readSourceStates(getReadDb(name, projectPath));
     } catch {
-      /* 库刚建 / 无 source 行 → 全部视为新增 */
+      /* DB just created / no source rows → treat everything as new */
     }
 
     const outcome = await withSpan("wiki-ingest", async (span) => {
@@ -1001,7 +1001,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       );
     });
 
-    // 重建索引 + 登记 source 状态 + 删已删源行：**同一写事务**（设计 003 §3.6 step 6，强一致）。
+    // Rebuild the index + register source status + delete rows of deleted sources: **in the same write transaction** (design 003 §3.6 step 6, strong consistency).
     state.status = "scanning";
     const t0 = Date.now();
     try {
@@ -1011,7 +1011,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
         for (const p of outcome.processed) recordSourceIngestResult(db, p);
         if (outcome.deletedSources.length > 0) deleteSources(db, outcome.deletedSources);
       });
-      evictWikiDb(name); // 丢弃可能持旧快照的读连接
+      evictWikiDb(name); // discard read connections that may hold an old snapshot
 
       const attempted = outcome.processed.length;
       const failed = outcome.processed.filter((p) => !p.ok);
@@ -1026,7 +1026,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       state.pageCount = pages.length;
       state.lastSyncAt = new Date().toISOString();
       state.error = undefined;
-      log.info("ingest 完成（增量抽取 + 索引/源状态同事务重建）", {
+      log.info("ingest completed (incremental extraction + index/source status rebuilt in the same transaction)", {
         name,
         pageCount: pages.length,
         extracted: outcome.processed.length,
@@ -1036,7 +1036,7 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     } catch (err) {
       state.status = "error";
       state.error = String(err);
-      log.error("ingest 失败", { name, path: projectPath, error: String(err) });
+      log.error("ingest failed", { name, path: projectPath, error: String(err) });
       persist();
       throw err;
     }
@@ -1051,9 +1051,9 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
     remove: (name) => {
       const state = sources.get(name);
       sources.delete(name);
-      // 先关读连接（内部 checkpoint+close），目录 rmSync 由调用方（wiki-service/route）负责。
+      // Close read connections first (checkpoint+close internally); the directory rmSync is handled by the caller (wiki-service/route).
       evictWikiDb(name);
-      if (state) { /* index.db 随目录删除一并清理 */ }
+      if (state) { /* index.db is cleaned up along with the directory */ }
       persist();
     },
     search: (name, query, limit, options) => searchInternal(name, query, limit ?? DEFAULT_LIMIT, options ?? {}),
@@ -1071,10 +1071,10 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
       const state = sources.get(name);
       if (!state) return null;
 
-      // 支持 raw/ 前缀：直接从项目根读取
+      // Supports the raw/ prefix: read directly from the project root
       if (relPath.startsWith("raw/")) {
         const fullPath = join(state.path, relPath);
-        if (!fullPath.startsWith(join(state.path, "raw"))) return null; // 防路径穿越
+        if (!fullPath.startsWith(join(state.path, "raw"))) return null; // guard against path traversal
         try { return readFileSync(fullPath, "utf-8"); } catch {}
         if (!relPath.endsWith(".md")) {
           try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}
@@ -1082,15 +1082,15 @@ export function createWikiSourceManager(dataDir: string): WikiSourceManager {
         return null;
       }
 
-      // 支持多种格式：
-      //   "wiki/concepts/l0-录入.md" → 完整 relPath
-      //   "concepts/l0-录入.md"      → 去掉 wiki/ 前缀
-      //   "concepts/l0-录入"         → id 格式（不带 .md）
+      // Supported formats:
+      //   "wiki/concepts/l0-intake.md" → full relPath
+      //   "concepts/l0-intake.md"      → with the wiki/ prefix stripped
+      //   "concepts/l0-intake"         → id format (without .md)
       const cleanPath = relPath.replace(/^wiki\//, "");
       const base = join(state.path, "wiki");
       let fullPath = join(base, cleanPath);
       if (!fullPath.startsWith(base)) return null;
-      // 先直接尝试，再补 .md
+      // Try directly first, then append .md
       try { return readFileSync(fullPath, "utf-8"); } catch {}
       if (!cleanPath.endsWith(".md")) {
         try { return readFileSync(fullPath + ".md", "utf-8"); } catch {}

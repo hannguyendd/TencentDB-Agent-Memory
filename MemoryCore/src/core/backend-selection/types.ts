@@ -1,5 +1,5 @@
 /**
- * Backend selection layer (专项五 / 完整实现设计 §4.2) — types only.
+ * Backend selection layer (Workstream 5 / full implementation design §4.2) — types only.
  *
  * A resolution answers "which backend + which connection" for one instance,
  * per dimension (DB / FS). It carries no connection behavior; the assembly
@@ -17,13 +17,13 @@ import type { CosConfig, MongoConfig, VdbConfig } from "../instance-config-provi
 export type DbKind = "sqlite" | "tcvdb" | "mongodb";
 
 /**
- * Env-surface vocabulary for `FILE_STORE_MODE` (两轴模型定稿 §5 映射的输入侧).
+ * Env-surface vocabulary for `FILE_STORE_MODE` (input side of the two-axis model spec §5 mapping).
  * `rowfs` is the composite form: profile keys as rows + an others leg.
  */
 export type FsKind = "local" | "cos" | "rowfs";
 
 /**
- * Two-axis FS model (两轴模型定稿 2026-09-02): an instance's file plane is two
+ * Two-axis FS model (two-axis model spec 2026-09-02): an instance's file plane is two
  * orthogonal questions, not one enum.
  *
  * - `profile`: do profile keys (`persona.md`, `scene_blocks/*.md`, i.e. L2/L3)

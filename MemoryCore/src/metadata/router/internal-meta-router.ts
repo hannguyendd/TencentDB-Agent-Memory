@@ -1,6 +1,6 @@
 /**
- * v3 内部元数据路由（/v3/internal/meta/*）。
- * 运维 / 控制面专用；不写入公开 MetadataClient。
+ * v3 internal metadata routes (/v3/internal/meta/*).
+ * For ops / control plane only; not written into the public MetadataClient.
  */
 import type * as http from "node:http";
 import type { ZodType } from "zod";
@@ -36,8 +36,8 @@ export interface InternalMetaRouterDeps {
   getMetadataService: (instanceId: string) => MetadataService | undefined | Promise<MetadataService | undefined>;
   logger: Logger;
   /**
-   * v2 InstanceUpstream:Proxy 拉数据时会触发 seed default 组,seed 逻辑依赖 supported-agents 数据源。
-   * 与 v3-meta-router 的 deps.getSupportedAgents 是同一份数据(Core 启动时从 gateway yaml 读)。
+   * v2 InstanceUpstream: when Proxy pulls data, it triggers seeding of the default group; the seed logic depends on the supported-agents data source.
+   * Same data as deps.getSupportedAgents in v3-meta-router (Core reads it from the gateway yaml at startup).
    */
   getSupportedAgents: () => import("../types.js").SupportedAgent[];
 }
@@ -84,7 +84,7 @@ const routeTable: Record<string, InternalHandler> = {
       });
     },
   ),
-  // §6.D:Proxy 拉全量配置(明文 api_key),同时触发 seed default 组。
+  // §6.D: Proxy pulls the full config (plaintext api_key) and also triggers seeding of the default group.
   [`${V3_INTERNAL_PREFIX}/instance-upstream/list`]: bind(
     instanceUpstreamInternalListSchema,
     async (_d, svc, _instanceId, runtime) =>
@@ -114,7 +114,7 @@ function resolveInstanceId(req: http.IncomingMessage, bodyInstance?: string): st
 }
 
 /**
- * 内部分发：仅 Bearer（Layer 1 已在 gateway 校验）；跳过 x-tdai-user-key。
+ * Internal dispatch: Bearer only (Layer 1 already verified at the gateway); skips x-tdai-user-key.
  */
 export async function handleInternalMetaRoute(
   req: http.IncomingMessage,

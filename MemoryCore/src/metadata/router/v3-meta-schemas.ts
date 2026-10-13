@@ -1,13 +1,13 @@
 /**
- * v3 元数据 API 请求体 Zod schema（55 公开接口）。
+ * Zod schemas for v3 metadata API request bodies (55 public endpoints).
  *
- * 对应设计文档 §7.1。每个 schema 校验对应路由的请求体；
- * 路由 handler 用 `schema.safeParse(body)` 校验后再调用 MetadataService。
+ * Corresponds to design doc §7.1. Each schema validates the request body of the corresponding route;
+ * the route handler validates with `schema.safeParse(body)` before calling MetadataService.
  */
 import { z } from "zod";
 import { paginationInputSchema } from "./pagination.js";
 
-// ── 枚举 ──
+// ── Enums ──
 const assetType = z.enum(["skill", "llm_wiki", "code_graph", "chat_memory"]);
 const visibility = z.enum(["private", "team", "restricted", "agent", "task"]);
 const assetStatus = z.enum(["draft", "candidate", "approved", "deprecated", "archived", "failed"]);
@@ -21,13 +21,13 @@ const teamStatus = z.enum(["active", "archived"]);
 const memberStatus = z.enum(["active", "removed"]);
 const agentStatus = z.enum(["active", "inactive"]);
 const taskStatus = z.enum(["running", "completed"]);
-/** 大类，不含具体来源（来源读 metadata_json.external.provider）。 */
+/** Broad category, excluding the specific source (the source is read from metadata_json.external.provider). */
 const taskSourceType = z.enum(["manual", "external", "other"]);
 
 const nonEmpty = z.string().min(1);
 const idList = z.array(nonEmpty).min(1);
 
-/** user_id 与 user_key 二选一（兼容旧调用方仅传 user_id）。 */
+/** Either user_id or user_key (compatible with old callers that only pass user_id). */
 const userIdOrKeyFields = z.object({
   user_id: z.string().min(1).optional(),
   user_key: z.string().min(1).optional(),
@@ -37,57 +37,57 @@ const userIdOrKeyRefine = { message: "user_id or user_key is required" } as cons
 
 export const userIdOrKeySchema = userIdOrKeyFields.refine(requireUserIdOrKey, userIdOrKeyRefine);
 
-// ── User（v3.1）──
+// ── User (v3.1) ──
 /**
- * 外部认证关联标识：外部 IdP（如 WOA 工号体系）下该用户的唯一 id。
- * 直接复用 core 既有的 meta_users.external_id 字段（origin 引入，原为太湖 OAuth2
- * 的 sub/工号而设），不新建关联表。
+ * External auth association identifier: the user's unique id under an external IdP (e.g. the WOA employee-ID system).
+ * Directly reuses core's existing meta_users.external_id field (introduced by origin, originally meant for Taihu OAuth2
+ * sub/employee ID), without creating a new association table.
  */
 const externalIdField = z.string().min(1);
 
-/** 按外部认证标识查用户：外部认证登录后判断是否初次（无绑定=初次）。 */
+/** Look up a user by external auth identifier: after external auth login, determine whether it is the first time (no binding = first time). */
 export const userFindByExternalSchema = z.object({
   external_id: externalIdField,
   auth_provider: z.string().min(1).optional(),
 });
 
-/** 把外部认证标识绑定到已有账号（存量账号接入外部认证）。 */
+/** Bind an external auth identifier to an existing account (onboarding existing accounts to external auth). */
 export const userBindExternalSchema = z.object({
   user_id: z.string().min(1),
   external_id: externalIdField,
   auth_provider: z.string().min(1).optional(),
-  // 可选：IdP 侧展示名（如 WOA 中文名）。仅在目标账号 display_name 为空时补写，
-  // 不覆盖已有名字。
+  // Optional: display name on the IdP side (e.g. WOA Chinese name). Only filled in when the target account's display_name is empty,
+  // and does not overwrite an existing name.
   display_name: z.string().min(1).optional(),
 });
 
 export const userCreateSchema = z.object({
   username: nonEmpty,
-  // 可选：管控/内部侧建"服务账号"时指定确定性 user_id（如 knowledge-service），
-  // 便于 proxy systemUsers 白名单按稳定 user_id 命中；不传则内核随机生成 usr-xxx。
-  // 仅 system_admin 可调用本接口（见 v3-meta-router assertCanManageUsers）。
+  // Optional: specify a deterministic user_id when the control/internal side creates a "service account" (e.g. knowledge-service),
+  // so the proxy systemUsers allowlist can hit it by a stable user_id; if omitted the kernel randomly generates usr-xxx.
+  // Only system_admin may call this endpoint (see v3-meta-router assertCanManageUsers).
   user_id: z.string().min(1).optional(),
-  // 可选：外部认证体系（如 WOA）的唯一标识（工号）。外部认证建号时必须传，
-  // 否则下次登录无法通过该 id 反查到账号，会被误判为"初次登录"。
+  // Optional: unique identifier (employee ID) in the external auth system (e.g. WOA). Must be passed when creating an account via external auth,
+  // otherwise the next login cannot reverse-look-up the account by this id and will be misjudged as a "first login".
   external_id: z.string().min(1).optional(),
-  // 可选：外部认证体系标识（如 woa）。省略则回落 local，与 external_id 一起
-  // 构成 (auth_provider, external_id) 查询域——传 external_id 时**必须**同时传，
-  // 否则绑定与反查会落在不同域里（写入 local、查询 woa）而互不可见。
+  // Optional: external auth system identifier (e.g. woa). If omitted it falls back to local; together with external_id it
+  // forms the (auth_provider, external_id) query domain -- when passing external_id it **must** be passed too,
+  // otherwise binding and reverse lookup land in different domains (written to local, queried in woa) and cannot see each other.
   auth_provider: z.string().min(1).optional(),
-  // 可选：展示名（如 WOA 中文名）。列表/成员展示优先取它，缺省回落到 username。
+  // Optional: display name (e.g. WOA Chinese name). Lists/member displays prefer it, falling back to username by default.
   display_name: z.string().min(1).optional(),
   email: z.string().email().optional(),
 });
 
-// /v3/meta/user/create 的姊妹接口：允许 system_admin 在建号时显式指定 user_key。
-// user_id 不接受入参（zod 默认 strip），由内核生成后返回；user_key 格式由调用方负责，
-// 内核只做非空校验 + DB 层 UNIQUE 兜底（重复抛 duplicate_user_key）。
+// Sibling endpoint of /v3/meta/user/create: lets system_admin explicitly specify user_key when creating an account.
+// user_id is not accepted as input (zod strips by default); it is generated by the kernel and returned; the user_key format is the caller's responsibility,
+// and the kernel only does a non-empty check + the DB-layer UNIQUE safety net (duplicates throw duplicate_user_key).
 export const userCreateWithKeySchema = z.object({
   username: nonEmpty,
   user_key: nonEmpty,
-  // 可选：外部认证体系（如 WOA）的唯一标识（工号），语义同 userCreateSchema.external_id。
+  // Optional: unique identifier (employee ID) in the external auth system (e.g. WOA), semantics same as userCreateSchema.external_id.
   external_id: z.string().min(1).optional(),
-  // 可选：外部认证体系标识（如 woa）/ 展示名 / 邮箱，语义同 userCreateSchema 同名可选字段。
+  // Optional: external auth system identifier (e.g. woa) / display name / email, semantics same as the same-named optional fields of userCreateSchema.
   auth_provider: z.string().min(1).optional(),
   display_name: z.string().min(1).optional(),
   email: z.string().email().optional(),
@@ -135,7 +135,7 @@ export const teamUpdateSchema = z.object({
   team_id: nonEmpty,
   name: z.string().optional(),
   description: z.string().optional(),
-  // owner_user_id 不可改：传入由 zod 默认 strip 静默忽略
+  // owner_user_id cannot be changed: if passed it is silently ignored via zod's default strip
   status: teamStatus.optional(),
   metadata_json: z.string().optional(),
 });
@@ -175,7 +175,7 @@ export const agentUpdateSchema = z.object({
   prompt: z.string().optional(),
   visibility: visibility.optional(),
   status: agentStatus.optional(),
-  // owner_user_id 不可改：传入由 zod 默认 strip 静默忽略
+  // owner_user_id cannot be changed: if passed it is silently ignored via zod's default strip
   metadata_json: z.string().optional(),
 });
 export const agentDeleteSchema = z.object({ agent_ids: idList });
@@ -335,15 +335,15 @@ export const fixedAssetListWithDetailSchema = z.object({
   apply_visibility_filter: z.boolean().optional(),
   touch_usage: z.boolean().optional(),
   /**
-   * 可选类型过滤：只返回 asset_type 在该列表中的绑定。
-   * 传空数组或省略 = 不过滤（返回全部类型）。
-   * 用于 caller 明确只需要某几类资产（如 proxy knowledge-tools-injector
-   * 只需 llm_wiki + code_graph），避免在混合列表分页外的类型被截断。
+   * Optional type filter: only return bindings whose asset_type is in this list.
+   * Passing an empty array or omitting = no filtering (return all types).
+   * For callers that explicitly need only certain asset types (e.g. proxy knowledge-tools-injector
+   * only needs llm_wiki + code_graph), avoiding truncation of types outside the page in a mixed list.
    */
   asset_types: z.array(assetType).optional(),
 }).merge(paginationInputSchema);
 
-/** agent_ids 去重；1–100。 */
+/** agent_ids deduplicated; 1–100. */
 const agentIdsList = z
   .array(nonEmpty)
   .min(1)
@@ -388,18 +388,18 @@ export const assetListAccessibleSchema = userIdOrKeyFields
     action: permission.optional(),
     asset_type: assetType.optional(),
     agent_id: z.string().optional(),
-    // 可选的服务端 visibility 过滤：
-    //   - 单值：`visibility: "team"` → 只返回 team 可见的（管控页"团队资产"tab 用）
-    //   - 数组：`visibility: ["team", "restricted"]` → 白名单方式
-    //   - 不传：不做 visibility 过滤（返回所有可访问的，含自己的 private）
-    // 关键作用：让前端"团队资产"tab 从 HTTP 层就拿不到自己的 private 数据，
-    // 避免\"响应体带全量、前端 JS 过滤\"的信息泄露风险。
+    // Optional server-side visibility filter:
+    //   - single value: `visibility: "team"` → return only team-visible items (used by the control page's "Team assets" tab)
+    //   - array: `visibility: ["team", "restricted"]` → allowlist style
+    //   - omitted: no visibility filtering (return everything accessible, including one's own private)
+    // Key purpose: so the frontend "Team assets" tab never receives one's own private data at the HTTP layer,
+    // avoiding the information-leak risk of \"the response body carries everything and frontend JS filters it\".
     visibility: z.union([visibility, z.array(visibility).min(1).max(5)]).optional(),
   })
   .merge(paginationInputSchema)
   .refine(requireUserIdOrKey, userIdOrKeyRefine);
 
-/** internal list-by-instance：user_ids 去重；不传或空数组 → undefined（不过滤）。 */
+/** internal list-by-instance: user_ids deduplicated; omitted or empty array → undefined (no filtering). */
 const optionalUserIdsFilter = z
   .array(nonEmpty)
   .max(100)
@@ -409,7 +409,7 @@ const optionalUserIdsFilter = z
     return [...new Set(ids)];
   });
 
-/** internal：实例用户列表（不写入公开 API 文档）。 */
+/** internal: instance user list (not written into the public API docs). */
 export const internalListUsersByInstanceSchema = z.object({
   instance_id: z.string().min(1).optional(),
   status: userStatus.optional(),
@@ -417,8 +417,8 @@ export const internalListUsersByInstanceSchema = z.object({
   user_ids: optionalUserIdsFilter,
 }).merge(paginationInputSchema);
 
-/** 路由 → schema 映射（55 公开接口）。 */
-// ── ConfigParam（v3.2）──
+/** Route → schema mapping (55 public endpoints). */
+// ── ConfigParam (v3.2) ──
 export const instanceQuotaGetSchema = z.object({});
 
 export const configUserGetSchema = z.object({
@@ -433,10 +433,10 @@ export const configUserSetSchema = z.object({
   params: z.record(z.string().min(1), z.string()),
 });
 
-// ── InstanceUpstreamConfig (v2 模型组) ──
-// 详见 docs/design/2026-08-25-instance-upstream-config.md §6.B / §6.C。
+// ── InstanceUpstreamConfig (v2 model group) ──
+// See docs/design/2026-08-25-instance-upstream-config.md §6.B / §6.C.
 const upstreamGroupType = z.enum(["default", "custom", "extraction"]);
-const upstreamGroupTypeConvOnly = z.enum(["default", "custom"]); // update/delete/toggle 用
+const upstreamGroupTypeConvOnly = z.enum(["default", "custom"]); // used by update/delete/toggle
 const upstreamMode = z.enum(["official", "custom_unified", "custom_passthrough"]);
 
 // ── supported-agents & internal list ──
@@ -445,12 +445,12 @@ export const supportedAgentsSchema = z.object({}).catchall(z.unknown());
 
 export const instanceUpstreamInternalListSchema = z.object({}).catchall(z.unknown());
 
-// ── B 类:conversation groups ──
+// ── Class B: conversation groups ──
 
 /** B1 groups/list */
 export const upstreamGroupsListSchema = z.object({}).catchall(z.unknown());
 
-/** B2 groups/create: 只允许 custom */
+/** B2 groups/create: custom only */
 export const upstreamGroupsCreateSchema = z.object({
   group_type: z.literal("custom"),
   name: z.string().min(1),
@@ -463,7 +463,7 @@ export const upstreamGroupsCreateSchema = z.object({
   description: z.string().optional(),
 });
 
-/** B3 groups/update: PATCH; default 只能改 agents/enabled(其他字段传值 → immutable error) */
+/** B3 groups/update: PATCH; default may only change agents/enabled (passing other fields → immutable error) */
 export const upstreamGroupsUpdateSchema = z.object({
   group_id: z.string().min(1),
   group_type: upstreamGroupTypeConvOnly,
@@ -490,7 +490,7 @@ export const upstreamGroupsDeleteSchema = z.object({
   group_id: z.string().min(1),
 });
 
-// ── C 类:extraction ──
+// ── Class C: extraction ──
 
 export const upstreamExtractionGetSchema = z.object({}).catchall(z.unknown());
 
@@ -588,16 +588,16 @@ export const V3_SCHEMAS = {
   "/v3/meta/instance-upstream/extraction/delete": upstreamExtractionDeleteSchema,
 } as const;
 
-// ── Task 外部来源（/v3/task-source/*）──
-// 注意：请求体**不含任何凭据**。令牌由 Panel 从会话注入 Core，
-// 既不进请求体也不落库（见 task-source 模块说明）。
+// ── Task external sources (/v3/task-source/*) ──
+// Note: the request body **contains no credentials**. The token is injected by the Panel from the session into Core,
+// and enters neither the request body nor the database (see the task-source module notes).
 const providerId = z.string().min(1);
 
 /**
- * 用户提交的手工令牌。
+ * Manually entered token submitted by the user.
  *
- * 只有三种 kind，且**不含 oauth2** —— 认证方式统一为用户填入长期令牌
- * （太湖统一认证令牌 / TAPD 个人令牌）。
+ * Only three kinds, and **no oauth2** -- the auth method is unified as the user entering a long-lived token
+ * (Taihu unified auth token / TAPD personal token).
  */
 const credentialSchema = z.object({
   kind: z.enum(["bearer", "basic", "custom"]),
@@ -625,7 +625,7 @@ export const taskSourceCandidatesSchema = z.object({
   status: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
-  /** 只看当前令牌用户的待办（走 user_todo_*_get 接口族）。 */
+  /** Only view the current token user's to-dos (via the user_todo_*_get endpoint family). */
   only_todo: z.boolean().optional(),
 });
 

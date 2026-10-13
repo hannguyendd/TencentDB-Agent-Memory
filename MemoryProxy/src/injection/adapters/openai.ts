@@ -102,9 +102,9 @@ export class OpenAIAdapter implements ProtocolAdapter {
         }
       }
 
-      // Preserve `reasoning_content` (deepseek thinking-mode; dsh 客户端必带此字段
-      // 回传上游,否则 deepseek 官方 400 `reasoning_content ... must be passed back`).
-      // 其它 OpenAI 兼容上游不认识这个字段,pass-through 无害。
+      // Preserve `reasoning_content` (deepseek thinking-mode; dsh clients always include this field
+      // and send it back to the upstream, otherwise official deepseek returns 400 `reasoning_content ... must be passed back`).
+      // Other OpenAI-compatible upstreams do not recognize this field; pass-through is harmless.
       const msg: ContextMessage = { role, blocks };
       if (typeof m.reasoning_content === "string") {
         msg.metadata = { ...(msg.metadata ?? {}), reasoning_content: m.reasoning_content };

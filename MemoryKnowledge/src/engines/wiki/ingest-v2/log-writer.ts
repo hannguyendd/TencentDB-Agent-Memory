@@ -1,17 +1,17 @@
 /**
- * log-writer.ts — 维护 wiki/log.md 摄取日志（OKF §7 / llm-wiki 时间线，OQ-10）。
+ * log-writer.ts — maintains the wiki/log.md ingest log (OKF §7 / llm-wiki timeline, OQ-10).
  *
- * 每次摄取一个源后追加一条日期分组的条目，最新在前，便于 grep 与人工回溯：
+ * After each source is ingested, append a date-grouped entry, newest first, for easy grep and manual review:
  *   ## YYYY-MM-DD
- *   * **ingest** <源文件名> — 写入 N 页
+ *   * **ingest** <source filename> — wrote N pages
  *
- * 批量 ingest 另有：
+ * Batch ingest additionally has:
  *   * **batch-ingest** N sources (...) — wrote M pages
  *
- * log.md 是结构性文件（page/write/rm 禁改），但 ingest 可维护它。
- * 无 frontmatter（OKF 约定）。纯文本追加，不调用 LLM。
+ * log.md is a structural file (page/write/rm may not modify it), but ingest may maintain it.
+ * No frontmatter (OKF convention). Plain-text append; does not call the LLM.
  *
- * 自研实现，未参考任何 GPL 代码。
+ * Original implementation; no GPL code was referenced.
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -19,7 +19,7 @@ import { join } from "node:path";
 
 const HEADER = "# Ingest Log";
 
-/** 取本地日期 YYYY-MM-DD。 */
+/** Get the local date YYYY-MM-DD. */
 function today(date = new Date()): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -28,13 +28,13 @@ function today(date = new Date()): string {
 }
 
 /**
- * 渲染一条日志条目行。导出以便单测。
+ * Render one log entry line. Exported for unit tests.
  */
 export function renderLogEntry(sourceName: string, pageCount: number): string {
   return `* **ingest** ${sourceName} — wrote ${pageCount} pages`;
 }
 
-/** 渲染批量 ingest 日志行。 */
+/** Render a batch ingest log line. */
 export function renderBatchLogEntry(sourcesProcessed: string[], pageCount: number): string {
   const list = sourcesProcessed.join(", ");
   return `* **batch-ingest** ${sourcesProcessed.length} sources (${list}) — wrote ${pageCount} pages`;
@@ -60,12 +60,12 @@ function appendEntries(projectPath: string, entries: string[], now: Date): void 
 }
 
 /**
- * 追加一条摄取日志到 wiki/log.md（最新日期分组在前）。
+ * Append an ingest log entry to wiki/log.md (newest date group first).
  *
- * @param projectPath wiki 项目根
- * @param sourceName  本次摄取的源文件名
- * @param pageCount   本次写入/更新的页数
- * @param now         注入时间（测试用）
+ * @param projectPath wiki project root
+ * @param sourceName  source filename for this ingest
+ * @param pageCount   number of pages written/updated this time
+ * @param now         injected time (for tests)
  */
 export function appendIngestLog(
   projectPath: string,
@@ -83,8 +83,8 @@ export interface BatchIngestLogInput {
 }
 
 /**
- * 批量聚合日志（一次 ingest 一条 batch 记录，可选 merge-errors）。
- * 与 appendIngestLog 共存，写入同一个 wiki/log.md。
+ * Batch aggregate log (one batch record per ingest, optional merge-errors).
+ * Coexists with appendIngestLog and writes to the same wiki/log.md.
  */
 export function appendIngestLogBatch(
   projectPath: string,
@@ -101,27 +101,27 @@ export function appendIngestLogBatch(
 }
 
 /**
- * 把一条 entry 并入日志文本：若已有当天分组则插到该组最前，否则在 header 后新建当天分组。
- * 最新日期分组始终在最前。导出以便单测。
+ * Merge one entry into the log text: if a group for the current day already exists, insert at the top of that group; otherwise create a new day group after the header.
+ * The newest date group is always first. Exported for unit tests.
  */
 export function mergeEntry(existing: string, day: string, entry: string): string {
   const dayHeading = `## ${day}`;
   const lines = (existing || `${HEADER}\n`).split("\n");
 
-  // 找 header 行索引（无则补）。
+  // Find the header line index (add one if missing).
   let headerIdx = lines.findIndex((l) => l.trim() === HEADER);
   if (headerIdx === -1) {
     lines.unshift(HEADER, "");
     headerIdx = 0;
   }
 
-  // 找当天分组。
+  // Find the current day's group.
   const dayIdx = lines.findIndex((l) => l.trim() === dayHeading);
   if (dayIdx !== -1) {
-    // 插到当天分组标题的下一行（该组最前）。
+    // Insert on the line after the day group's heading (top of that group).
     lines.splice(dayIdx + 1, 0, entry);
   } else {
-    // 在 header（及其后可能的空行）之后插入新当天分组，使其位于所有旧分组之前。
+    // Insert the new day group after the header (and any blank lines following it), so it sits before all older groups.
     let insertAt = headerIdx + 1;
     if (lines[insertAt]?.trim() === "") insertAt++;
     lines.splice(insertAt, 0, dayHeading, entry, "");

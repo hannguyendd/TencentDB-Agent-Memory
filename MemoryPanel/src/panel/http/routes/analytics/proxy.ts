@@ -9,9 +9,9 @@ import { respondControlError, respondEnvelope } from '../../envelope.js';
 import type { MetaCallContext } from '../../../kernel/types.js';
 
 /**
- * 从请求路径中解析 analytics action。
- * action 带二级路径（session-init/summary、tool-calls/list、usage-raw/list 等），
- * 故取 `/analytics/` 之后的全部片段。
+ * Parse the analytics action from the request path.
+ * An action may have a sub-path (session-init/summary, tool-calls/list, usage-raw/list, etc.),
+ * so take all segments after `/analytics/`.
  */
 function readAction(path: string): string {
   const marker = '/analytics/';
@@ -21,15 +21,15 @@ function readAction(path: string): string {
 }
 
 /**
- * 注册 analytics 查询面透明代理：
- *   GET  /api/v1/analytics/{config|spaces} → 内核 GET  /v3/analytics/{action}
- *   POST /api/v1/analytics/{action}        → 内核 POST /v3/analytics/{action}
+ * Register the analytics query-plane transparent proxy:
+ *   GET  /api/v1/analytics/{config|spaces} -> kernel GET  /v3/analytics/{action}
+ *   POST /api/v1/analytics/{action}        -> kernel POST /v3/analytics/{action}
  *
- * 关键点：
- *   - 前端不能直连内核 —— analytics 要求 Bearer（网关 api_key），该密钥仅存在于
- *     Panel 后端的实例注册表，绝不能进入浏览器 bundle。故必须由本代理注入。
- *   - method 必须与内核声明一致：config / spaces 为 GET，其余为 POST，否则内核 405。
- *   - 权限（system_admin）与 CH 可用性（503）均由内核判定后原样透传，Panel 不预判。
+ * Key points:
+ *   - The frontend cannot connect to the kernel directly -- analytics requires a Bearer (gateway api_key), and that key exists only in
+ *     the Panel backend's instance registry and must never enter the browser bundle. So this proxy must inject it.
+ *   - The method must match the kernel's declaration: config / spaces are GET, the rest are POST, otherwise the kernel returns 405.
+ *   - Permission (system_admin) and CH availability (503) are both decided by the kernel and passed through as-is; Panel does not pre-judge.
  */
 export function registerAnalyticsProxyRoutes(api: Hono, deps: PanelDeps): void {
   const handler = async (c: Context) => {
@@ -37,7 +37,7 @@ export function registerAnalyticsProxyRoutes(api: Hono, deps: PanelDeps): void {
     if (!action || !isAllowedAnalyticsAction(action)) {
       return respondControlError(c, 404, 'UNKNOWN_ANALYTICS_ACTION');
     }
-    // method 与内核声明不一致时直接拒绝，避免把 405 甩给用户
+    // Reject directly when the method disagrees with the kernel's declaration, to avoid throwing a 405 at the user
     const wantGet = isAnalyticsGetAction(action);
     const isGet = c.req.method.toUpperCase() === 'GET';
     if (wantGet !== isGet) {

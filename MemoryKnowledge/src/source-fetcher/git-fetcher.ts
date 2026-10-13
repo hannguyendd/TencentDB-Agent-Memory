@@ -1,24 +1,24 @@
 /**
- * GitSourceFetcher — 基于 simple-git 的源码拉取实现。
+ * GitSourceFetcher — source-code fetch implementation based on simple-git.
  *
- * simple-git 内部用 child_process.spawn + args 数组，不走 shell，从原理上消除 shell 注入。
+ * simple-git internally uses child_process.spawn + an args array, no shell, which eliminates shell injection in principle.
  *
- * 安全防护（002 §4-5）：
- *   - R1 git hooks：clone/fetch 本就不拉取远端 .git/hooks（hooks 为本地态），故不额外
- *     配置 core.hooksPath（加固版 git 会拒绝该配置，需 allowUnsafeHooksPath）。
- *   - R2 SSRF：只允许 public HTTPS + 内网/环回地址黑名单（对齐项目 security_rules）。
- *   - Bug 修复（方案 A）：增量 sync 的 git clean 排除 .codegraph/，避免删掉 codegraph 索引库。
+ * Security protections (002 §4-5):
+ *   - R1 git hooks: clone/fetch never pulls the remote .git/hooks (hooks are local state), so no extra
+ *     core.hooksPath is configured (hardened git rejects that config and needs allowUnsafeHooksPath).
+ *   - R2 SSRF: only public HTTPS is allowed + intranet/loopback address blocklist (aligned with the project security_rules).
+ *   - Bug fix (plan A): git clean in incremental sync excludes .codegraph/, to avoid deleting the codegraph index DB.
  */
 
 import simpleGit, { CleanOptions, ResetMode } from "simple-git";
 import type { ISourceFetcher, FetchResult, SourceType } from "./types.js";
 
 /**
- * 识别 git 认证 / 权限类错误（simple-git 无 TTY，git 交互式询问 Username/Password
- * 会变成 `could not read Username for '...': No such device or address`）。
+ * Recognize git auth / permission errors (simple-git has no TTY; git's interactive Username/Password prompt
+ * becomes `could not read Username for '...': No such device or address`).
  *
- * 这类错误对用户极具误导性：本质是仓库需要认证（401/403），却被 git 表述成
- * 「无法读取用户名」。用这里集中识别，再在 worker 层按是否带凭据转成人类可读提示。
+ * Such errors are highly misleading to users: the essence is that the repo requires authentication (401/403), yet git phrases it as
+ * "cannot read username". Identify them centrally here, then in the worker layer convert to a human-readable hint depending on whether credentials were supplied.
  */
 export function isGitAuthError(raw: string): boolean {
   const msg = raw.toLowerCase();
@@ -35,36 +35,36 @@ export function isGitAuthError(raw: string): boolean {
   );
 }
 
-/** 把 git 认证错误转成面向用户的提示。needsCredential = clone 时是否已注入凭据。 */
+/** Convert a git auth error into a user-facing hint. needsCredential = whether credentials were injected at clone time. */
 export function explainGitAuthError(raw: string, needsCredential: boolean): string {
   const brief = raw.split("\n").find((l) => l.trim())?.trim() ?? raw.trim();
   if (needsCredential) {
     return (
-      `访问令牌无效或已过期，无法拉取仓库（git: ${brief}）。` +
-      `请在仓库详情里重新填写访问令牌。`
+      `The access token is invalid or expired, so the repository cannot be fetched (git: ${brief}). ` +
+      `Please re-enter the access token in the repository details.`
     );
   }
   return (
-    `该仓库需要身份认证，无法以「公开」方式克隆（git: ${brief}）。` +
-    `请删除后重新注册，来源选择对应的代码平台并填写访问令牌。`
+    `This repository requires authentication and cannot be cloned as "public" (git: ${brief}). ` +
+    `Please delete it and register again, choosing the matching code platform as the source and entering an access token.`
   );
 }
 
 /**
- * 内网 / 环回 / link-local 地址黑名单（标准网段）：
- *   - 10. / 172.16-31. / 192.168.  → RFC1918 私有网段
- *   - 169.254.                     → link-local（含云元数据 169.254.169.254）
- *   - 127. / 0. / localhost / ::1  → 环回
+ * Intranet / loopback / link-local address blocklist (standard ranges):
+ *   - 10. / 172.16-31. / 192.168.  → RFC1918 private ranges
+ *   - 169.254.                     → link-local (including cloud metadata 169.254.169.254)
+ *   - 127. / 0. / localhost / ::1  → loopback
  *   - fe80:                        → IPv6 link-local
  *
- * 该黑名单可通过环境变量 KNOWLEDGE_SSRF_CHECK=off 关闭（见 GitSourceFetcher 构造）。
+ * This blocklist can be turned off via the env var KNOWLEDGE_SSRF_CHECK=off (see the GitSourceFetcher constructor).
  */
 const PRIVATE_ADDR_RE =
   /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|127\.|0\.|localhost$|::1$|fe80:)/i;
 
 /**
- * 读取 SSRF 私网黑名单开关。默认开启；
- * 当 KNOWLEDGE_SSRF_CHECK 为 off/false/0/no（大小写不敏感）时关闭。
+ * Read the SSRF private-network blocklist switch. On by default;
+ * turned off when KNOWLEDGE_SSRF_CHECK is off/false/0/no (case-insensitive).
  */
 function ssrfCheckEnabledFromEnv(): boolean {
   const raw = process.env.KNOWLEDGE_SSRF_CHECK;
@@ -75,8 +75,8 @@ function ssrfCheckEnabledFromEnv(): boolean {
 
 export interface GitSourceFetcherOptions {
   /**
-   * 是否启用 SSRF 私网 / 环回地址黑名单校验。
-   * 默认读环境变量 KNOWLEDGE_SSRF_CHECK（默认开启）；显式传入时优先于环境变量。
+   * Whether to enable the SSRF private-network / loopback address blocklist check.
+   * Defaults to reading the env var KNOWLEDGE_SSRF_CHECK (on by default); when passed explicitly it takes precedence over the env var.
    */
   ssrfCheck?: boolean;
 }
@@ -84,7 +84,7 @@ export interface GitSourceFetcherOptions {
 export class GitSourceFetcher implements ISourceFetcher {
   readonly supportedType: SourceType = "git";
 
-  /** SSRF 私网黑名单校验开关（https-only 协议校验始终生效，不受此开关影响）。 */
+  /** SSRF private-network blocklist check switch (the https-only protocol check always applies and is unaffected by this switch). */
   private readonly ssrfCheck: boolean;
 
   constructor(opts?: GitSourceFetcherOptions) {
@@ -92,7 +92,7 @@ export class GitSourceFetcher implements ISourceFetcher {
   }
 
   validate(sourceUrl: string): void {
-    // 第一版：仅支持 public HTTPS 仓库（SSH / 私有仓库鉴权见文档 005）。
+    // First version: only public HTTPS repos are supported (SSH / private repo auth, see doc 005).
     if (!sourceUrl.startsWith("https://")) {
       throw new Error(
         "first version only supports public HTTPS repos; SSH/private repo support coming soon",
@@ -102,7 +102,7 @@ export class GitSourceFetcher implements ISourceFetcher {
     if (!host) {
       throw new Error(`invalid repo_url: cannot parse host from ${sourceUrl}`);
     }
-    // R2: SSRF 防护 —— 禁止指向内网 / 环回地址（可经 KNOWLEDGE_SSRF_CHECK=off 关闭）。
+    // R2: SSRF protection — forbid pointing at intranet / loopback addresses (can be turned off via KNOWLEDGE_SSRF_CHECK=off).
     if (this.ssrfCheck && this.isPrivateAddress(host)) {
       throw new Error(`repo_url must not point to private/loopback address: ${host}`);
     }
@@ -110,9 +110,9 @@ export class GitSourceFetcher implements ISourceFetcher {
 
   async fetch(sourceUrl: string, branch: string, localPath: string): Promise<FetchResult> {
     this.validate(sourceUrl);
-    // 浅克隆单分支。注：git clone/fetch 不会拉取远端的 .git/hooks（hooks 是本地态），
-    // 所以正常仓库 clone 出来不带可执行钩子；此处不再配置 core.hooksPath
-    // （加固版 git 会拒绝该配置：需 allowUnsafeHooksPath）。
+    // Shallow clone of a single branch. Note: git clone/fetch does not pull the remote .git/hooks (hooks are local state),
+    // so a normally cloned repo carries no executable hooks; core.hooksPath is no longer configured here
+    // (hardened git rejects that config: needs allowUnsafeHooksPath).
     await simpleGit().clone(sourceUrl, localPath, {
       "--depth": 1,
       "--branch": branch,
@@ -126,14 +126,14 @@ export class GitSourceFetcher implements ISourceFetcher {
     const git = simpleGit(localPath);
     await git.fetch("origin", branch, { "--depth": 1 });
     await git.reset(ResetMode.HARD, [`origin/${branch}`]);
-    // Bug 修复（方案 A）：clean 排除 .codegraph/，否则会删掉 codegraph 的索引库，
-    // 导致增量 sync 永远失败、每次回退到全量 clone。
+    // Bug fix (plan A): clean excludes .codegraph/, otherwise it would delete codegraph's index DB,
+    // causing incremental sync to always fail and fall back to a full clone every time.
     await git.clean(CleanOptions.FORCE + CleanOptions.RECURSIVE, ["-e", ".codegraph"]);
     const version = await this.headCommit(localPath);
     return { localPath, version, sourceType: "git" };
   }
 
-  // ── 内部 helper ──
+  // ── Internal helpers ──
 
   private async headCommit(localPath: string): Promise<string | null> {
     try {

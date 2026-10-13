@@ -19,7 +19,7 @@ export interface AtomicItem {
   body: string;
   refs?: string[];
   tags?: string[];
-  /** 条目创建/记录时间（ISO8601），仅展示，不参与排序 */
+  /** Entry creation/record time (ISO8601), display only, not used for sorting */
   created_at?: string;
 }
 
@@ -41,7 +41,7 @@ export interface MemoryBlock {
     L3: AtomicItem[];
   };
   layerCounts: Partial<Record<MemoryLayer, number>>;
-  /** L0 在当前时间筛选下是否已加载到最早（「加载更早」无新增数据时置位，用于隐藏入口） */
+  /** Whether L0 has loaded to the earliest under the current time filter (set when "Load earlier" adds no new data, used to hide the entry point) */
   l0Ended?: boolean;
 }
 

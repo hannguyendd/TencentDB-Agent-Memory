@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Knowledge list 鉴权端到端验证（team-assets / my-assets / id-only read）
-# 需要：Panel :8123 + Kernel :8420 + KS :8421，instance 与 .env 对齐
+# Knowledge list authorization end-to-end verification (team-assets / my-assets / id-only read)
+# Requires: Panel :8123 + Kernel :8420 + KS :8421, with instance aligned to .env
 set -euo pipefail
 
 BASE="${BASE:-http://127.0.0.1:8123}"
@@ -32,14 +32,14 @@ if [[ -z "$ADMIN_KEY" || -z "$MEMBER_KEY" || -z "$TEAM_ID" ]]; then
   exit 1
 fi
 
-info "① admin 创建 private wiki"
+info "① admin creates a private wiki"
 WNAME="e2e-wiki-$(date +%s)"
 R=$(call_knowledge wiki/create "$ADMIN_KEY" "{\"team_id\":\"$TEAM_ID\",\"name\":\"$WNAME\"}")
 [[ $(jcode "$R") == "0" ]] || fail "wiki/create" "$R"
 WIKI_ID=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['wiki_id'])")
 pass "wiki_id=$WIKI_ID (private by default)"
 
-info "② member team-assets 不应看到 admin private wiki"
+info "② member's team-assets should not show the admin's private wiki"
 R=$(call_knowledge wiki/team-assets "$MEMBER_KEY" "{\"team_id\":\"$TEAM_ID\"}")
 [[ $(jcode "$R") == "0" ]] || fail "wiki/team-assets member" "$R"
 COUNT=$(jcount "$R")
@@ -50,7 +50,7 @@ sys.exit(0 if '$WIKI_ID' not in ids else 1)
 " <<< "$R" || fail "private wiki leaked in team-assets" "$R"
 pass "team-assets count=$COUNT, no leak"
 
-info "③ admin my-assets 应看到自己 wiki"
+info "③ admin's my-assets should show their own wiki"
 R=$(call_knowledge wiki/my-assets "$ADMIN_KEY" "{\"team_id\":\"$TEAM_ID\"}")
 [[ $(jcode "$R") == "0" ]] || fail "wiki/my-assets admin" "$R"
 python3 -c "
@@ -60,13 +60,13 @@ sys.exit(0 if '$WIKI_ID' in ids else 1)
 " <<< "$R" || fail "admin my-assets missing wiki" "$R"
 pass "admin my-assets contains wiki"
 
-info "④ member 直接 get admin wiki → 应 403/404"
+info "④ member directly gets the admin's wiki → should be 403/404"
 R=$(call_knowledge wiki/get "$MEMBER_KEY" "{\"wiki_id\":\"$WIKI_ID\"}")
 CODE=$(jcode "$R")
 [[ "$CODE" != "0" ]] || fail "wiki/get should be forbidden for member" "$R"
 pass "wiki/get blocked (code=$CODE)"
 
-info "⑤ 清理 admin wiki"
+info "⑤ clean up the admin wiki"
 R=$(call_knowledge wiki/delete "$ADMIN_KEY" "{\"wiki_ids\":[\"$WIKI_ID\"]}")
 [[ $(jcode "$R") == "0" ]] || fail "wiki/delete" "$R"
 pass "wiki deleted"

@@ -679,7 +679,7 @@ class MemoryTencentdbProvider(MemoryProvider):
                     lines.append(f"- [{mtype}] {content}")
                 parts.append(
                     "<relevant-memories>\n"
-                    "以下是当前对话召回的相关记忆，仅作为参考：\n\n"
+                    "The following relevant memories were recalled for the current conversation, for reference only:\n\n"
                     + "\n".join(lines)
                     + "\n</relevant-memories>"
                 )

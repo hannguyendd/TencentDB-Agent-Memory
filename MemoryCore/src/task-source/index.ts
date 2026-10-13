@@ -1,11 +1,11 @@
 /**
- * Task 外部来源模块统一出口。
+ * Unified entry point for the Task external-source module.
  *
- * 对外只暴露：类型、注册中心、导入服务、TAPD provider。
- * 所有内部服务地址来自部署配置，本模块不内置任何域名。
+ * Only exposes: types, registry, import service, TAPD provider.
+ * All internal service addresses come from deployment config; this module embeds no domain names.
  *
- * 注：导入是**一次性快照**，不提供「同步远端变更」能力（无定时同步、
- * 无抽屉页手动同步），故本模块没有 sync 出口。
+ * Note: import is a **one-time snapshot**; there is no "sync remote changes" capability (no scheduled sync,
+ * no manual sync from the drawer page), so this module has no sync export.
  */
 
 export * from "./types.js";

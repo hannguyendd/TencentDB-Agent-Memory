@@ -9,10 +9,10 @@ export function registerMetaInstanceRoutes(api: Hono, deps: PanelDeps): void {
   api.get('/meta/instances', (c) => {
     return c.json({
       instances: deps.instanceRegistry.listPublic(),
-      // 面板级能力开关随实例列表顺带下发（不新增接口）：
-      // 「可观测」入口是否开放由部署方通过 PANEL_FEATURE_ANALYTICS_ENABLED 控制，
-      // 默认关闭；开启后前端再结合 /api/v1/analytics/config 的 CH 探测结果
-      // 决定菜单/路由是否最终可见。
+      // Panel-level capability switches are sent along with the instance list (no new endpoint):
+      // whether the "Observability" entry is open is controlled by the deployer via PANEL_FEATURE_ANALYTICS_ENABLED,
+      // off by default; once on, the frontend combines it with the CH probe result of /api/v1/analytics/config
+      // to decide whether the menu/route is finally visible.
       capabilities: { analyticsEnabled: deps.config.featureAnalyticsEnabled },
     });
   });

@@ -20,7 +20,7 @@ interface Logger {
 }
 
 // ════════════════════════════════════════════════════════════════
-// Cluster probe (connect-time 拨测)
+// Cluster probe (connect-time probe)
 //
 // Topology and mongot are **cluster-level** attributes, so they are probed
 // once per endpoint and cached next to the pooled client. FTS is a hard

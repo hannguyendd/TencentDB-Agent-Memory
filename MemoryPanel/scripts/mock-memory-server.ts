@@ -1,17 +1,17 @@
 /**
- * Mock memory 服务（本地端到端联调用）。
+ * Mock memory service (for local end-to-end integration).
  *
- * 起一个独立 Hono 实例，监听 `MOCK_KERNEL_PORT`（默认 9090），
- * 接收主服务 Outbox worker 投递的全部聚合类型 upsert / delete。
+ * Starts a standalone Hono instance listening on `MOCK_KERNEL_PORT` (default 9090),
+ * receiving all aggregate-type upserts / deletes delivered by the main service's Outbox worker.
  *
- * - POST /internal/sync/:aggregate     → 落到 received 数组 + stdout 打印
- * - POST /internal/sync/:aggregate/delete → 同上，event_type=delete
- * - GET  /__received                   → 返回已收事件列表（便于断言 / 排错）
- * - DELETE /__received                 → 清空（便于多轮联调）
+ * - POST /internal/sync/:aggregate     → stored in the received array + printed to stdout
+ * - POST /internal/sync/:aggregate/delete → same as above, event_type=delete
+ * - GET  /__received                   → returns the list of received events (handy for assertions / debugging)
+ * - DELETE /__received                 → clears it (handy for multi-round integration)
  *
- * 启动：`tsx scripts/mock-memory-server.ts`
+ * Start: `tsx scripts/mock-memory-server.ts`
  *
- * 主服务对接：`KERNEL_ENABLED=true KERNEL_BASE_URL=http://127.0.0.1:9090 pnpm dev`
+ * Connect the main service: `KERNEL_ENABLED=true KERNEL_BASE_URL=http://127.0.0.1:9090 pnpm dev`
  */
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
@@ -44,7 +44,7 @@ app.post('/internal/sync/:aggregate', async (c) => {
     payload,
   };
   received.push(ev);
-  // 一行 JSON，便于 grep
+  // One line of JSON, easy to grep
   console.log(JSON.stringify({ tag: 'mock-kernel', ...ev }));
   return c.json({ ok: true });
 });

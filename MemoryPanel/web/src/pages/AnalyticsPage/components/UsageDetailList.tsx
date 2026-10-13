@@ -1,8 +1,8 @@
 /**
- * UsageDetailList — 抽屉内的用量明细列表（usage/list）。
+ * UsageDetailList -- usage detail list inside the drawer (usage/list).
  *
- * 每行是一次模型请求的计费快照：token 构成、credit、是否流式、是否由其他模型
- * 路由而来。按成员下钻时隐藏成员列、按模型下钻时隐藏模型列（恒为同一值）。
+ * Each row is the billing snapshot of one model request: token breakdown, credit, whether streamed, whether routed
+ * from another model. The member column is hidden when drilling down by member, and the model column when drilling down by model (always the same value).
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Table, Text } from 'tea-component';

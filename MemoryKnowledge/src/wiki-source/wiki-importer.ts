@@ -1,20 +1,20 @@
 /**
- * WikiImporter —— 外部 wiki 定时同步的拉取服务（供 AutoSyncScheduler 调用）。
+ * WikiImporter — fetch service for scheduled sync of external wikis (called by AutoSyncScheduler).
  *
- * 准入（设计 §5.4）：**不设 per-wiki 开关**，wiki 同步跟随全局开关
- * `KNOWLEDGE_AUTO_SYNC_ENABLED`；是否参与由「有无凭据行」决定（§4.2，
- * 凭据行存在 == 外部来源）。调度器侧已按此筛选，这里只负责执行。
+ * Admission (design §5.4): **no per-wiki switch**; wiki sync follows the global switch
+ * `KNOWLEDGE_AUTO_SYNC_ENABLED`; participation is decided by "whether there is a credential row" (§4.2,
+ * a credential row exists == external source). The scheduler side has already filtered this way; this only handles execution.
  *
- * 同步范围：**每个文档的具体内容全量重拉**。
- * 通用外部源通常没有"按更新时间增量"的可靠接口：
- *   - 列表接口（多数平台仅返回直接子级，需逐层展开）只给标题/层级，
- *     不含正文，也往往不含更新时间
- *   - 正文只能逐篇取
- * 因此每轮同步都重新拉取全部文档正文并覆盖同名文件，
- * 天然覆盖「新增 / 修改 / 删除后重建」三种变化。
+ * Sync scope: **the specific content of every document is fully re-fetched**.
+ * Generic external sources usually have no reliable "incremental by update time" API:
+ *   - The list API (most platforms return only direct children, requiring level-by-level expansion) gives only titles/hierarchy,
+ *     does not include the body, and often does not include the update time either
+ *   - Bodies can only be fetched one by one
+ * So each sync round re-fetches all document bodies and overwrites same-named files,
+ * naturally covering the three kinds of changes: "added / modified / rebuilt after deletion".
  *
- * 与首次导入的差异：首次导入可只勾部分文档（pageIds），
- * 同步**不传 pageIds** → 全量。
+ * Difference from the first import: the first import can select only some documents (pageIds);
+ * sync **does not pass pageIds** → full.
  */
 
 import { createLogger } from "../logger.js";
@@ -29,7 +29,7 @@ const log = createLogger("wiki-importer");
 export interface WikiImporterDeps {
   registry: WikiSourceRegistry;
   wikiService: WikiServiceLike;
-  /** 取 wiki 行，用于拿 source_type（provider id）与 source_url。 */
+  /** Fetch the wiki row, used to get source_type (provider id) and source_url. */
   store: Pick<IKnowledgeStore, "getWikiById">;
 }
 
@@ -45,13 +45,13 @@ export function createWikiImporter(deps: WikiImporterDeps): WikiImporter {
       const providerId = row.source_type;
       const sourceUrl = row.source_url;
       if (!providerId || !sourceUrl) {
-        // 手工上传的 wiki 不该进入候选（调度器按凭据行筛选），这里是防御式检查
+        // A manually uploaded wiki should not become a candidate (the scheduler filters by credential row); this is a defensive check
         log.debug(`[wiki-sync] wiki ${wikiId} has no external source, skip`);
         return 0;
       }
 
       if (!deps.registry.get(providerId)) {
-        // provider 未在部署中启用（WIKI_SOURCE_ENABLED 未包含该 id）
+        // The provider is not enabled in this deployment (WIKI_SOURCE_ENABLED does not include this id)
         log.warn(`[wiki-sync] wiki ${wikiId} provider '${providerId}' not enabled, skip`);
         return 0;
       }
@@ -66,11 +66,11 @@ export function createWikiImporter(deps: WikiImporterDeps): WikiImporter {
         teamId,
         wikiId,
         sourceUrl,
-        // 不传 pageIds → 全量重拉所有文档正文（含新增/修改）
+        // Do not pass pageIds → fully re-fetch all document bodies (including added/modified)
       });
 
       if (result.failed.length > 0) {
-        // 部分失败不抛异常：已成功的文档已落盘，抛了会整轮回滚掉
+        // Partial failure does not throw: successful documents are already on disk, and throwing would roll back the whole round
         log.warn(
           `[wiki-sync] wiki ${wikiId} partially synced: ${result.imported} ok, ${result.failed.length} failed`,
         );

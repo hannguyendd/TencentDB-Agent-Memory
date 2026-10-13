@@ -1,13 +1,13 @@
 /**
- * v3 元数据路由（/v3/meta/*，55 接口）。
+ * v3 metadata routes (/v3/meta/*, 55 endpoints).
  *
- * 对应设计文档 §7 + 实施计划 M3.3。镜像 v2-router 的 dispatch 模式：
- *   - 仅 POST，前缀 /v3/meta
- *   - x-tdai-user-key 用户鉴权 + bootstrap 路由例外（见 auth.ts）
- *   - 每个 handler 用 Zod schema 校验后调用 MetadataService
- *   - MetadataError → 对应 envelope code；未知异常 → 500
+ * Corresponds to design doc §7 + implementation plan M3.3. Mirrors the v2-router dispatch pattern:
+ *   - POST only, prefix /v3/meta
+ *   - x-tdai-user-key user auth + bootstrap route exceptions (see auth.ts)
+ *   - each handler validates with a Zod schema before calling MetadataService
+ *   - MetadataError → the corresponding envelope code; unknown exceptions → 500
  *
- * 复用 v2 的 envelope 工具，保证响应格式一致。
+ * Reuses the v2 envelope utilities to keep response formats consistent.
  */
 
 import type * as http from "node:http";
@@ -51,15 +51,15 @@ export interface V3MetaRouterDeps {
   getMetadataService: (instanceId: string) => MetadataService | undefined | Promise<MetadataService | undefined>;
   logger: Logger;
   /**
-   * 返回当前 Core 部署支持的 agent 列表。
-   * 供 §6.A supported-agents 接口回响,以及 groups/create + update 时的 agents
-   * 枚举校验、seed default 数据源。由 Core 启动时从 gateway.yaml
-   * upstream.supportedAgents 加载(见 §8.1 Core 侧改造)。
+   * Returns the list of agents supported by the current Core deployment.
+   * Used by the §6.A supported-agents endpoint echo, the agents enum validation on groups/create + update,
+   * and as the seed default data source. Loaded by Core at startup from gateway.yaml
+   * upstream.supportedAgents (see §8.1 Core-side changes).
    */
   getSupportedAgents: () => import("../types.js").SupportedAgent[];
 }
 
-/** 供 handler 消费的运行时依赖(bind 层传入的第 4 参数)。 */
+/** Runtime dependencies consumed by handlers (the 4th argument passed in by the bind layer). */
 export interface V3MetaRouterRuntimeDeps {
   getSupportedAgents: () => import("../types.js").SupportedAgent[];
 }
@@ -80,7 +80,7 @@ type Handler = (
   deps: V3MetaRouterRuntimeDeps,
 ) => Promise<ApiResponseEnvelope>;
 
-/** schema 校验 + 业务调用 + 成功封装；业务异常交由 dispatch 统一处理。 */
+/** Schema validation + business call + success wrapping; business exceptions are handled uniformly by dispatch. */
 function bind<S2 extends ZodType>(schema: S2, fn: BizFn<S2["_output"]>): Handler {
   return async (body, ctx, svc, requestId, deps) => {
     const parsed = schema.safeParse(body);
@@ -99,29 +99,29 @@ function orNotFound<T>(entity: T | null, code: string, id: string): T {
 
 const OK = { ok: true } as const;
 
-// ── Route table（55 接口）──
+// ── Route table (55 endpoints) ──
 const routeTable: Record<string, Handler> = {
   // User
   [`${V3_PREFIX}/user/create`]: bind(S.userCreateSchema, async (d, c, s) => {
     s.assertCanManageUsers(c);
     return s.createNormalUser(d);
   }),
-  // 姊妹接口：允许 system_admin 建号时显式指定 user_key。鉴权与 /user/create 完全对称。
-  // Zod 只校验 username + user_key 非空，user_id 若被传入会被 zod strip 忽略。
+  // Sibling endpoint: lets system_admin explicitly specify user_key when creating an account. Auth is fully symmetric with /user/create.
+  // Zod only validates that username + user_key are non-empty; a passed-in user_id is stripped and ignored by zod.
   [`${V3_PREFIX}/user/create-with-key`]: bind(S.userCreateWithKeySchema, async (d, c, s) => {
     s.assertCanManageUsers(c);
     return s.createNormalUserWithKey(d);
   }),
-  // 外部认证（如 WOA）登录后判断是否初次：按 (auth_provider, external_id) 查 user。
-  // 查 core 既有的 meta_users.external_id；无匹配=初次。
+  // After external auth (e.g. WOA) login, determine whether it is the first time: look up the user by (auth_provider, external_id).
+  // Looks up core's existing meta_users.external_id; no match = first time.
   [`${V3_PREFIX}/user/find-by-external`]: bind(S.userFindByExternalSchema, async (d, c, s) => {
     s.assertCanManageUsers(c);
     return s.findUserByExternalId(d.external_id, d.auth_provider);
   }),
-  // 外部认证绑定存量账号：把外部 IdP 唯一 id 写入 user 的 external_id。
-  // auth_provider 一并写入外部域，保证与 find-by-external 的读取同域
-  // （只写 external_id 不写域 → 下次反查落空）。
-  // 存量账号绑定后仍可用原 user_key 登录，外部认证只是新增一种入口。
+  // External auth binds an existing account: write the external IdP unique id into the user's external_id.
+  // auth_provider is also written as the external domain, so that it stays in the same domain as the find-by-external read
+  // (writing only external_id without the domain → the next reverse lookup misses).
+  // After binding, the existing account can still log in with the original user_key; external auth is just an added entry point.
   [`${V3_PREFIX}/user/bind-external`]: bind(S.userBindExternalSchema, async (d, c, s) => {
     s.assertCanManageUsers(c);
     return s.bindExternalIdToUser(d.user_id, d.external_id, d.auth_provider, d.display_name);
@@ -206,8 +206,8 @@ const routeTable: Record<string, Handler> = {
   [`${V3_PREFIX}/agent/list`]: bind(S.agentListSchema, async (d, _c, s) => {
     const pagination = resolvePagination(d);
     if (d.team_id) {
-      // team_id 分支：owner_user_id 若同传则叠加过滤（"团队内我 owner 的 agent"），
-      // 用于面板"私有 agent 可见性"场景。不传时行为不变（团队全量）。
+      // team_id branch: if owner_user_id is also passed, filter by both ("agents I own within the team"),
+      // used for the panel's "private agent visibility" scenario. Behavior is unchanged when not passed (all of the team).
       const filter: AgentFilter = {};
       if (d.status) filter.status = d.status;
       if (d.owner_user_id) filter.owner_user_id = d.owner_user_id;
@@ -275,14 +275,14 @@ const routeTable: Record<string, Handler> = {
 
   // Asset
   [`${V3_PREFIX}/asset/create`]: bind(S.assetCreateSchema, (d, c, s) => s.createAssetForCaller(d, c)),
-  // 调用者视角读（水平越权修复）：无权访问返回 null → 404，不泄露资产存在性
+  // Caller-perspective read (horizontal privilege escalation fix): no access returns null → 404, without leaking asset existence
   [`${V3_PREFIX}/asset/get`]: bind(S.assetGetSchema, async (d, c, s) => orNotFound(await s.getAssetForCaller(d.asset_id, c), "asset_not_found", d.asset_id)),
   [`${V3_PREFIX}/asset/update`]: bind(S.assetUpdateSchema, (d, c, s) => {
     const { asset_id, ...patch } = d;
     return s.updateAssetForCaller(asset_id, patch, c);
   }),
   [`${V3_PREFIX}/asset/delete`]: bind(S.assetDeleteSchema, (d, c, s) => s.deleteAssetsForCaller(d.asset_ids, c)),
-  // 调用者视角读（水平越权修复）：成员校验 + 逐条权限过滤，与 list-accessible 同源
+  // Caller-perspective read (horizontal privilege escalation fix): membership check + per-item permission filtering, same source as list-accessible
   [`${V3_PREFIX}/asset/list`]: bind(S.assetListSchema, (d, c, s) => s.listAssetsForCaller(d, c)),
   [`${V3_PREFIX}/asset/list-accessible`]: bind(S.assetListAccessibleSchema, (d, _c, s) =>
     s.listAccessibleAssets(d)),
@@ -345,14 +345,14 @@ const routeTable: Record<string, Handler> = {
 
   // InstanceUpstreamConfig v2 (see docs/design/2026-08-25-instance-upstream-config.md §6)
   //
-  // 依赖 deps.getSupportedAgents():从 Core gateway config 里读 upstream.supportedAgents。
-  // 用于:supported-agents 接口回响;B/C 类接口的 agents 枚举校验 + seed 数据源。
+  // Depends on deps.getSupportedAgents(): reads upstream.supportedAgents from the Core gateway config.
+  // Used for: the supported-agents endpoint echo; agents enum validation for B/C-class endpoints + seed data source.
 
-  // §6.A supported-agents(挂 Core 后由本模块提供)
+  // §6.A supported-agents (provided by this module once mounted on Core)
   //
-  // 也触发 seed:Panel 首屏拉的第一发就是这个,响应体本身只回 supportedAgents,
-  // 但顺带 seed 保证用户随后打 groups/list 能看到 default 行(懒配置 = 用户
-  // 视角"每个实例都自带 default")。
+  // Also triggers seeding: this is the very first call the Panel makes on its first screen; the response body itself only returns supportedAgents,
+  // but seeding along the way ensures that when the user then calls groups/list they can see the default row (lazy config = from the user's
+  // perspective "every instance comes with a default").
   [`${V3_PREFIX}/upstream/supported-agents`]: bind(S.supportedAgentsSchema, async (_d, c, s, _reqId, deps) => {
     s.assertCanManageUsers(c);
     const supported = deps.getSupportedAgents();
@@ -384,11 +384,11 @@ const routeTable: Record<string, Handler> = {
 
   // §6.C extraction/*
   //
-  // 全部写入路径都传 supportedAgents 是为了兜底存量实例首个请求非 list 时的 seed
-  // (见 §11.11f 决策 + docs/design 2026-08-25 §5.5 存量实例兜底):
-  // Panel 用户可能直接进入 "extraction 新建" 或 "新建 custom",跳过 list,
-  // 若不 seed default 行,后续 hermes/其他 agent 请求会 AGENT_NOT_CONFIGURED。
-  // extraction/get 不写入,也无 seed 需求,保持只读语义。
+  // All write paths pass supportedAgents as a safety net for existing instances whose first request is not list, to seed
+  // (see §11.11f decision + docs/design 2026-08-25 §5.5 existing-instance fallback):
+  // a Panel user may go straight to "create extraction" or "create custom", skipping list;
+  // without seeding the default row, subsequent hermes/other agent requests would hit AGENT_NOT_CONFIGURED.
+  // extraction/get does not write and has no seed need, so it keeps read-only semantics.
   [`${V3_PREFIX}/instance-upstream/extraction/get`]: bind(S.upstreamExtractionGetSchema, async (_d, c, s, _reqId, deps) => {
     s.assertCanManageUsers(c);
     return s.getInstanceUpstreamExtraction(deps.getSupportedAgents());
@@ -411,10 +411,10 @@ const routeTable: Record<string, Handler> = {
   }),
 };
 
-/** 已注册的 v3 路由路径（供测试 / 文档）。 */
+/** Registered v3 route paths (for tests / docs). */
 export const V3_ROUTES = Object.keys(routeTable);
 
-/** MetadataError code → envelope code。 */
+/** MetadataError code → envelope code. */
 function mapErrorCode(code: string): number {
   if (code.endsWith("_not_found")) return 404;
   switch (code) {
@@ -446,7 +446,7 @@ function mapErrorCode(code: string): number {
       return 403;
     case "user_key_not_found":
       return 404;
-    // ── v2 InstanceUpstream 错误码(§6.E)──
+    // ── v2 InstanceUpstream error codes (§6.E) ──
     case "GROUP_NOT_FOUND":
       return 404;
     case "EXTRACTION_ALREADY_CONFIGURED":
@@ -474,7 +474,7 @@ function mapErrorCode(code: string): number {
 }
 
 /**
- * v3 路由分发。命中返回 true（已响应）；非 /v3/meta 或非 POST 返回 false（交还上层）。
+ * v3 route dispatch. Returns true on a hit (already responded); returns false for non-/v3/meta or non-POST (handed back to the upper layer).
  */
 export async function handleV3MetaRoute(
   req: http.IncomingMessage,
@@ -518,7 +518,7 @@ export async function handleV3MetaRoute(
     return true;
   }
 
-  // 鉴权：V3_NO_USER_KEY_ROUTES
+  // Auth: V3_NO_USER_KEY_ROUTES
   let ctx: Ctx;
   const headerUserKey = extractUserKeyHeader(req.headers);
   if (V3_NO_USER_KEY_ROUTES.has(pathname)) {
@@ -574,7 +574,7 @@ export async function handleV3MetaRoute(
       const message = `${err.code}: ${err.message}`;
       deps.logger.warn?.(`${TAG} [${pathname}] ${message}`);
       logMetaApiError(traceCtx, err, { envelopeCode: code, httpStatus: code });
-      // detail (如 AGENTS_OVERLAP 的 conflict_groups)带进 envelope.data 供前端渲染
+      // detail (e.g. conflict_groups of AGENTS_OVERLAP) is carried into envelope.data for the frontend to render
       sendJson(res, code, errorEnvelope(code, message, requestId, err.detail));
     } else {
       const msg = err instanceof Error ? err.message : String(err);

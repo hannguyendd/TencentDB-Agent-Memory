@@ -2,102 +2,102 @@
 #
 # install_memory_tencentdb.sh
 #
-# 在 install_hermes_ubuntu.sh 之后执行，用于：
-#   1. 通过 npm 下载 @tencentdb-agent-memory/memory-tencentdb@latest 到
-#      $MEMORY_TENCENTDB_ROOT/tdai-memory-openclaw-plugin（默认 ~/.memory-tencentdb/tdai-memory-openclaw-plugin）
-#   2. 安装 Gateway 的 Node.js 依赖（npm install）
-#   3. 配置 hermes config.yaml 使用 memory_tencentdb 记忆提供者
-#   4. 设置 Gateway 自动启动环境变量
+# Run after install_hermes_ubuntu.sh, to:
+#   1. Download @tencentdb-agent-memory/memory-tencentdb@latest via npm into
+#      $MEMORY_TENCENTDB_ROOT/tdai-memory-openclaw-plugin (default ~/.memory-tencentdb/tdai-memory-openclaw-plugin)
+#   2. Install the Gateway's Node.js dependencies (npm install)
+#   3. Configure hermes config.yaml to use the memory_tencentdb memory provider
+#   4. Set the Gateway auto-start environment variables
 #
-# 路径约定（全部位于 ~/.memory-tencentdb/ 之下，可通过环境变量覆盖）：
-#   $MEMORY_TENCENTDB_ROOT     默认 ~/.memory-tencentdb
-#   $TDAI_INSTALL_DIR          默认 $MEMORY_TENCENTDB_ROOT/tdai-memory-openclaw-plugin
-#   $TDAI_DATA_DIR             默认 $MEMORY_TENCENTDB_ROOT/memory-tdai
+# Path conventions (all under ~/.memory-tencentdb/, overridable via environment variables):
+#   $MEMORY_TENCENTDB_ROOT     default ~/.memory-tencentdb
+#   $TDAI_INSTALL_DIR          default $MEMORY_TENCENTDB_ROOT/tdai-memory-openclaw-plugin
+#   $TDAI_DATA_DIR             default $MEMORY_TENCENTDB_ROOT/memory-tdai
 #
-# 旧版本（<= 0.3.x）使用 ~/tdai-memory-openclaw-plugin 与 ~/memory-tdai；
-# 本脚本会在执行前自动迁移这两个旧目录到新位置（见 Step 0）。
+# Older versions (<= 0.3.x) used ~/tdai-memory-openclaw-plugin and ~/memory-tdai;
+# this script automatically migrates those two old directories to the new location before running (see Step 0).
 #
-# 使用方式：
-#   以目标用户身份执行（推荐）：
+# Usage:
+#   Run as the target user (recommended):
 #     su - <username> -c "bash ~/install_memory_tencentdb.sh"
-#     # 或直接以该用户登录后执行
+#     # or log in as that user directly and run
 #     bash ~/install_memory_tencentdb.sh
 #
-#   以 root 身份执行（镜像构建场景）：
+#   Run as root (image-build scenario):
 #     bash ~/install_memory_tencentdb.sh
-#     # root 会自动 su 切换到目标用户执行，完成后修复权限
+#     # root automatically switches to the target user via su to run, and fixes permissions afterwards
 #
-# 前置条件：
-#   - install_hermes_ubuntu.sh 已执行完成（hermes-agent 已安装）
-#   - Node.js >= 22 已安装
+# Prerequisites:
+#   - install_hermes_ubuntu.sh has completed (hermes-agent is installed)
+#   - Node.js >= 22 is installed
 
 set -e
 
-# 动态获取目标安装用户及其 HOME 目录。
-# 优先级：
-#   1. 显式 ``INSTALL_AS_USER`` 环境变量（管理员脚本场景：root 跑安装但
-#      想为另一个用户配置）
-#   2. ``SUDO_USER``（被 ``sudo`` 调用时，切回原用户而不是 root）
-#   3. ``whoami`` —— 当前 EUID 对应的用户
+# Dynamically determine the target install user and its HOME directory.
+# Priority:
+#   1. An explicit ``INSTALL_AS_USER`` environment variable (admin-script scenario: root runs the install but
+#      wants to configure it for another user)
+#   2. ``SUDO_USER`` (when invoked via ``sudo``, switch back to the original user instead of root)
+#   3. ``whoami`` -- the user corresponding to the current EUID
 #
-# 注意：当 root 直接 ssh 登录跑（非 sudo）时，前两个都不会被设置，
-# ``whoami`` 返回 ``root``。下面的 ``id -u`` == 0 分支会识别这种"目标
-# 就是 root"的情况、跳过 ``su - root`` 递归。
+# Note: when root runs it directly over ssh login (not sudo), neither of the first two is set and
+# ``whoami`` returns ``root``. The ``id -u`` == 0 branch below recognizes this "target
+# is root" case and skips the ``su - root`` recursion.
 USERNAME="${INSTALL_AS_USER:-${SUDO_USER:-$(whoami)}}"
 USER_HOME=$(eval echo ~$USERNAME)
 
-# npm 包名
+# npm package name
 NPM_PACKAGE="@tencentdb-agent-memory/memory-tencentdb@latest"
 
-# Hermes 路径
+# Hermes path
 HERMES_HOME="$USER_HOME/.hermes"
-# HERMES_AGENT_DIR（fix: issue #18）
-# 用户通过环境变量传什么就用什么；未设置时 fallback 到传统路径。
-# 如果目录不存在，后续前置检查会统一报错。
+# HERMES_AGENT_DIR (fix: issue #18)
+# Whatever the user passes via environment variables is used; when unset, fall back to the traditional path.
+# If the directory does not exist, the later prerequisite check reports an error uniformly.
 HERMES_AGENT_DIR="${HERMES_AGENT_DIR:-$HERMES_HOME/hermes-agent}"
 HERMES_CONFIG="$HERMES_HOME/config.yaml"
 
-# memory-tencentdb 统一根目录（所有 tdai 相关数据/代码都收纳在此）
-# 可通过环境变量 MEMORY_TENCENTDB_ROOT 覆盖
+# memory-tencentdb unified root directory (all tdai-related data/code is collected here)
+# Overridable via the environment variable MEMORY_TENCENTDB_ROOT
 MEMORY_TENCENTDB_ROOT="${MEMORY_TENCENTDB_ROOT:-$USER_HOME/.memory-tencentdb}"
 
-# tdai 解压目标目录（位于统一根目录下）
-# 可通过环境变量 TDAI_INSTALL_DIR 覆盖
+# tdai extraction target directory (under the unified root directory)
+# Overridable via the environment variable TDAI_INSTALL_DIR
 TDAI_INSTALL_DIR="${TDAI_INSTALL_DIR:-$MEMORY_TENCENTDB_ROOT/tdai-memory-openclaw-plugin}"
 
-# tdai 数据目录（Gateway baseDir，位于统一根目录下）
-# 可通过环境变量 TDAI_DATA_DIR 覆盖
+# tdai data directory (Gateway baseDir, under the unified root directory)
+# Overridable via the environment variable TDAI_DATA_DIR
 TDAI_DATA_DIR="${TDAI_DATA_DIR:-$MEMORY_TENCENTDB_ROOT/memory-tdai}"
 
-# 旧路径（仅用于自动迁移）
+# Old paths (only used for automatic migration)
 LEGACY_INSTALL_DIR="$USER_HOME/tdai-memory-openclaw-plugin"
 LEGACY_DATA_DIR="$USER_HOME/memory-tdai"
 
-# ==================== root → 自动切换到目标用户 ====================
-# 与 install_hermes_ubuntu.sh 保持一致：如果以 root 执行且目标用户不是
-# root，自动 su 切到目标用户运行实际安装逻辑。
+# ==================== root -> automatically switch to the target user ====================
+# Consistent with install_hermes_ubuntu.sh: if run as root and the target user is not
+# root, automatically su to the target user to run the actual install logic.
 #
-# 如果当前是 root 且目标用户也是 root（``USERNAME=root``，例如直接 ssh
-# 登录 root 跑安装），跳过 ``su - root`` —— 否则会无限递归（``su - root``
-# 进入的仍是 root，又走到这个分支，再次 su，永远停不下来）。见 issue #20。
+# If the current user is root and the target user is also root (``USERNAME=root``, e.g. logging in directly over ssh
+# as root to run the install), skip ``su - root`` -- otherwise it recurses infinitely (``su - root``
+# still lands in root, which hits this branch again, su again, never stopping). See issue #20.
 
 if [ "$(id -u)" -eq 0 ] && [ "$USERNAME" != "root" ]; then
     echo "[memory-tencentdb] Running as root, switching to $USERNAME for installation..."
 
-    # 验证前置条件
+    # Validate prerequisites
     if [ ! -d "$HERMES_AGENT_DIR" ]; then
         echo "[ERROR] Hermes agent not found at $HERMES_AGENT_DIR"
         echo "[ERROR] Please run install_hermes_ubuntu.sh first."
         exit 1
     fi
 
-    # 切换到目标用户执行
+    # Switch to the target user to run
     TEMP_SCRIPT=$(mktemp /tmp/memory-tencentdb-install-XXXXXX.sh)
     cp "${BASH_SOURCE[0]}" "$TEMP_SCRIPT"
     chmod 755 "$TEMP_SCRIPT"
     su - $USERNAME -c "bash $TEMP_SCRIPT" </dev/null
 
-    # 修复权限
+    # Fix permissions
     echo "[memory-tencentdb] Fixing permissions..."
     chown -R $USERNAME:$USERNAME "$USER_HOME"
 
@@ -105,35 +105,35 @@ if [ "$(id -u)" -eq 0 ] && [ "$USERNAME" != "root" ]; then
     echo "[memory-tencentdb] Installation completed successfully"
     exit 0
 elif [ "$(id -u)" -eq 0 ]; then
-    # 当前是 root 且目标用户也是 root：直接以 root 跑后续安装逻辑，
-    # 不再走 ``su -`` 切换（避免 #20 的递归）。
+    # The current user is root and the target user is also root: run the subsequent install logic directly as root,
+    # without ``su -`` switching (avoiding the recursion of #20).
     echo "[memory-tencentdb] Running as root; target user is also root — installing in place."
 fi
 
-# ==================== 用户阶段（核心安装逻辑） ====================
+# ==================== User phase (core install logic) ====================
 
 echo "[memory-tencentdb] Installing memory-tencentdb plugin (user: $(whoami))..."
 
-# 验证前置条件
+# Validate prerequisites
 if [ ! -d "$HERMES_AGENT_DIR" ]; then
     echo "[ERROR] Hermes agent not found at $HERMES_AGENT_DIR"
     echo "[ERROR] Please run install_hermes_ubuntu.sh first."
     exit 1
 fi
 
-# 加载 hermes 环境（PATH 中需要 node/npm）
+# Load the hermes environment (node/npm are needed in PATH)
 if [ -f /etc/profile.d/hermes-env.sh ]; then
     source /etc/profile.d/hermes-env.sh
 fi
 
-# 确保统一根目录存在
+# Ensure the unified root directory exists
 mkdir -p "$MEMORY_TENCENTDB_ROOT"
 
-# ---------- Step 0: 自动迁移旧路径（向后兼容） ----------
+# ---------- Step 0: automatically migrate old paths (backward compatibility) ----------
 #
-# 历史版本把 tdai 解压到 ~/tdai-memory-openclaw-plugin、数据放在 ~/memory-tdai。
-# 现在统一收纳到 ~/.memory-tencentdb/ 之下，这里做一次性自动迁移。
-# 已经在新位置时跳过；新旧都存在时打印警告并保留新位置不动。
+# Historical versions extracted tdai to ~/tdai-memory-openclaw-plugin and put data in ~/memory-tdai.
+# Now everything is collected under ~/.memory-tencentdb/, and a one-time automatic migration is done here.
+# Skip when already at the new location; when both old and new exist, print a warning and leave the new location untouched.
 
 migrate_legacy_dir() {
     local legacy="$1"
@@ -143,7 +143,7 @@ migrate_legacy_dir() {
         return 0
     fi
     if [ -L "$legacy" ]; then
-        # 旧位置是 symlink，直接清掉
+        # The old location is a symlink; just remove it
         echo "[memory-tencentdb] Removing legacy symlink: $legacy"
         rm -f "$legacy"
         return 0
@@ -161,20 +161,20 @@ migrate_legacy_dir() {
 migrate_legacy_dir "$LEGACY_INSTALL_DIR" "$TDAI_INSTALL_DIR" "install"
 migrate_legacy_dir "$LEGACY_DATA_DIR"    "$TDAI_DATA_DIR"    "data"
 
-# ---------- Step 1: 通过 npm 下载包并提取到 $TDAI_INSTALL_DIR ----------
+# ---------- Step 1: download the package via npm and extract it to $TDAI_INSTALL_DIR ----------
 
 echo "[memory-tencentdb] Step 1: Downloading $NPM_PACKAGE via npm..."
 
-# 清理旧安装
+# Clean up the old installation
 rm -rf "$TDAI_INSTALL_DIR"
 
-# 使用临时目录通过 npm install 下载包
+# Use a temporary directory to download the package via npm install
 TEMP_DOWNLOAD=$(mktemp -d /tmp/memory-tencentdb-download-XXXXXX)
 cd "$TEMP_DOWNLOAD"
 npm init -y --silent > /dev/null 2>&1
 npm install "$NPM_PACKAGE" --omit=dev 2>&1 | tail -5
 
-# 包安装后位于 node_modules/@tencentdb-agent-memory/memory-tencentdb
+# After the package is installed it lives in node_modules/@tencentdb-agent-memory/memory-tencentdb
 PACK_DIR="$TEMP_DOWNLOAD/node_modules/@tencentdb-agent-memory/memory-tencentdb"
 
 if [ ! -d "$PACK_DIR" ]; then
@@ -183,13 +183,13 @@ if [ ! -d "$PACK_DIR" ]; then
     exit 1
 fi
 
-# 将包内容移动到目标安装目录
+# Move the package contents to the target install directory
 mkdir -p "$(dirname "$TDAI_INSTALL_DIR")"
 cp -r "$PACK_DIR" "$TDAI_INSTALL_DIR"
 
 echo "[memory-tencentdb] Package downloaded and extracted to $TDAI_INSTALL_DIR"
 
-# ---------- Step 2: 安装 Gateway Node.js 依赖 ----------
+# ---------- Step 2: install the Gateway Node.js dependencies ----------
 
 echo "[memory-tencentdb] Step 2: Installing Gateway dependencies..."
 
@@ -198,33 +198,33 @@ cd "$TDAI_INSTALL_DIR"
 echo "[memory-tencentdb] Running npm install (this may take a while)..."
 npm install --omit=dev 2>&1 | tail -5
 
-# 安装 tsx（Gateway 启动需要），优先本地安装
+# Install tsx (needed to start the Gateway), preferring a local install
 if ! npx tsx --version &>/dev/null; then
     npm install tsx 2>&1 | tail -2
 fi
 
 echo "[memory-tencentdb] Gateway dependencies installed"
 
-# ---------- Step 2.5: 将插件链接到 hermes 插件目录 ----------
+# ---------- Step 2.5: link the plugin into the hermes plugin directory ----------
 
 echo "[memory-tencentdb] Step 2.5: Linking plugin into hermes plugins directory..."
 
 HERMES_PLUGIN_DIR="$HERMES_AGENT_DIR/plugins/memory/memory_tencentdb"
 PLUGIN_SRC_DIR="$TDAI_INSTALL_DIR/hermes-plugin/memory/memory_tencentdb"
 
-# 移除旧链接/目录
+# Remove the old link/directory
 rm -rf "$HERMES_PLUGIN_DIR"
 
-# 创建 symlink 使 hermes 能发现插件
+# Create a symlink so hermes can discover the plugin
 ln -sf "$PLUGIN_SRC_DIR" "$HERMES_PLUGIN_DIR"
 
 echo "[memory-tencentdb] Plugin linked: $HERMES_PLUGIN_DIR -> $PLUGIN_SRC_DIR"
 
-# ---------- Step 3: 提示用户手动开启 memory_tencentdb（不自动修改 config） ----------
+# ---------- Step 3: prompt the user to enable memory_tencentdb manually (config is not modified automatically) ----------
 
 echo "[memory-tencentdb] Step 3: Checking hermes config..."
 
-# 插件已链接到 hermes 插件目录，但默认不自动启用，仅提示
+# The plugin is linked into the hermes plugin directory but is not enabled automatically by default; only a prompt is shown
 if [ -f "$HERMES_CONFIG" ]; then
     if sed -n '/^memory:/,/^[a-zA-Z]/p' "$HERMES_CONFIG" | grep -q "provider: memory_tencentdb"; then
         echo "[memory-tencentdb] memory.provider already set to memory_tencentdb"
@@ -240,19 +240,19 @@ else
     echo "[memory-tencentdb] WARN: $HERMES_CONFIG not found, please run install_hermes_ubuntu.sh first"
 fi
 
-# ---------- Step 4: 配置 Gateway 环境变量 ----------
+# ---------- Step 4: configure the Gateway environment variables ----------
 
 echo "[memory-tencentdb] Step 4: Setting up Gateway environment..."
 
-# 构建 Gateway 启动命令
-# 使用 sh -c 包裹，先 cd 到插件目录再启动 Gateway（ESM 解析需要）
+# Build the Gateway start command
+# Wrapped with sh -c, cd to the plugin directory first and then start the Gateway (needed for ESM resolution)
 #
-# 解析 node 绝对路径写入 GATEWAY_CMD（fix: issue #19）
-# 当 Hermes 或独立 Gateway 以 systemd service 运行时，systemd 不会
-# source 任何 user shell rc 文件，nvm/asdf 注入的 PATH 不存在。
-# 用 `command -v node` 在 install 时解析绝对路径，并改用 Node 原生
-# `--import tsx/esm`（Node >= 20.6 stable）替代 `npx tsx`，
-# 让最终命令完全不依赖运行时 PATH。
+# Resolve the absolute node path into GATEWAY_CMD (fix: issue #19)
+# When Hermes or a standalone Gateway runs as a systemd service, systemd does not
+# source any user shell rc file, so the PATH injected by nvm/asdf does not exist.
+# Use `command -v node` to resolve the absolute path at install time, and use Node's native
+# `--import tsx/esm` (Node >= 20.6 stable) instead of `npx tsx`,
+# so the final command does not depend on the runtime PATH at all.
 NODE_BIN="$(command -v node || true)"
 if [ -z "$NODE_BIN" ]; then
     echo "[ERROR] 'node' not found in PATH; cannot generate Gateway start command." >&2
@@ -264,16 +264,16 @@ echo "[memory-tencentdb] Resolved node: $NODE_BIN"
 
 GATEWAY_CMD="sh -c 'cd $TDAI_INSTALL_DIR && exec \"$NODE_BIN\" --import tsx/esm src/gateway/server.ts'"
 
-# ── 4a: /etc/profile.d（SSH 交互式登录场景） ──
-# 写入 /etc/profile.d 持久化环境变量，供 SSH 手动执行 `hermes` 时使用。
-# 注意：LLM 相关变量（API key、model 等）需要用户后续手动配置
+# -- 4a: /etc/profile.d (SSH interactive login scenario) --
+# Write persistent environment variables to /etc/profile.d, for when `hermes` is run manually over SSH.
+# Note: LLM-related variables (API key, model, etc.) must be configured manually by the user afterwards
 ENVFILE="/etc/profile.d/memory-tencentdb-env.sh"
 cat << ENVEOF | sudo tee "$ENVFILE" > /dev/null
-# memory-tencentdb Gateway 环境变量
+# memory-tencentdb Gateway environment variables
 export MEMORY_TENCENTDB_GATEWAY_CMD="$GATEWAY_CMD"
 export MEMORY_TENCENTDB_GATEWAY_HOST="127.0.0.1"
 export MEMORY_TENCENTDB_GATEWAY_PORT="8420"
-# LLM 配置（按需修改）
+# LLM config (modify as needed)
 # export MEMORY_TENCENTDB_LLM_API_KEY="sk-..."
 # export MEMORY_TENCENTDB_LLM_BASE_URL="https://api.openai.com/v1"
 # export MEMORY_TENCENTDB_LLM_MODEL="gpt-4o"
@@ -281,10 +281,10 @@ ENVEOF
 
 echo "[memory-tencentdb] Environment variables written to $ENVFILE"
 
-# ── 4b: ~/.hermes/.env（systemd service 场景） ──
-# hermes-gateway 通过 systemd user service 启动时不会 source /etc/profile.d/*.sh，
-# 但 hermes 的 run.py 启动时会 load_dotenv("~/.hermes/.env")。
-# 因此必须将关键变量同步写入 .env，否则 systemd 场景下 Gateway 无法自动启动。
+# -- 4b: ~/.hermes/.env (systemd service scenario) --
+# When hermes-gateway is started via a systemd user service it does not source /etc/profile.d/*.sh,
+# but hermes's run.py does load_dotenv("~/.hermes/.env") at startup.
+# So the key variables must also be written into .env, otherwise the Gateway cannot start automatically in the systemd scenario.
 HERMES_ENV="$HERMES_HOME/.env"
 
 _append_or_update_env() {
@@ -294,10 +294,10 @@ _append_or_update_env() {
     if [ ! -f "$file" ]; then
         touch "$file"
     fi
-    # 移除已有的同名变量行（含注释掉的和带引号的），再追加
+    # Remove existing lines of the same variable name (including commented-out and quoted ones), then append
     sed -i "/^${key}=/d" "$file"
     sed -i "/^# *${key}=/d" "$file"
-    # python-dotenv 要求含空格/引号/特殊字符的值用双引号包裹
+    # python-dotenv requires values containing spaces/quotes/special characters to be wrapped in double quotes
     echo "${key}=\"${value}\"" >> "$file"
 }
 
@@ -307,11 +307,11 @@ _append_or_update_env "MEMORY_TENCENTDB_GATEWAY_PORT" "8420"         "$HERMES_EN
 
 echo "[memory-tencentdb] Gateway env vars also written to $HERMES_ENV (for systemd service)"
 
-# ---------- 清理 ----------
+# ---------- Cleanup ----------
 
 rm -rf "$TEMP_DOWNLOAD"
 
-# ---------- 验证安装 ----------
+# ---------- Verify the installation ----------
 
 echo ""
 echo "=========================================="
@@ -327,7 +327,7 @@ echo "  Installed files in tdai dir:"
 ls -la "$TDAI_INSTALL_DIR"/ 2>/dev/null | head -20 || echo "  (none)"
 echo ""
 
-# 验证 hermes 插件文件存在（在解压目录中）
+# Verify the hermes plugin files exist (in the extraction directory)
 PLUGIN_SRC="$TDAI_INSTALL_DIR/hermes-plugin/memory/memory_tencentdb"
 MISSING=0
 for f in __init__.py plugin.yaml client.py supervisor.py; do
@@ -341,14 +341,14 @@ if [ "$MISSING" -eq 0 ]; then
     echo "  [OK] All hermes plugin files present"
 fi
 
-# 验证 Gateway 入口存在
+# Verify the Gateway entry exists
 if [ -f "$TDAI_INSTALL_DIR/src/gateway/server.ts" ]; then
     echo "  [OK] Gateway entry point found"
 else
     echo "  [WARN] Gateway server.ts not found at $TDAI_INSTALL_DIR/src/gateway/server.ts"
 fi
 
-# 验证 node_modules 已安装
+# Verify node_modules has been installed
 if [ -d "$TDAI_INSTALL_DIR/node_modules" ]; then
     echo "  [OK] Gateway node_modules installed"
 else

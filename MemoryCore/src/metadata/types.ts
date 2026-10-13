@@ -1,15 +1,15 @@
 /**
  * Metadata module — Entity types & shared contracts.
  *
- * 对应设计文档 08-metadata-migration-and-permission-design.md §2 / §6。
+ * Corresponds to design doc 08-metadata-migration-and-permission-design.md §2 / §6.
  *
- * 这是从 team-memory-control 搬迁到记忆内核的元数据实体类型定义。
- * 与 core/store 中已有的简化 entity_* 类型不同，这里是完整的业务模型
- * （含 user_key / password / visibility / acl 等）。
+ * These are the metadata entity type definitions migrated from team-memory-control into the memory kernel.
+ * Unlike the simplified entity_* types already in core/store, these are the full business models
+ * (including user_key / password / visibility / acl, etc.).
  */
 
 // ============================
-// 枚举与字面量类型
+// Enums and literal types
 // ============================
 
 export type UserStatus = "active" | "inactive" | "invited";
@@ -20,15 +20,15 @@ export type MemberStatus = "active" | "removed";
 export type AgentStatus = "active" | "inactive";
 export type TaskStatus = "running" | "completed";
 /**
- * Task 来源的**大类**，不编码具体来源系统。
+ * The **broad category** of a Task source, not encoding the specific source system.
  *
- * - `manual`：用户在看板手工新建。
- * - `external`：从第三方需求/任务系统导入。具体是哪个系统
- *   （tapd / jira / …）一律读 `metadata_json.external.provider`。
- * - `other`：其它。
+ * - `manual`: manually created by the user on the board.
+ * - `external`: imported from a third-party requirements/task system. Which system it is
+ *   (tapd / jira / ...) is always read from `metadata_json.external.provider`.
+ * - `other`: anything else.
  *
- * 刻意**不**把每个来源做成枚举项：那会让新增来源变成「改类型定义 + 改所有
- * 引用处」的散弹式改动。来源标识是开放集合，放在 metadata 里才可扩展。
+ * Deliberately **not** making each source an enum member: that would turn adding a source into a scattershot change of
+ * "edit the type definition + edit all references". The source identifier is an open set, extensible only when placed in metadata.
  */
 export type TaskSourceType = "manual" | "external" | "other";
 
@@ -44,7 +44,7 @@ export type AssetStatus =
 
 export type InjectionMode = "direct" | "summary" | "tool" | "reference";
 
-/** 权限动作（6 类）。 */
+/** Permission actions (6 kinds). */
 export type Permission =
   | "read"
   | "write"
@@ -53,21 +53,21 @@ export type Permission =
   | "share"
   | "use";
 
-/** ACL 授权主体类型。 */
+/** ACL grant subject types. */
 export type AclSubjectType = "user" | "team_role" | "agent";
 
-/** ACL 效果（一期仅 allow，deny 预留）。 */
+/** ACL effect (phase one only allow, deny reserved). */
 export type AclEffect = "allow" | "deny";
 
 // ============================
-// 实体类型
+// Entity types
 // ============================
 
 export type UserKeyStatus = "active" | "revoked";
 
 export interface UserEntity {
   user_id: string;
-  /** scrypt+pepper 哈希后的密码（`$scrypt$...`），可空。 */
+  /** Password hashed with scrypt+pepper (`$scrypt$...`), nullable. */
   password?: string | null;
   auth_provider: string;
   external_id: string;
@@ -102,7 +102,7 @@ export interface TeamMemberEntity {
   status: MemberStatus;
 }
 
-/** team-member/list · get 响应：成员关系 + 读时 JOIN 的 username（不落库）。 */
+/** team-member/list · get response: membership + username JOINed at read time (not persisted). */
 export interface TeamMemberView extends TeamMemberEntity {
   username: string;
 }
@@ -146,7 +146,7 @@ export interface TaskAgentEntity {
   created_at: string;
 }
 
-/** Task/Agent 参与事件日志（append-only）。 */
+/** Task/Agent participation event log (append-only). */
 export interface ParticipationLogEntity {
   id: string;
   team_id: string;
@@ -176,7 +176,7 @@ export interface ParticipationLogFilter {
   user_id?: string;
   created_after?: string;
   created_before?: string;
-  /** 是否按 user_id 去重；默认 false。 */
+  /** Whether to dedupe by user_id; default false. */
   dedupe?: boolean;
 }
 
@@ -213,7 +213,7 @@ export interface FixedAssetBindingEntity {
   created_at: string;
 }
 
-/** 按 asset_type 聚合的固定资产绑定计数（distinct asset_id）。 */
+/** Fixed-asset binding counts aggregated by asset_type (distinct asset_id). */
 export interface FixedAssetTypeCounts {
   skill: number;
   code_graph: number;
@@ -221,35 +221,35 @@ export interface FixedAssetTypeCounts {
   chat_memory: number;
 }
 
-/** 单个 agent 的固定资产分配汇总。 */
+/** Fixed-asset allocation summary of a single agent. */
 export interface AgentFixedAssetSummary {
   agent_id: string;
   counts: FixedAssetTypeCounts;
-  /** 该 agent 匹配到的 binding 总行数（非去重）。 */
+  /** Total number of binding rows matched by this agent (not deduplicated). */
   total: number;
 }
 
-/** summary-by-agents 响应。 */
+/** summary-by-agents response. */
 export interface AgentFixedAssetSummaryResult {
   items: AgentFixedAssetSummary[];
   total: number;
 }
 
-/** Store/Service：按多 agent 分组统计固定资产绑定。 */
+/** Store/Service: count fixed-asset bindings grouped by multiple agents. */
 export interface SummarizeAgentFixedAssetsParams {
   agent_ids: string[];
-  /** 可选：只统计绑定了该 asset 的行；用于 bound_agent_count。 */
+  /** Optional: only count rows bound to this asset; used for bound_agent_count. */
   asset_id?: string;
 }
 
-/** Store 层原始聚合行（未补零）。 */
+/** Raw aggregate rows at the Store layer (zeros not filled). */
 export interface AgentFixedAssetCountRow {
   agent_id: string;
   asset_type: AssetType;
   cnt: number;
 }
 
-/** 用户 API 密钥行（存储层，含完整 key_value）。 */
+/** User API key row (storage layer, containing the full key_value). */
 export interface UserKeyEntity {
   key_id: string;
   user_id: string;
@@ -264,7 +264,7 @@ export interface UserKeyEntity {
   metadata_json: string;
 }
 
-/** API 脱敏结构（list / get）。 */
+/** API sanitized structure (list / get). */
 export interface UserKeyPublic {
   key_id: string;
   user_id: string;
@@ -278,7 +278,7 @@ export interface UserKeyPublic {
   revoked_at?: string | null;
 }
 
-/** create 响应：仅此一次返回完整 key_value。 */
+/** create response: the full key_value is returned only this once. */
 export interface UserKeyCreated extends UserKeyPublic {
   key_value: string;
 }
@@ -296,7 +296,7 @@ export interface AclEntity {
 }
 
 // ============================
-// 输入类型（创建/更新）
+// Input types (create/update)
 // ============================
 
 export interface UserPublic {
@@ -306,14 +306,14 @@ export interface UserPublic {
   created_at: string;
 }
 
-/** 公开 user/list 可选过滤（internal list-by-instance 另含 status / user_type）。 */
+/** Optional filters for public user/list (internal list-by-instance additionally has status / user_type). */
 export interface UserListFilter {
   user_ids?: string[];
-  /** 精确匹配用户名（用于查重等场景）。 */
+  /** Exact match on username (for duplicate-check scenarios, etc.). */
   username?: string;
 }
 
-/** user/create 响应：不含 username（见 08 §CreateUserResult）。 */
+/** user/create response: does not include username (see 08 §CreateUserResult). */
 export interface CreateUserApiResult {
   user_id: string;
   user_type: UserType;
@@ -333,11 +333,11 @@ export interface InitAdminResult {
 
 export interface CreateUserInput {
   user_id?: string;
-  /** 内部：init-admin 可指定默认 user_key。 */
+  /** Internal: init-admin may specify the default user_key. */
   default_key_value?: string;
-  /** 存储层默认 `local`（API 不暴露）。 */
+  /** Storage-layer default `local` (not exposed by the API). */
   auth_provider?: string;
-  /** 存储层默认 `user_id`（API 不暴露）。 */
+  /** Storage-layer default `user_id` (not exposed by the API). */
   external_id?: string;
   username: string;
   display_name?: string | null;
@@ -345,9 +345,9 @@ export interface CreateUserInput {
   raw_profile_json?: string;
   status?: UserStatus;
   metadata_json?: string;
-  /** 仅存储层内部使用；API create 固定 normal，init-admin 固定 system_admin。 */
+  /** Used only inside the storage layer; API create is fixed to normal, init-admin is fixed to system_admin. */
   user_type?: UserType;
-  /** v3.1：新用户恒 NULL；仅 store 层写入。 */
+  /** v3.1: always NULL for new users; written only by the store layer. */
   password?: string | null;
 }
 
@@ -401,12 +401,12 @@ export interface CreateTaskInput {
   auto_assign_floating_assets?: boolean;
   risk_level?: string | null;
   metadata_json?: string;
-  /** 创建 task 时可同时关联的 agent。 */
+  /** Agents that can be linked at the same time when creating a task. */
   linked_agents?: Array<{ agent_id: string; role_in_task?: string }>;
 }
 
 export interface CreateAssetInput {
-  /** 由调用方（外部资产系统）提供，元数据模块仅记录与鉴权，不生成 asset_id。 */
+  /** Provided by the caller (the external asset system); the metadata module only records and authorizes, and does not generate asset_id. */
   asset_id: string;
   team_id: string;
   asset_type: AssetType;
@@ -442,30 +442,30 @@ export interface GrantAclInput {
 }
 
 // ============================
-// 过滤器类型
+// Filter types
 // ============================
 
 export interface AgentFilter {
   status?: AgentStatus;
   /**
-   * 组合过滤：与 team_id 一起使用时表示"团队内某用户 owner 的 agent"。
-   * 单独使用 owner_user_id 时走 listAgentsByOwner，无需该字段。
+   * Combined filter: when used together with team_id it means "agents owned by a certain user within the team".
+   * When owner_user_id is used alone it goes through listAgentsByOwner, and this field is not needed.
    */
   owner_user_id?: string;
-  /** 精确匹配 agent 名称（用于查重等场景）。 */
+  /** Exact match on agent name (for duplicate-check scenarios, etc.). */
   name?: string;
 }
 
 export interface TaskFilter {
   status?: TaskStatus;
   creator_user_id?: string;
-  /** 精确匹配 task 标题（用于查重等场景）。 */
+  /** Exact match on task title (for duplicate-check scenarios, etc.). */
   title?: string;
 }
 
-/** team/list 可选过滤（用于查重等场景）。 */
+/** team/list optional filter (for duplicate-check scenarios, etc.). */
 export interface TeamFilter {
-  /** 精确匹配 team 名称。 */
+  /** Exact match on team name. */
   name?: string;
 }
 
@@ -477,22 +477,22 @@ export interface AssetFilter {
 }
 
 // ============================
-// 通用结果类型
+// Common result types
 // ============================
 
-/** list 接口分页入参（可选；未传时服务端默认 limit=20、offset=0）。 */
+/** list API pagination input (optional; when omitted the server defaults to limit=20, offset=0). */
 export interface PaginationInput {
   limit?: number;
   offset?: number;
 }
 
-/** 解析后的分页参数（limit/offset 均有确定值）。 */
+/** Resolved pagination parameters (limit/offset both have definite values). */
 export interface PaginationParams {
   limit: number;
   offset: number;
 }
 
-/** list 接口分页响应信封。 */
+/** list API pagination response envelope. */
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -500,13 +500,13 @@ export interface PaginatedResult<T> {
   offset: number;
 }
 
-/** Store 层 list 查询结果（内部分页切片 + 总数）。 */
+/** Store-layer list query result (internal pagination slice + total). */
 export interface ListPage<T> {
   items: T[];
   total: number;
 }
 
-/** internal list-by-instance 可选过滤（扩展 UserListFilter）。 */
+/** internal list-by-instance optional filter (extends UserListFilter). */
 export interface InstanceUserListFilter extends UserListFilter {
   status?: UserStatus;
   user_type?: UserType;
@@ -518,7 +518,7 @@ export interface BatchDeleteResult {
 }
 
 // ============================
-// ConfigParam 类型
+// ConfigParam types
 // ============================
 
 export type ConfigParamScope = "global" | "user";
@@ -552,53 +552,53 @@ export interface ListConfigParamsFilter {
 }
 
 // ============================
-// InstanceUpstreamConfig 类型（v2 模型组结构）
+// InstanceUpstreamConfig types (v2 model group structure)
 // ============================
 //
-// 对应设计文档 docs/design/2026-08-25-instance-upstream-config.md §5.1。
-// v2 从"一行=一 agent"重构为"一行=一模型组"：
-//   - default 组:每实例最多 1 行,mode=official,name 固定"官方内置"
-//   - custom 组:0~N 行,mode ∈ {custom_unified, custom_passthrough},name 用户自定义
-//   - extraction 行:0 或 1 行,mode=custom_unified,agents 恒 [],name 固定"抽取模型"
+// Corresponds to design doc docs/design/2026-08-25-instance-upstream-config.md §5.1.
+// v2 refactors from "one row = one agent" to "one row = one model group":
+//   - default group: at most 1 row per instance, mode=official, name fixed to "Official Built-in"
+//   - custom group: 0~N rows, mode ∈ {custom_unified, custom_passthrough}, name user-defined
+//   - extraction row: 0 or 1 row, mode=custom_unified, agents always [], name fixed to "Extraction Model"
 //
-// 与 v1 的核心差异:
-//   - agents 从"每行一个 agent_source"升级为"每行一个 agents 数组"
-//   - 引入 group_id (前缀 ULID) + group_type + name + enabled 字段
-//   - agents 全域唯一(default + custom 不重叠)
-//   - MongoDB 版本乐观锁(version 字段)保护并发写
+// Core differences from v1:
+//   - agents upgraded from "one agent_source per row" to "one agents array per row"
+//   - introduces the group_id (prefixed ULID) + group_type + name + enabled fields
+//   - agents globally unique (default + custom do not overlap)
+//   - MongoDB version optimistic lock (version field) protects concurrent writes
 
 export type GroupType = "default" | "custom" | "extraction";
 export type UpstreamMode = "official" | "custom_unified" | "custom_passthrough";
 
-/** default 组 name 固定值（用户不可改）。 */
-export const DEFAULT_GROUP_NAME = "官方内置";
-/** extraction 行 name 固定值（用户不可改）。 */
-export const EXTRACTION_GROUP_NAME = "抽取模型";
+/** Fixed name of the default group (not changeable by users). */
+export const DEFAULT_GROUP_NAME = "Official Built-in";
+/** Fixed name of the extraction row (not changeable by users). */
+export const EXTRACTION_GROUP_NAME = "Extraction Model";
 
 /**
- * 实例上游配置行（存储层实体）。
+ * Instance upstream config row (storage-layer entity).
  *
- * 一行 = 一个模型组(default / custom / extraction)。
- * agents 字段以 JSON 数组形式存储(SQLite 用 TEXT 存 JSON, MongoDB 用原生数组)。
- * MongoDB 侧额外多一个 `version` 字段(乐观锁,§5.3);SQLite 不需要。
+ * One row = one model group (default / custom / extraction).
+ * The agents field is stored as a JSON array (SQLite stores JSON in TEXT, MongoDB uses a native array).
+ * MongoDB additionally has a `version` field (optimistic lock, §5.3); SQLite does not need it.
  */
 export interface InstanceUpstreamConfigEntity {
   id: number;
-  /** 后端生成的组 ID:`dflt-<random>` / `grp-<random>` / `ext-<random>`。 */
+  /** Backend-generated group ID: `dflt-<random>` / `grp-<random>` / `ext-<random>`. */
   group_id: string;
   group_type: GroupType;
-  /** custom: 用户自定义;default 固定 DEFAULT_GROUP_NAME;extraction 固定 EXTRACTION_GROUP_NAME。 */
+  /** custom: user-defined; default is fixed to DEFAULT_GROUP_NAME; extraction is fixed to EXTRACTION_GROUP_NAME. */
   name: string;
   /**
-   * default / custom 组:显式管理的 agent 列表(可 0~N);extraction 行:恒 []。
-   * 全域唯一约束:同一实例内 default.agents ∪ 所有 custom.agents 元素两两不重复。
+   * default / custom groups: the explicitly managed agent list (0~N); extraction row: always [].
+   * Global uniqueness constraint: within one instance, the elements of default.agents ∪ all custom.agents are pairwise distinct.
    */
   agents: string[];
   /**
-   * 三种 group_type 的 enabled 语义不同:
-   *   - default:  false = 命中该组的 agent 请求报 UPSTREAM_DISABLED
-   *   - custom:   false = 命中该组的 agent 请求报 UPSTREAM_DISABLED
-   *   - extraction: false = 优雅回退到全局 upstream(不报错)
+   * The enabled semantics differ across the three group_types:
+   *   - default:  false = agent requests hitting this group fail with UPSTREAM_DISABLED
+   *   - custom:   false = agent requests hitting this group fail with UPSTREAM_DISABLED
+   *   - extraction: false = gracefully fall back to the global upstream (no error)
    */
   enabled: boolean;
   mode: UpstreamMode;
@@ -608,29 +608,29 @@ export interface InstanceUpstreamConfigEntity {
   description: string;
   created_at: string;
   updated_at: string;
-  /** 乐观锁版本号。MongoDB 每次写入 $inc:1；SQLite 忽略此字段（依赖 BEGIN IMMEDIATE 事务）。 */
+  /** Optimistic lock version number. MongoDB does $inc:1 on every write; SQLite ignores this field (relies on BEGIN IMMEDIATE transactions). */
   version: number;
   /**
-   * 仅 default 组有值:上次 listGroups 时看到的 supported-agents 全集快照(去重 + 排序)。
+   * Only the default group has a value: the full supported-agents snapshot seen at the last listGroups (deduped + sorted).
    *
-   * 用于"Proxy 新增 agent 后自动补齐 default.agents"逻辑(见 store 层
+   * Used for the "automatically fill in default.agents after Proxy adds an agent" logic (see the store layer
    * `_syncDefaultAgentsWithSnapshot`):
-   *   - Proxy 加了 cursor,supported-agents 从 [old8] 变 [old8+cursor]
-   *   - listGroups 触发 diff:supported - snapshot = [cursor]
-   *   - 自动 append 到 default.agents,同时更新 snapshot = [old8+cursor]
-   *   - 用户主动 remove 的 agent(agents 里没,但 snapshot 里有)保留决策不变
+   *   - Proxy adds cursor, supported-agents goes from [old8] to [old8+cursor]
+   *   - listGroups triggers a diff: supported - snapshot = [cursor]
+   *   - automatically append to default.agents, and update snapshot = [old8+cursor]
+   *   - agents the user actively removed (not in agents but in snapshot) keep their decision unchanged
    *
-   * 存量实例首次 listGroups 时 snapshot=空 → 视为"用户已认可当前 agents",
-   * 直接把 snapshot 填成 agents(不改 agents),后续新增才走 diff-append。
+   * On the first listGroups for an existing instance, snapshot=empty → treated as "the user has accepted the current agents",
+   * directly fill snapshot with agents (agents unchanged), and only later additions go through diff-append.
    *
-   * custom / extraction 组恒为 [];不参与 diff。
+   * custom / extraction groups are always []; they do not take part in diff.
    */
   supported_agents_snapshot: string[];
 }
 
 /**
- * create 输入:新建 default (seed 内部用) / custom / extraction 行。
- * group_id 由 store 层生成,调用方不传。
+ * create input: create a new default (seed internal use) / custom / extraction row.
+ * group_id is generated by the store layer; the caller does not pass it.
  */
 export interface CreateInstanceUpstreamGroupInput {
   group_type: GroupType;
@@ -645,14 +645,14 @@ export interface CreateInstanceUpstreamGroupInput {
 }
 
 /**
- * update 输入:PATCH 语义,未传字段保留原值。
- * `api_key`:undefined = 保留原值;空串 = 显式清空。
+ * update input: PATCH semantics, unpassed fields keep their original value.
+ * `api_key`: undefined = keep the original value; empty string = explicitly clear.
  */
 export interface UpdateInstanceUpstreamGroupInput {
   group_id: string;
-  /** 期望的 group_type,用作 dispatch 守卫(与库中不符 → GROUP_TYPE_MISMATCH)。 */
+  /** Expected group_type, used as a dispatch guard (mismatch with the DB → GROUP_TYPE_MISMATCH). */
   expected_group_type: GroupType;
-  /** 乐观锁:调用方传当前读到的 version,写入时匹配失败 → WRITE_CONFLICT。 */
+  /** Optimistic lock: the caller passes the currently-read version; a mismatch on write → WRITE_CONFLICT. */
   expected_version?: number;
   name?: string;
   agents?: string[];
@@ -664,24 +664,24 @@ export interface UpdateInstanceUpstreamGroupInput {
   description?: string;
 }
 
-/** toggle 单字段快捷接口输入(是 update 的语法糖)。 */
+/** toggle single-field shortcut input (syntactic sugar for update). */
 export interface ToggleInstanceUpstreamGroupInput {
   group_id: string;
   enabled: boolean;
   expected_version?: number;
 }
 
-/** delete 输入:按 group_id 物理删除。 */
+/** delete input: physical delete by group_id. */
 export interface DeleteInstanceUpstreamGroupInput {
   group_id: string;
 }
 
-/** 查询过滤(list 用)。 */
+/** Query filter (for list). */
 export interface InstanceUpstreamConfigFilter {
   group_type?: GroupType;
 }
 
-/** supported-agents 单元(Core yaml 里读出来,也是本模块 seed default agents 的来源)。 */
+/** supported-agents entry (read from the Core yaml; also the source of this module's seed default agents). */
 export interface SupportedAgent {
   agent_source: string;
   protocol: "anthropic" | "openai-chat" | "openai-responses";
@@ -689,8 +689,8 @@ export interface SupportedAgent {
 }
 
 /**
- * 写入冲突:并发写入时 agents 重叠、group_id 缺失、version 不匹配等。
- * Store 层直接抛此错(不依赖 service 层的 MetadataError,避免反向依赖)。
+ * Write conflict: agents overlap, missing group_id, version mismatch, etc. on concurrent writes.
+ * Store layer throws this error directly (not depending on the service layer's MetadataError, to avoid a reverse dependency).
  */
 export class InstanceUpstreamWriteConflictError extends Error {
   constructor(

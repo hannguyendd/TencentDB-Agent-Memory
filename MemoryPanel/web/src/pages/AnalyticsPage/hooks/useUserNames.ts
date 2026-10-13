@@ -1,33 +1,33 @@
 /**
- * useUserNames — user_id → 用户名 的批量解析。
+ * useUserNames -- batch resolution of user_id -> username.
  *
- * 为什么不直接用 `useDisplayNameResolver`：它在渲染期对每个未命中的 id 单独发
- * 一次 `user/get`（本页 distinct_users 实测 29，且 trace / usage / raw 三张表都带
- * user_id），会打出数十个并发请求。这里改为一次 `user/list({ user_ids })` 批量拉取。
+ * Why not use `useDisplayNameResolver` directly: during render it issues a separate
+ * `user/get` for every missed id (distinct_users on this page measured 29, and the trace / usage / raw tables all carry
+ * user_id), producing dozens of concurrent requests. Here a single `user/list({ user_ids })` batch fetch is used instead.
  *
- * 契约约束（已核对内核 `v3-meta-schemas.ts:userListSchema`）：
- *   - `user_ids` 上限 **100**，超过直接 400 → 故按 100 分批
- *   - 省略 `team_id` 时要求调用方是 system_admin（见 metadata-service
- *     `listUsersForCaller`：非 system_admin 抛 missing_team_id）。可观测页面本身
- *     admin-only，条件满足
- *   - Panel 代理层对 `user/list` 会执行 hideKnowledgeServiceUser 过滤，内部计费
- *     账号查不到 → 回退显示原始 id（预期行为，不视为错误）
+ * Contract constraints (checked against the kernel `v3-meta-schemas.ts:userListSchema`):
+ *   - `user_ids` is capped at **100**; exceeding it returns 400 -> so batch by 100
+ *   - Omitting `team_id` requires the caller to be system_admin (see metadata-service
+ *     `listUsersForCaller`: non-system_admin throws missing_team_id). The observability page itself is
+ *     admin-only, so the condition is met
+ *   - The Panel proxy layer applies the hideKnowledgeServiceUser filter to `user/list`, so internal billing
+ *     accounts are not found -> fall back to showing the raw id (expected behavior, not treated as an error)
  *
- * 解析结果会回灌 `seedDisplayNameCache`，供其他页面共享同一份缓存。
+ * Resolved results are fed back into `seedDisplayNameCache`, so other pages share the same cache.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usersApi } from '@/lib/api/users';
 import { seedDisplayNameCache } from '@/services/user-profile-store';
 
-/** 内核 userListSchema 的 user_ids 上限。 */
+/** The user_ids cap of the kernel userListSchema. */
 const USER_IDS_BATCH_MAX = 100;
 
 export function useUserNames(userIds: Array<string | null | undefined>): (id: string) => string {
   const [names, setNames] = useState<Record<string, string>>({});
-  // 已发起过请求的 id（含解析失败的），避免对查不到的 id 反复重试
+  // ids already requested (including failed resolutions), to avoid repeatedly retrying ids that cannot be found
   const attemptedRef = useRef(new Set<string>());
 
-  // 以内容而非数组引用作为依赖，否则每次渲染都会重新触发拉取
+  // Use content rather than the array reference as the dependency, otherwise every render re-triggers the fetch
   const pendingKey = useMemo(() => {
     const unique = new Set<string>();
     for (const id of userIds) {
@@ -62,7 +62,7 @@ export function useUserNames(userIds: Array<string | null | undefined>): (id: st
           }
         }
       } catch {
-        // 静默失败：解析不到的 id 回退显示原始值，不阻塞看板
+        // Fail silently: ids that cannot be resolved fall back to the raw value, without blocking the dashboard
       }
     })();
 

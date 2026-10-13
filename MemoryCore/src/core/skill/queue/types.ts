@@ -1,34 +1,34 @@
 /**
  * src/core/skill/queue/types.ts
  *
- * Skill 抽取接口层类型定义。
+ * Skill extraction interface-layer type definitions.
  *
- * 2026-07-17 改造：老 job 队列（SkillExtractJob / SkillExtractResult /
- * ISkillTaskQueue / SkillQueueConfig）随着 skill_extract 收敛到
- * 「SkillTriggerService.archive → agent 队列」新链路一起删除。本文件保留
- * Worker/extractor 接口层类型（ConversationMessage / ExtractedCandidate /
- * ISkillExtractor / ExtractorLogger），供 conversation-add/extract-worker.ts
- * 与 skill-extractor.ts 复用。
+ * 2026-07-17 rework: the old job queue (SkillExtractJob / SkillExtractResult /
+ * ISkillTaskQueue / SkillQueueConfig) was deleted along with skill_extract converging onto the
+ * new "SkillTriggerService.archive → agent queue" path. This file keeps the
+ * Worker/extractor interface-layer types (ConversationMessage / ExtractedCandidate /
+ * ISkillExtractor / ExtractorLogger), for reuse by conversation-add/extract-worker.ts
+ * and skill-extractor.ts.
  */
 
 // ─────────────────────────────────────────────────────────────
-// 队列内部用的 conversation / candidate 形状
+// conversation / candidate shapes used inside the queue
 // ─────────────────────────────────────────────────────────────
 
-/** 队列里单条对话消息的形状（loose role 字段，兼容 user/assistant/tool_*）。 */
+/** Shape of a single conversation message in the queue (loose role field, compatible with user/assistant/tool_*). */
 export interface ConversationMessage {
   role: string;
   content: string;
 }
 
-/** 抽取结果中单个 skill 候选的形状。 */
+/** Shape of a single skill candidate in the extraction result. */
 export interface ExtractedCandidate {
   action: "create" | "patch" | "edit" | "update" | "write_file" | "files_write";
   name: string;
   skill_id?: string;
   version?: number;
   description?: string;
-  /** 透传字段：保留以兼容旧 result 持久化 payload。 */
+  /** Passthrough field: retained for compatibility with the old result persistence payload. */
   content?: string;
   old_string?: string;
   new_string?: string;
@@ -39,50 +39,50 @@ export interface ExtractedCandidate {
 }
 
 /**
- * Worker 调用的最小 extractor 接口。SkillExtractor 只需暴露这个方法。
- * 这样 queue 不依赖具体类，测试可以直接 mock。
+ * The minimal extractor interface the Worker calls. SkillExtractor only needs to expose this method.
+ * This way the queue does not depend on a concrete class, and tests can mock it directly.
  */
 export interface ISkillExtractor {
   extract(input: {
     task_id?: string;
-    taskId?: string;                // 兼容字段
+    taskId?: string;                // compatibility field
     team_id: string;
     user_id?: string;
-    /** owner agent id；V2 adapter 据此校验 owner 写权。 */
+    /** owner agent id; the V2 adapter uses it to verify owner write permission. */
     agent_id?: string;
     /**
-     * Langfuse 顶级 sessionId 透传。Worker 从 SkillTaskEntry.session_id 读取，
-     * 一路传到 runner.run 的 telemetry metadata。缺失时 Langfuse trace 的
-     * sessionId 会是 null —— 页面按 session 过滤就看不到这次 skill 抽取。
+     * Langfuse top-level sessionId passthrough. The Worker reads it from SkillTaskEntry.session_id,
+     * passing it all the way to the telemetry metadata of runner.run. When missing, the Langfuse trace's
+     * sessionId would be null — filtering by session on the page would not show this skill extraction.
      */
     session_id?: string;
     /**
-     * 实例 id（= space_id / instanceId）。透传成 runner telemetry 的 instanceId，
-     * 否则 Langfuse trace 上 instanceId 会退化成 "unknown"，且 llm_call metric
-     * 因 `if (params.instanceId)` 门控被跳过。
+     * Instance id (= space_id / instanceId). Passed through as the runner telemetry's instanceId;
+     * otherwise the instanceId on the Langfuse trace degrades to "unknown", and the llm_call metric
+     * is skipped because of the `if (params.instanceId)` gate.
      */
     space_id?: string;
     conversation: ConversationMessage[];
     context?: { loaded_skills?: string[] };
     signal?: AbortSignal;
     /**
-     * direct-trigger 场景：主 Agent 的抽取提示，透传给 extractor 注入 prompt。
-     * 由 conversation-add extract-worker 从 SkillTaskEntry.reason 读取。
+     * direct-trigger scenario: the main Agent's extraction hint, passed through to the extractor to inject into the prompt.
+     * Read by the conversation-add extract-worker from SkillTaskEntry.reason.
      */
     reason?: string;
-    /** direct-trigger 场景：LLM 迭代上限，透传给 SkillExtractor 覆盖默认。 */
+    /** direct-trigger scenario: LLM iteration cap, passed through to SkillExtractor to override the default. */
     options?: { max_iterations?: number };
     /**
-     * 抽取模式;Worker 从 SkillTaskEntry.mode 读取后透传到这里,adapter 再传给
-     * SkillExtractor.extract({mode})。缺省/undefined 走默认 v2 SKILL_REVIEW_PROMPT;
-     * 'strict' 走 SKILL_REVIEW_PROMPT_STRICT (v1 严格 gate),用于冷启动/批量导入。
+     * Extraction mode; the Worker reads it from SkillTaskEntry.mode and passes it through here, and the adapter passes it on to
+     * SkillExtractor.extract({mode}). Omitted/undefined takes the default v2 SKILL_REVIEW_PROMPT;
+     * 'strict' takes SKILL_REVIEW_PROMPT_STRICT (v1 strict gate), used for cold start / bulk import.
      */
     mode?: 'default' | 'strict';
   }): Promise<{ candidates: ExtractedCandidate[] }>;
 }
 
 /**
- * Worker 用的最小 logger 接口（兼容 console 与项目 Logger）。
+ * The minimal logger interface used by the Worker (compatible with console and the project Logger).
  */
 export interface ExtractorLogger {
   debug?: (msg: string) => void;

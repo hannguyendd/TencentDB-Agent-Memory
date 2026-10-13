@@ -223,8 +223,8 @@ export async function pullProfilesToLocal(
 ): Promise<Map<string, ProfileBaseline>> {
   if (!store.pullProfiles) return new Map();
 
-  // P2-D6: rowfs 文件模式下 L2/L3 读走行视图，不把行灌成本地文件——
-  // 灌了就是永远不被读取的第二份副本（行即文件）。
+  // P2-D6: in rowfs file mode, L2/L3 reads go through the row view and do not pour rows into local files —
+  // pouring them would only create a second copy that is never read (rows are the files).
   if (storage?.getBackend().type === "rowfs") {
     logger.debug?.(`[memory-tdai][profile-sync] rowfs mode: skip profile pull (rows are read via row view)`);
     return new Map();
@@ -425,8 +425,8 @@ export async function syncLocalProfilesToStore(
   storage?: StorageAdapter,
   options?: ProfileScopeOptions,
 ): Promise<ProfileRecord[]> {
-  // P2-D6: rowfs 模式下写已经通过行视图直接落行；回灌只会拿着空 baseline
-  // 把所有行无意义地重写一遍（版本空转，还会掩盖真实的乐观锁冲突）。
+  // P2-D6: in rowfs mode writes already land directly as rows via the row view; write-back would only take the empty baseline
+  // and pointlessly rewrite every row (spinning versions, and masking real optimistic-lock conflicts).
   if (storage?.getBackend().type === "rowfs") {
     logger.debug?.(`[memory-tdai][profile-sync] rowfs mode: skip profile sync-back (writes already landed on rows)`);
     return [];

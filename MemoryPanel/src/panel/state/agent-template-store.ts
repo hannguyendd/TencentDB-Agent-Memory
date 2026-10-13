@@ -1,10 +1,10 @@
 /**
- * 默认 Agent 模板的本地文件存储（存 Panel 本地）。
+ * Local file storage for the default Agent template (stored locally in Panel).
  *
- * 路径：{dir}/{instanceId}/{team_id}/template.json
- * - 写入覆盖式 upsert（JSON 2 空格缩进）；
- * - 读取 ENOENT 返回 null（无模板）。
- * - team_id 做路径穿越防御。
+ * Path: {dir}/{instanceId}/{team_id}/template.json
+ * - writes are overwrite-style upsert (JSON with 2-space indentation);
+ * - a read with ENOENT returns null (no template).
+ * - team_id is guarded against path traversal.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,7 +15,7 @@ export interface AgentTemplateAssetIds {
   wikis?: string[];
 }
 
-/** 模板配置（= JSON 文件内容，对齐 agent/create 入参）。 */
+/** Template config (= JSON file content, aligned with the agent/create input). */
 export interface AgentTemplateConfig {
   name: string;
   description?: string | null;

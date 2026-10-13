@@ -1,7 +1,7 @@
 import type { MetaCallContext } from '../types.js';
 import type { MetaEnvelope } from '../envelope.js';
 
-/** Core /v3/task-source/* 的调用面（Panel 侧薄转发）。 */
+/** Call surface of Core /v3/task-source/* (thin forwarding on the Panel side). */
 export interface TaskSourceKernelPort {
   invoke(action: string, body: Record<string, unknown>, ctx: MetaCallContext): Promise<MetaEnvelope>;
 }

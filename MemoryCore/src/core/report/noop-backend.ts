@@ -1,13 +1,13 @@
 /**
- * Noop Observability Backend — 空操作实现。
+ * Noop Observability Backend — no-op implementation.
  *
- * 所有方法为空操作，不产生任何副作用。
- * 用于开源环境下未配置任何可观测性后端时的默认实现。
+ * All methods are no-ops and produce no side effects.
+ * The default implementation when no observability backend is configured in open-source environments.
  *
- * 设计原则：
- * - 所有方法不抛异常
- * - 不产生任何 I/O 或副作用
- * - 零性能开销
+ * Design principles:
+ * - No method throws
+ * - No I/O or side effects
+ * - Zero performance overhead
  */
 
 import type http from "node:http";
@@ -32,7 +32,7 @@ import type {
 // Noop Span
 // ============================
 
-/** 空操作 Span — 所有方法为 no-op */
+/** No-op Span — all methods are no-ops */
 const noopSpan: ISpan = {
   end() {},
   setAttribute() { return this; },
@@ -49,7 +49,7 @@ const noopSpan: ISpan = {
 // Noop SpanProcessor
 // ============================
 
-/** 空操作 SpanProcessor */
+/** No-op SpanProcessor */
 const noopSpanProcessor: ISpanProcessor = {
   onStart() {},
   onEnd() {},
@@ -157,7 +157,7 @@ export class NoopTraceMiddleware implements ITraceMiddleware {
     _res: http.ServerResponse,
     handler: () => Promise<void>,
   ): Promise<void> {
-    // 直接透传到原始 handler
+    // pass straight through to the original handler
     return handler();
   }
 
@@ -195,12 +195,12 @@ export class NoopTracePropagation implements ITracePropagation {
 }
 
 // ============================
-// NoopObservabilityBackend — 聚合
+// NoopObservabilityBackend — aggregation
 // ============================
 
 /**
- * 空操作可观测性后端 — 所有子后端均为 no-op。
- * 开源环境下的默认实现。
+ * No-op observability backend — all sub-backends are no-ops.
+ * The default implementation in open-source environments.
  */
 export class NoopObservabilityBackend implements IObservabilityBackend {
   readonly type = "noop";

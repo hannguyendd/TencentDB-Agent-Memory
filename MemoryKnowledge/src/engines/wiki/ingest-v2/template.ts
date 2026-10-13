@@ -1,15 +1,15 @@
 /**
- * template.ts — 读取 wiki/schema.md 与 wiki/purpose.md 作为抽取模板（FR-4b）。
+ * template.ts — reads wiki/schema.md and wiki/purpose.md as the extraction template (FR-4b).
  *
- * 这两个文件让用户/调用方自定义"这个 wiki 想抽什么、怎么组织"：
- *   - purpose.md：声明 wiki 的目标领域与用途。
- *   - schema.md：声明抽取偏好（想要哪些页面类型、关注字段、命名/语言约定）。
+ * These two files let the user/caller customize "what this wiki wants to extract and how to organize it":
+ *   - purpose.md: declares the wiki's target domain and purpose.
+ *   - schema.md: declares extraction preferences (desired page types, fields of interest, naming/language conventions).
  *
- * ingest 时把它们「原样拼进 system prompt」（不强制机器解析骨架，容错）。
- * 为空/不存在时用领域中立的默认骨架兜底，保证开箱即用。
+ * At ingest time they are "spliced verbatim into the system prompt" (no machine-parsed skeleton is enforced, for fault tolerance).
+ * When empty/missing, a domain-neutral default skeleton is used as a fallback, ensuring it works out of the box.
  *
- * 注意：init 已存在的默认文件（manager.initWikiProject）可能只是空壳
- * （如仅 `# Wiki Schema\n\nDefine ... here.`），这类视为"无有效内容"，用默认。
+ * Note: default files already created by init (manager.initWikiProject) may be just empty shells
+ * (e.g. only `# Wiki Schema\n\nDefine ... here.`); these are treated as "no meaningful content" and the default is used.
  */
 
 import { readFileSync, existsSync } from "node:fs";
@@ -17,11 +17,11 @@ import { join } from "node:path";
 import { parseFrontmatter } from "./frontmatter.js";
 
 export interface WikiTemplate {
-  /** purpose.md 的有效正文（去 frontmatter），无则为默认。 */
+  /** Effective body of purpose.md (frontmatter stripped); the default if absent. */
   purpose: string;
-  /** schema.md 的有效正文（去 frontmatter），无则为默认。 */
+  /** Effective body of schema.md (frontmatter stripped); the default if absent. */
   schema: string;
-  /** 是否使用了用户自定义内容（用于日志/调试）。 */
+  /** Whether user-customized content was used (for logging/debugging). */
   customized: boolean;
 }
 
@@ -59,11 +59,11 @@ Other types (comparison, synthesis, etc.) may be created as needed.
 - slug: lowercase, spaces→hyphens
 - Output language: follow the source document — do not switch`;
 
-/** 判断一段正文是否"有实质内容"（排除 init 写入的空壳占位）。 */
+/** Decide whether a body "has substantive content" (excluding the empty-shell placeholder written by init). */
 function hasMeaningfulContent(body: string): boolean {
   const stripped = body
-    .replace(/^#.*$/gm, "")              // 去掉标题行
-    .replace(/Define\b[^.。]*[.。]?/gi, "") // 去掉 "Define ..." 占位句（init 默认壳）
+    .replace(/^#.*$/gm, "")              // strip heading lines
+    .replace(/Define\b[^.。]*[.。]?/gi, "") // strip the "Define ..." placeholder sentence (init's default shell)
     .replace(/\s+/g, "");
   return stripped.length >= 8;
 }
@@ -83,7 +83,7 @@ function readTemplateFile(projectPath: string, name: string): string | null {
 }
 
 /**
- * 加载抽取模板。存在且有实质内容则用用户的；否则用领域中立默认。
+ * Load the extraction template. Use the user's if present with substantive content; otherwise the domain-neutral default.
  */
 export function loadTemplate(projectPath: string): WikiTemplate {
   const purpose = readTemplateFile(projectPath, "purpose.md");

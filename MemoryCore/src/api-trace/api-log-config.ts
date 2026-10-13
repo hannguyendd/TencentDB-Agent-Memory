@@ -1,5 +1,5 @@
 /**
- * API trace 运行时配置：档位由元数据 store backend 推断；默认写 stdout JSON。
+ * API trace runtime config: the tier is inferred from the metadata store backend; writes stdout JSON by default.
  */
 import type { MetadataBackend } from "../metadata/store/interface.js";
 import { resolvePolicy, type ApiTracePolicy } from "./api-trace-policy.js";
@@ -29,7 +29,7 @@ function buildConfig(
   };
 }
 
-/** Gateway 启动时注入元数据存储 backend（决定 full/lite）。 */
+/** Injected by the gateway at startup with the metadata store backend (determines full/lite). */
 export function initApiTraceConfig(
   metadataBackend: MetadataBackend = "sqlite",
   opts?: ApiTraceInitOptions,
@@ -44,7 +44,7 @@ export function getApiTraceConfig(): ApiTraceRuntimeConfig {
   return runtimeConfig;
 }
 
-/** 测试用：重置缓存配置。 */
+/** For tests: reset the cached config. */
 export function resetApiTraceConfigForTests(): void {
   runtimeConfig = null;
 }

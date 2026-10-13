@@ -1,6 +1,6 @@
 /**
- * 生成新面板（stateless）链路 A OpenAPI 3.0。
- * 运行：pnpm generate:meta-openapi
+ * Generates the OpenAPI 3.0 for link A of the new panel (stateless).
+ * Run: pnpm generate:meta-openapi
  */
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -44,39 +44,39 @@ function yamlQuote(s: string): string {
 
 function panelDescription(action: string): string {
   if (isNotInScopeAction(action)) {
-    return '新面板一期 **不转发** 至内核；Control 返回 HTTP 501、`message=NOT_IN_SCOPE`。';
+    return 'Phase 1 of the new panel does **not forward** to the kernel; Control returns HTTP 501, `message=NOT_IN_SCOPE`.';
   }
   if (action === AUTH_VERIFY) {
-    return '登录验活：Header 仅 `X-Tdai-Service-Id`；body 须含 `user_key`。成功看 `data.valid`（软校验）。';
+    return 'Login liveness check: Header only needs `X-Tdai-Service-Id`; body must contain `user_key`. On success check `data.valid` (soft validation).';
   }
   if (action === 'user/list') {
-    return '透明代理；team_id 仅 system_admin 可省略（实例级 list）。可选 user_ids、username（精确匹配）过滤。响应 UserPublic 含 username。';
+    return 'Transparent proxy; team_id may be omitted only by system_admin (instance-level list). Optional user_ids and username (exact match) filters. Response UserPublic includes username.';
   }
   if (action === 'team-member/list') {
-    return '分页 list；body 须 team_id。响应 items 为 TeamMemberEntity（含读时 JOIN 的 username，v3.2.2+）；仅 active 团队成员可调用。默认 joined_at DESC。须 Header 双凭证。';
+    return 'Paginated list; body must include team_id. Response items are TeamMemberEntity (including username joined at read time, v3.2.2+); only active team members may call. Default joined_at DESC. Both Header credentials required.';
   }
   if (action === 'team-member/get') {
-    return '透明代理；响应 TeamMemberEntity 含 username（v3.2.2+，读时 JOIN）。须为 team active 成员。须 Header 双凭证。';
+    return 'Transparent proxy; response TeamMemberEntity includes username (v3.2.2+, joined at read time). Caller must be an active team member. Both Header credentials required.';
   }
   if (action === 'team-member/add') {
-    return '透明代理；团队 admin。禁对自己 add、禁 demote owner。响应 TeamMemberEntity **不含** username（v3.2.2+）；添加后请 team-member/list 获取展示名。v3.2.3+：active 同 role 重复 add → 409 member_already_exists。';
+    return 'Transparent proxy; team admin. Adding oneself and demoting the owner are forbidden. Response TeamMemberEntity **does not include** username (v3.2.2+); call team-member/list after adding to get the display name. v3.2.3+: adding the same role again for an active member → 409 member_already_exists.';
   }
   if (action === 'team-member/remove') {
-    return '透明代理；团队 admin。禁移除 team owner（403 cannot remove team owner）。物理删除成员行。须 Header 双凭证。';
+    return 'Transparent proxy; team admin. Removing the team owner is forbidden (403 cannot remove team owner). Physically deletes the member row. Both Header credentials required.';
   }
   if (action === 'team/update') {
-    return '透明代理；team owner 或 admin。不可改 owner_user_id（传入静默忽略）。字段见 08-metadata-v3-api-reference.md。须 Header 双凭证。';
+    return 'Transparent proxy; team owner or admin. owner_user_id cannot be changed (silently ignored if passed). See 08-metadata-v3-api-reference.md for fields. Both Header credentials required.';
   }
   if (action === 'agent/update') {
-    return '透明代理；agent owner。不可改 owner_user_id（传入静默忽略）。字段见 08-metadata-v3-api-reference.md。须 Header 双凭证。';
+    return 'Transparent proxy; agent owner. owner_user_id cannot be changed (silently ignored if passed). See 08-metadata-v3-api-reference.md for fields. Both Header credentials required.';
   }
   if (action === 'user/create' || action === 'user/delete') {
-    return '透明代理；须 Header `X-Tdai-User-Key` 为 system_admin。非 admin → 内核 403。';
+    return 'Transparent proxy; Header `X-Tdai-User-Key` must belong to a system_admin. Non-admin → kernel 403.';
   }
   if (META_LIST_ACTIONS.has(action)) {
-    return '分页 list；body 可选 limit（默认 20，最大 100）、offset（默认 0）。默认 created_at DESC（v3.1.2+；team-member 为 joined_at DESC）。须 Header 双凭证。';
+    return 'Paginated list; body accepts optional limit (default 20, max 100) and offset (default 0). Default created_at DESC (v3.1.2+; team-member uses joined_at DESC). Both Header credentials required.';
   }
-  return '透明代理至内核；字段见 08-metadata-v3-api-reference.md。须 Header 双凭证。';
+  return 'Transparent proxy to the kernel; see 08-metadata-v3-api-reference.md for fields. Both Header credentials required.';
 }
 
 function buildMetaPostPath(action: string): string {
@@ -102,7 +102,7 @@ function buildMetaPostPath(action: string): string {
   lines.push('              additionalProperties: true');
   lines.push('      responses:');
   lines.push("        '200':");
-  lines.push('          description: 内核风格信封（业务成败优先看 body.code）');
+  lines.push('          description: Kernel-style envelope (check body.code first for business success/failure)');
   lines.push('          content:');
   lines.push('            application/json:');
   lines.push('              schema:');
@@ -122,37 +122,37 @@ function buildMetaPostPath(action: string): string {
 
 const header = `openapi: 3.0.3
 info:
-  title: Team Memory Control — 新面板元数据 API（stateless）
+  title: Team Memory Control — New Panel Metadata API (stateless)
   description: |
-    新面板 Control **无状态代理**：\`/api/v1/meta/*\` 透明转发记忆内核 \`/v3/meta/*\`（v3.1）。
+    The new panel Control is a **stateless proxy**: \`/api/v1/meta/*\` transparently forwards to the memory kernel \`/v3/meta/*\` (v3.1).
 
-    **鉴权（Header，无 cookie）**
-    - \`X-Tdai-Service-Id\`：实例 ID（来自 \`GET /meta/instances\`，= 内核 \`x-tdai-service-id\`）
-    - \`X-Tdai-User-Key\`：用户密钥 \`sk-mem-…\`（\`auth/verify\` 除外，user_key 仅放 body）
+    **Authentication (Header, no cookie)**
+    - \`X-Tdai-Service-Id\`: instance ID (from \`GET /meta/instances\`, = kernel \`x-tdai-service-id\`)
+    - \`X-Tdai-User-Key\`: user key \`sk-mem-…\` (except \`auth/verify\`, where user_key goes only in the body)
 
-    **响应信封** \`{ code, message, request_id, data }\`
-    - \`code === 0\` → HTTP **200**（请求执行成功）
-    - \`code ∈ [400, 599]\` → HTTP 与 code **相等**
-    - 软校验：\`auth/verify\` 看 \`data.valid\`；\`acl/check\` 看 \`data.allowed\`
+    **Response envelope** \`{ code, message, request_id, data }\`
+    - \`code === 0\` → HTTP **200** (request executed successfully)
+    - \`code ∈ [400, 599]\` → HTTP equals code
+    - Soft validation: \`auth/verify\` checks \`data.valid\`; \`acl/check\` checks \`data.allowed\`
 
-    设计文档：[09-new-panel-control-backend-design.md](../architecture/09-new-panel-control-backend-design.md)
-    内核字段权威：[08-metadata-v3-api-reference.md](../architecture/08-metadata-v3-api-reference.md)
+    Design doc: [09-new-panel-control-backend-design.md](../architecture/09-new-panel-control-backend-design.md)
+    Authoritative kernel fields: [08-metadata-v3-api-reference.md](../architecture/08-metadata-v3-api-reference.md)
   version: 1.3.1
   contact:
     name: team-memory-control
 
 servers:
   - url: http://127.0.0.1:8123
-    description: 本地 Control（\`PANEL_MODE=stateless\` 或 \`pnpm dev:panel\`）
+    description: Local Control (\`PANEL_MODE=stateless\` or \`pnpm dev:panel\`)
   - url: https://{controlHost}
-    description: 部署环境
+    description: Deployment environment
     variables:
       controlHost:
         default: control.example.com
 
 tags:
   - name: Meta · Control
-    description: Control 辅助接口
+    description: Control auxiliary endpoints
   - name: Meta · User
   - name: Meta · User Key
   - name: Meta · Team
@@ -170,15 +170,15 @@ paths:
     get:
       tags: [Meta · Control]
       operationId: meta_instances_list
-      summary: 记忆实例列表（登录前）
+      summary: Memory instance list (before login)
       description: |
-        返回配置文件中全部记忆实例，**无分页**。
-        仅公开 \`instance_id\`、\`name\`（不含 gateway_endpoint / api_key）。
-        配置：\`METADATA_INSTANCES_CONFIG\`（默认 \`./config/metadata-instances.json\`）。
+        Returns all memory instances in the config file, **without pagination**.
+        Exposes only \`instance_id\` and \`name\` (excluding gateway_endpoint / api_key).
+        Config: \`METADATA_INSTANCES_CONFIG\` (default \`./config/metadata-instances.json\`).
       security: []
       responses:
         '200':
-          description: 公开实例列表
+          description: Public instance list
           content:
             application/json:
               schema:
@@ -186,9 +186,9 @@ paths:
               example:
                 instances:
                   - instance_id: default
-                    name: 社区研发演示实例
+                    name: Community R&D demo instance
                   - instance_id: sre-platform
-                    name: SRE 平台实例
+                    name: SRE platform instance
 `;
 
 const metaPaths = META_ACTIONS.map(buildMetaPostPath).join('\n');
@@ -202,7 +202,7 @@ components:
       required: true
       schema:
         type: string
-      description: 记忆实例 ID（= 注册表 id = 内核 x-tdai-service-id）
+      description: Memory instance ID (= registry id = kernel x-tdai-service-id)
       example: default
     TdaiUserKey:
       name: X-Tdai-User-Key
@@ -210,12 +210,12 @@ components:
       required: true
       schema:
         type: string
-      description: 用户 API 密钥 sk-mem-…（auth/verify 不使用此 Header）
+      description: User API key sk-mem-… (auth/verify does not use this Header)
       example: sk-mem-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
   responses:
     ControlBadRequest:
-      description: Control 校验错误（未转发内核）
+      description: Control validation error (not forwarded to the kernel)
       content:
         application/json:
           schema:
@@ -226,7 +226,7 @@ components:
             request_id: req-example
             data: null
     NotInScope:
-      description: 新面板一期禁用的 action 域（asset / agent-fixed-asset）
+      description: Action domains disabled in phase 1 of the new panel (asset / agent-fixed-asset)
       content:
         application/json:
           schema:
@@ -237,7 +237,7 @@ components:
             request_id: req-example
             data: null
     KernelUnavailable:
-      description: 内核不可达
+      description: Kernel unreachable
       content:
         application/json:
           schema:
@@ -248,7 +248,7 @@ components:
             request_id: req-example
             data: null
     KernelTimeout:
-      description: 内核超时
+      description: Kernel timeout
       content:
         application/json:
           schema:
@@ -266,12 +266,12 @@ components:
       properties:
         instance_id:
           type: string
-          description: 记忆实例 ID（对应内核 x-tdai-service-id）
+          description: Memory instance ID (corresponds to kernel x-tdai-service-id)
           example: default
         name:
           type: string
-          description: 登录页展示名称
-          example: 社区研发演示实例
+          description: Display name on the login page
+          example: Community R&D demo instance
 
     MetadataInstanceListResponse:
       type: object
@@ -289,9 +289,9 @@ components:
         code:
           type: integer
           description: |
-            0 = 请求执行成功。
-            400–599 时 HTTP 状态码与 code 相等。
-            判断业务成败优先看 code；软校验再看 data.valid / data.allowed。
+            0 = request executed successfully.
+            For 400–599, the HTTP status code equals code.
+            Check code first for business success/failure; then check data.valid / data.allowed for soft validation.
           example: 0
         message:
           type: string
@@ -301,7 +301,7 @@ components:
           example: req-a1b2c3d4
         data:
           nullable: true
-          description: 成功载荷；失败常为 null
+          description: Success payload; often null on failure
 
     PaginatedResult:
       type: object

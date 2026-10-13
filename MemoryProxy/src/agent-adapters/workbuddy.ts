@@ -1,56 +1,56 @@
 /**
- * WorkBuddy 桌面客户端适配器。
+ * WorkBuddy desktop client adapter.
  *
- * 侦查依据（2026-08-10逆向 workbuddy Mac 客户端 5.3.11 抓包证据）：
+ * Recon basis (2026-08-10, packet-capture evidence from reverse-engineering the workbuddy Mac client 5.3.11):
  *
- * # 客户端架构
- *   - Electron GUI（腾讯官方"桌面 AI 智能体"，产品页 www.codebuddy.cn/work/）
- *   - 桌面壳层通过 ACP over HTTP（本地 127.0.0.1 sidecar）与本地 `@genie/agent-cli`
- *     通信；真正的远程 LLM 请求由 sidecar 发出（`cli/dist/codebuddy.js`）
- *   - 底层库：`@openai/agents 0.5.2`（OpenAI 官方 Agents SDK）
+ * # Client architecture
+ *   - Electron GUI (Tencent's official "desktop AI agent"; product page www.codebuddy.cn/work/)
+ *   - The desktop shell talks to the local `@genie/agent-cli` via ACP over HTTP (local 127.0.0.1 sidecar);
+ *     the actual remote LLM requests are issued by the sidecar (`cli/dist/codebuddy.js`)
+ *   - Underlying library: `@openai/agents 0.5.2` (OpenAI's official Agents SDK)
  *
  * # Wire protocol
- *   - 协议 = **OpenAI Responses API**（不是 Chat Completions）
- *   - endpoint 后缀：`/responses`（主）、`/responses/compact`、
+ *   - Protocol = **OpenAI Responses API** (not Chat Completions)
+ *   - endpoint suffixes: `/responses` (main), `/responses/compact`,
  *     `/realtime/calls`、`/memories/trace_summarize`
- *   - stream 走 SSE / WebSocket（`ensureResponsesWebSocketPath` 存在，但 HTTP 亦支持）
- *   - Base URL 可通过 `OPENAI_BASE_URL` / `OPENAI_ENDPOINT`覆盖 →
- *     **接proxy 只需环境变量重定向，客户端二进制无需魔改**
- *   - 认证：`Authorization: Bearer <token>`（token 来源环境变量
- *     `CODEBUDDY_AUTH_TOKEN` / `CODEBUDDY_API_KEY`）+独立 `X-User-Id` header
+ *   - stream uses SSE / WebSocket (`ensureResponsesWebSocketPath` exists, but HTTP is also supported)
+ *   - Base URL can be overridden via `OPENAI_BASE_URL` / `OPENAI_ENDPOINT` ->
+ *     **pointing at the proxy only needs an env-var redirect; no need to hack the client binary**
+ *   - Auth: `Authorization: Bearer <token>` (token from env vars
+ *     `CODEBUDDY_AUTH_TOKEN` / `CODEBUDDY_API_KEY`) + a separate `X-User-Id` header
  *
- * # 独有 header 集合（抓包 grep 命中）
+ * # Unique header set (hits from capture grep)
  *   - `X-Agent-Intent` / `X-Agent-Purpose`
  *   - `X-User-Id`（URL-encode）
- *   - `X-Codebuddy-Run-Timeout`（注：header key沿用 codebuddy 前缀，
- *     是 sidecar 继承自 codebuddy CLI 的历史遗产）
+ *   - `X-Codebuddy-Run-Timeout` (note: the header key keeps the codebuddy prefix,
+ *     a historical legacy the sidecar inherited from the codebuddy CLI)
  *
- * # System prompt 结构（`resources/templates/workbuddy-prompt.tpl` 抓包证据）
- *   - nunjucks 模板由客户端渲染，**proxy 收到的是渲染后成品文本**
- *   - XML tag 分节：`<content_policy>` / `<agent_skills>` / `<expert_management>`
+ * # System prompt structure (`resources/templates/workbuddy-prompt.tpl` capture evidence)
+ *   - The nunjucks template is rendered by the client; **the proxy receives the rendered final text**
+ *   - XML tag sections: `<content_policy>` / `<agent_skills>` / `<expert_management>`
  *     / `<mcp_configuration>` / `<response_language>` / `<binary_context>`
  *   - user message wrapper: `<user_query>...</user_query>`
- *   - 4 段 memory 占位符（本adapter 不涉及注入，injection profile 层处理）：
+ *   - 4 memory placeholders (this adapter does no injection; handled at the injection profile layer):
  *       * `{{ WorkbuddyMemory_1 }}`
  *       * `{{ WorkingMemoryContent }}`
  *       * `{{ UserLocalMemoryContent }}`
  *       * `{{ UserMemoryContent }}`
- *   - 数据目录变量：`{{ dataFolderName }}` → `.workbuddy`
- *   - 产品域名：`www.workbuddy.cn/docs/workbuddy/Overview`（**独立于 codebuddy**）
+ *   - Data directory variable: `{{ dataFolderName }}` -> `.workbuddy`
+ *   - Product domain: `www.workbuddy.cn/docs/workbuddy/Overview` (**independent of codebuddy**)
  *
- * # 两个适配点
- *   - `classifyRequest`: **独立实现**同款 aux 三层信号判定（endpoint path白名单 +
- *     memgen header + client_metadata.thread_source）——与 codex 关键字重合但零依赖
- *   - `extractUserText`: 从 responses API `body.input[]` 提取最后一条
- *     `type=message && role=user` 的 `content[].input_text` —— 独立实现，
- *     不import codex 模块
+ * # Two adaptation points
+ *   - `classifyRequest`: **independent implementation** of the same three-layer aux signal check (endpoint path allowlist +
+ *     memgen header + client_metadata.thread_source) -- keywords overlap with codex but zero dependency
+ *   - `extractUserText`: from responses API `body.input[]`, extract the content[].input_text of the last
+ *     `type=message && role=user` item -- independent implementation,
+ *     does not import the codex module
  *
- * # 独立性约束（用户明确要求）
- *   - 零 import codebuddy / codex
- *   - 关键字集合恰好与 codex 重合是"上游协议同源"的自然结果，不视为耦合
- *   - workbuddy 侧任何未来变化（新 aux path、新 header）在本文件内演进
+ * # Independence constraints (explicitly requested by the user)
+ *   - Zero imports of codebuddy / codex
+ *   - The keyword sets coinciding with codex is a natural result of the "same upstream protocol", not considered coupling
+ *   - Any future workbuddy-side changes (new aux path, new header) evolve within this file
  *
- * 详见抓包报告：MemoryProxy/docs/workbuddy-recon/*.tpl + workbuddy-cli-product.json。
+ * See the capture report: MemoryProxy/docs/workbuddy-recon/*.tpl + workbuddy-cli-product.json.
  */
 
 import { extractUserQueryText } from "../common/user-query-extractor.js";
@@ -59,14 +59,14 @@ import type { AgentAdapter, RequestKind } from "./types.js";
 // ── Aux detection constants ──────────────────────────────────────────────────
 
 /**
- * WorkBuddy 客户端已知的 aux endpoint path suffix。
+ * Known aux endpoint path suffixes of the WorkBuddy client.
  *
- * 来源：workbuddy Mac 客户端 5.3.11 逆向 `cli/dist/codebuddy.js` grep 结果：
- *   - `/responses/compact`         压缩/摘要请求
- *   - `/memories/trace_summarize`  memory 轨迹归纳
- *   - `/realtime/calls`            实时会话建立
+ * Source: grep results from reverse-engineering workbuddy Mac client 5.3.11 `cli/dist/codebuddy.js`:
+ *   - `/responses/compact`         compaction/summary requests
+ *   - `/memories/trace_summarize`  memory trajectory summarization
+ *   - `/realtime/calls`            realtime session setup
  *
- * 未来若发现 workbuddy 新增aux endpoint，在此追加（不要修改 codex 侧）。
+ * If workbuddy adds a new aux endpoint in the future, append it here (do not modify the codex side).
  */
 const WORKBUDDY_AUX_PATH_SUFFIXES: readonly string[] = [
   "/responses/compact",
@@ -75,11 +75,11 @@ const WORKBUDDY_AUX_PATH_SUFFIXES: readonly string[] = [
 ];
 
 /**
- * WorkBuddy 客户端已知的 aux 类型 body.client_metadata.thread_source 值。
+ * Known aux-type body.client_metadata.thread_source values of the WorkBuddy client.
  *
- *抓包尚未确证 workbuddy 是否使用 client_metadata；此处保守只放 codex 已知
- * 的两个白名单值（若workbuddy 底层 SDK 与 codex 同源，理论上一致）。
- * 未知一律main（偏严不偏宽）。
+ * Capture has not yet confirmed whether workbuddy uses client_metadata; conservatively only the two
+ * allowlist values known to codex are listed (if workbuddy's underlying SDK shares codex's origin, they should theoretically match).
+ * Unknown is always main (strict rather than lenient).
  */
 const WORKBUDDY_AUX_THREAD_SOURCES:ReadonlySet<string> = new Set([
   "memory_consolidation",
@@ -87,44 +87,44 @@ const WORKBUDDY_AUX_THREAD_SOURCES:ReadonlySet<string> = new Set([
 ]);
 
 /**
- * WorkBuddy 特有的 memgen 请求头 key 集合。
+ * Set of memgen request header keys specific to WorkBuddy.
  *
- *抓包证据显示 workbuddy sidecar 继承自 codebuddy CLI，仍在使用
- * `x-openai-memgen-request` 标记 memory generation 请求。
- * 独立列出，不 import codex 常量。
+ * Capture evidence shows the workbuddy sidecar inherited from the codebuddy CLI and still uses
+ * `x-openai-memgen-request` to mark memory generation requests.
+ * Listed independently, not importing codex constants.
  */
 const WORKBUDDY_MEMGEN_HEADER_KEYS: readonly string[] = [
   "x-openai-memgen-request",
 ];
 
 /**
- * 判定 workbuddy 请求是否为 aux（辅助请求）。
+ * Determine whether a workbuddy request is aux (auxiliary request).
  *
- * 三层信号按优先级：
- *   1. endpoint path suffix 白名单（最强）
- *   2. memgen 请求头（memory consolidation 独占）
- *   3. body.client_metadata.thread_source 白名单
+ * Three-layer signals by priority:
+ *   1. endpoint path suffix allowlist (strongest)
+ *   2. memgen request header (exclusive to memory consolidation)
+ *   3. body.client_metadata.thread_source allowlist
  */
 function isWorkbuddyAuxiliary(
   path: string | undefined,
   headers: Record<string, string> | undefined,
   body: Record<string, unknown>,
 ): boolean {
-  // 信号 1: aux endpoint（path 白名单）
+  // Signal 1: aux endpoint (path allowlist)
   if (path) {
     for (const suffix of WORKBUDDY_AUX_PATH_SUFFIXES) {
       if (path.endsWith(suffix)) return true;
     }
   }
 
-  // 信号 2: memgen 请求头
+  // Signal 2: memgen request header
   if (headers) {
     for (const key of WORKBUDDY_MEMGEN_HEADER_KEYS) {
       if (headers[key] === "true") return true;
     }
   }
 
-  // 信号 3: body.client_metadata.thread_source 命中白名单
+  // Signal 3: body.client_metadata.thread_source hits the allowlist
   const meta = body.client_metadata as { thread_source?: string } | undefined;
   const ts = meta?.thread_source;
   if (typeof ts === "string" && WORKBUDDY_AUX_THREAD_SOURCES.has(ts)) return true;
@@ -135,26 +135,26 @@ function isWorkbuddyAuxiliary(
 // ── User text extraction ─────────────────────────────────────────────────────
 
 /**
- * 从 workbuddy responses API `body.input[]` 提取最后一条
- * `type=message && role=user` 的 `content[].input_text` 拼接文本。
+ * From the workbuddy responses API `body.input[]`, extract the last
+ * `type=message && role=user` item's `content[].input_text` concatenated text.
  *
- *抓包证据：workbuddy 底层用 @openai/agents SDK，wire body 结构与
- * OpenAI Responses API 完全一致。input[] item 已知类型：
+ * Capture evidence: workbuddy uses the @openai/agents SDK underneath; the wire body structure is
+ * identical to the OpenAI Responses API. Known input[] item types:
  *   - {type:"message", role:"user"|"assistant"|"developer"|"system",
  *      content:[{type:"input_text"|"output_text"|"input_image",...}]}
  *   - {type:"function_call", name, arguments}
  *   - {type:"function_call_output", output}
  *   - {type:"reasoning", encrypted_content, ...}
  *
- * 只关心 type=message && role=user 的 content 里type=input_text 段。
+ * Only cares about type=input_text segments in the content of type=message && role=user.
  *
- * 注：独立于 codex 实现（重复算法但零耦合）；未来若 workbuddy input[]
- * 结构分化（如新增 workbuddy 特有 content type），在此文件内演进。
+ * Note: independent of the codex implementation (duplicated algorithm but zero coupling); if workbuddy input[]
+ * structure diverges in the future (e.g. a workbuddy-specific content type is added), evolve it within this file.
  */
 function extractWorkbuddyUserText(input: unknown): string | null {
   if (!Array.isArray(input)) return null;
 
-  // 从后往前找最后一条 role=user 的 message
+  // Search backwards for the last message with role=user
   for (let i = input.length - 1; i >= 0; i--) {
     const item = input[i] as Record<string, unknown> | null | undefined;
     if (!item || typeof item !== "object") continue;
@@ -180,23 +180,23 @@ function extractWorkbuddyUserText(input: unknown): string | null {
 // ── Adapter export ───────────────────────────────────────────────────────────
 
 /**
- * 提取用户真实输入 —— 双形态兼容：
+ * Extract the real user input -- compatible with both shapes:
  *
- * 1) **Responses API (`/v1/responses`)**：桌面客户端专属，content 是 `input[]`
- *    数组（`{type:"message", role:"user", content:[{type:"input_text", text}]}`），
- *    走 `extractWorkbuddyUserText` 独立算法。
+ * 1) **Responses API (`/v1/responses`)**: desktop-client-only; content is an `input[]`
+ *    array (`{type:"message", role:"user", content:[{type:"input_text", text}]}`),
+ *    using the independent `extractWorkbuddyUserText` algorithm.
  *
- * 2) **Chat Completions (`/v1/chat/completions`)**：workbuddy 网页版底层用的是
- *    OpenAI ChatCompletions（`claude-opus-4.7-1m` + OpenAI 兼容上游），
- *    走通用主 handler 路径。`message.content` 是字符串，且带 CC/CB 同款
- *    `<system-reminder>` / `<user_query>` wrapper（2026-08-12 日志实证）。
- *    直接复用 CB 的 `extractUserQueryText` —— 与 tdai L0 / mem-command
- *    保持同一份剥离语义。
+ * 2) **Chat Completions (`/v1/chat/completions`)**: the workbuddy web version is built on
+ *    OpenAI ChatCompletions (`claude-opus-4.7-1m` + OpenAI-compatible upstream),
+ *    going through the generic main handler path. `message.content` is a string, with the same
+ *    `<system-reminder>` / `<user_query>` wrapper as CC/CB (verified from 2026-08-12 logs).
+ *    Directly reuses CB's `extractUserQueryText` -- keeping the same stripping semantics
+ *    as tdai L0 / mem-command.
  *
- * 修复背景：2026-08-12 用户在 workbuddy 网页版发 `mem:help`，请求进 proxy 后走
- * `/chat/completions`（handler.ts::handleChatCompletions），parseMemCommand 调
- * `workbuddyAdapter.extractUserText(content)`，但原实现只处理 Array，字符串
- * content 返 null → 命令识别失败 → 透传给 LLM 兜底。见 develop_timestone/。
+ * Background of the fix: on 2026-08-12 a user sent `mem:help` from the workbuddy web version; the request entered the proxy and went through
+ * `/chat/completions` (handler.ts::handleChatCompletions), parseMemCommand called
+ * `workbuddyAdapter.extractUserText(content)`, but the original implementation only handled Array; string
+ * content returned null -> command recognition failed -> fell through to the LLM. See develop_timestone/.
  */
 export const workbuddyAdapter: AgentAdapter = {
   agentKind: "workbuddy",
@@ -210,12 +210,12 @@ export const workbuddyAdapter: AgentAdapter = {
   },
 
   extractUserText(content: unknown): string | null {
-    // 网页版 chat/completions：content 是字符串（可能带 <user_query> / wrapper）
+    // Web version chat/completions: content is a string (may carry <user_query> / wrapper)
     if (typeof content === "string") {
       const extracted = extractUserQueryText(content);
       return extracted.length > 0 ? extracted : null;
     }
-    // 桌面客户端 /v1/responses：content 是 input[] 数组
+    // Desktop client /v1/responses: content is an input[] array
     return extractWorkbuddyUserText(content);
   },
 };

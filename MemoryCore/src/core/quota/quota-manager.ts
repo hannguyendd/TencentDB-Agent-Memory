@@ -1,24 +1,24 @@
 /**
- * QuotaManager — 配额管理器
+ * QuotaManager — quota manager
  *
- * 职责:
- * 1. 缓存并检查 MemoryLimit / CreditLimit 是否超限
- * 2. 通过注入的 IQuotaReporter 上报用量变化
- * 3. 本地缓存 Usage 避免每次请求都调远程
+ * Responsibilities:
+ * 1. Cache and check whether MemoryLimit / CreditLimit is exceeded
+ * 2. Report usage changes via the injected IQuotaReporter
+ * 3. Cache Usage locally to avoid calling the remote on every request
  *
- * 配额数据来源由依赖注入的 IQuotaReporter 决定：
- *   - standalone: NoopQuotaReporter (fetchQuota 返回 null → 视为无限额)
- *   - service:    由部署环境注入远程配额 reporter
+ * The quota data source is determined by the injected IQuotaReporter:
+ *   - standalone: NoopQuotaReporter (fetchQuota returns null → treated as unlimited)
+ *   - service:    remote quota reporter injected by the deployment environment
  */
 
 import type { Logger } from "../logger.js";
 import type { IQuotaReporter } from "../abstractions/index.js";
 
 export interface QuotaConfig {
-  memoryLimit: number;   // 记忆总条数上限 (default: 10000)
-  creditLimit: number;   // Credit 限额 (default: 1000)
-  memoryUsage: number;   // 当前已用记忆条数
-  creditUsage: number;   // 当前已用 Credit
+  memoryLimit: number;   // max total memory count (default: 10000)
+  creditLimit: number;   // Credit limit (default: 1000)
+  memoryUsage: number;   // memory count currently used
+  creditUsage: number;   // Credits currently used
 }
 
 export interface QuotaCheckResult {
@@ -31,11 +31,11 @@ export interface QuotaCheckResult {
 export interface QuotaManagerOptions {
   /** Pre-constructed quota reporter for the current deployment. */
   reporter: IQuotaReporter;
-  /** 配额缓存 TTL (毫秒), 默认 60s */
+  /** Quota cache TTL (ms), default 60s */
   cacheTtlMs?: number;
-  /** 默认 MemoryLimit (上游未返回时使用) */
+  /** Default MemoryLimit (used when upstream does not return one) */
   defaultMemoryLimit?: number;
-  /** 默认 CreditLimit (上游未返回时使用) */
+  /** Default CreditLimit (used when upstream does not return one) */
   defaultCreditLimit?: number;
   logger: Logger;
 }
@@ -49,7 +49,7 @@ export class QuotaManager {
   private defaultMemoryLimit: number;
   private defaultCreditLimit: number;
 
-  // Per-instance 缓存
+  // Per-instance cache
   private cache = new Map<string, { config: QuotaConfig; expiresAt: number }>();
 
   constructor(opts: QuotaManagerOptions) {
@@ -61,10 +61,10 @@ export class QuotaManager {
   }
 
   /**
-   * 获取实例配额配置 (带缓存)
+   * Get the instance quota config (cached)
    *
-   * 当 reporter.fetchQuota() 返回 null (开源/无配额模式), 视为无限额 ——
-   * 返回 memoryUsage=0/creditUsage=0 + defaultLimit, 这样所有 check 都会通过。
+   * When reporter.fetchQuota() returns null (open-source / no-quota mode), treat as unlimited —
+   * return memoryUsage=0/creditUsage=0 + defaultLimit, so all checks pass.
    */
   async getQuota(instanceId: string): Promise<QuotaConfig> {
     const now = Date.now();
@@ -77,7 +77,7 @@ export class QuotaManager {
       const snapshot = await this.reporter.fetchQuota(instanceId);
 
       if (snapshot === null) {
-        // 无配额模式 (Noop reporter): 返回默认 limit + 零 usage, 永远不会超限
+        // No-quota mode (Noop reporter): return default limit + zero usage, never exceeds
         const config: QuotaConfig = {
           memoryLimit: this.defaultMemoryLimit,
           creditLimit: this.defaultCreditLimit,
@@ -103,11 +103,11 @@ export class QuotaManager {
   }
 
   /**
-   * 检查是否允许写入记忆 (MemoryUsage < MemoryLimit)
+   * Check whether writing memory is allowed (MemoryUsage < MemoryLimit)
    */
   async checkMemoryQuota(instanceId: string, delta: number = 1): Promise<QuotaCheckResult> {
     const quota = await this.getQuota(instanceId);
-    // limit < 0 表示不限额（兼容控制面用 -1 表达 unlimited）。
+    // limit < 0 means unlimited (compatible with the control plane using -1 to express unlimited).
     if (quota.memoryLimit >= 0 && quota.memoryUsage + delta > quota.memoryLimit) {
       return {
         allowed: false,
@@ -120,11 +120,11 @@ export class QuotaManager {
   }
 
   /**
-   * 检查是否允许使用 LLM (CreditUsage < CreditLimit)
+   * Check whether LLM use is allowed (CreditUsage < CreditLimit)
    */
   async checkCreditQuota(instanceId: string): Promise<QuotaCheckResult> {
     const quota = await this.getQuota(instanceId);
-    // limit < 0 表示不限额（兼容控制面用 -1 表达 unlimited）。
+    // limit < 0 means unlimited (compatible with the control plane using -1 to express unlimited).
     if (quota.creditLimit >= 0 && quota.creditUsage >= quota.creditLimit) {
       return {
         allowed: false,
@@ -137,19 +137,19 @@ export class QuotaManager {
   }
 
   /**
-   * 上报用量变化 (通过注入的 reporter)
-   * @param memoryDelta 记忆条数变化 (正=新增, 负=删除)
-   * @param creditDelta Credit 消耗变化 (正=消耗)
-   * @param level 记忆层级 ("L0" | "L1" | "L2" | "L3")
+   * Report usage changes (via the injected reporter)
+   * @param memoryDelta memory count change (positive = added, negative = deleted)
+   * @param creditDelta Credit consumption change (positive = consumed)
+   * @param level memory level ("L0" | "L1" | "L2" | "L3")
    */
   async reportUsage(instanceId: string, memoryDelta: number, creditDelta: number, level: "L0" | "L1" | "L2" | "L3" | "Skill" = "L0"): Promise<void> {
     if (memoryDelta === 0 && creditDelta === 0) return;
 
-    // Reporter 内部保证不抛错; 这里仍然 try/catch 以防接口契约被违反
+    // The reporter guarantees it does not throw; try/catch here anyway in case the interface contract is violated
     try {
       await this.reporter.reportUsage(instanceId, memoryDelta, creditDelta, level);
 
-      // 同步更新本地缓存 (无论 reporter 是 noop 还是真实上报, 本地都需要追踪)
+      // Update the local cache synchronously (whether the reporter is noop or real, local tracking is always needed)
       const cached = this.cache.get(instanceId);
       if (cached) {
         cached.config.memoryUsage += memoryDelta;
@@ -158,54 +158,54 @@ export class QuotaManager {
 
       this.logger.debug?.(`${TAG} Usage reported: instance=${instanceId}, memDelta=${memoryDelta}, creditDelta=${creditDelta}`);
     } catch (err) {
-      // Defensive: reporter 不应该抛错, 但万一抛了不能影响业务
+      // Defensive: the reporter should not throw, but if it does it must not affect business logic
       this.logger.error(`${TAG} reportUsage unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
   /**
-   * 快捷方法: 上报记忆新增
+   * Shortcut: report memory added
    */
   async reportMemoryAdded(instanceId: string, count: number, level: "L0" | "L1" | "L2" | "L3" = "L0"): Promise<void> {
     return this.reportUsage(instanceId, count, 0, level);
   }
 
   /**
-   * 快捷方法: 上报记忆删除
+   * Shortcut: report memory deleted
    */
   async reportMemoryDeleted(instanceId: string, count: number, level: "L0" | "L1" | "L2" | "L3" = "L0"): Promise<void> {
     return this.reportUsage(instanceId, -count, 0, level);
   }
 
   /**
-   * 快捷方法: 上报 Credit 消耗
+   * Shortcut: report Credit consumption
    */
   async reportCreditUsed(instanceId: string, credits: number, level: "L0" | "L1" | "L2" | "L3" = "L1"): Promise<void> {
     return this.reportUsage(instanceId, 0, credits, level);
   }
 
   /**
-   * 快捷方法: 上报 Skill VDB 新增 (新建 skill / 新增版本)
+   * Shortcut: report Skill VDB added (new skill / new version)
    */
   async reportSkillAdded(instanceId: string, count: number = 1): Promise<void> {
     return this.reportUsage(instanceId, count, 0, "Skill");
   }
 
   /**
-   * 快捷方法: 上报 Skill VDB 删除 (软删除 / TTL 清理)
+   * Shortcut: report Skill VDB deleted (soft delete / TTL cleanup)
    */
   async reportSkillDeleted(instanceId: string, count: number = 1): Promise<void> {
     return this.reportUsage(instanceId, -count, 0, "Skill");
   }
 
-  /** 清除缓存 (测试用) */
+  /** Clear the cache (for tests) */
   clearCache(): void {
     this.cache.clear();
   }
 
   private getDefaultOrCached(instanceId: string): QuotaConfig {
     const cached = this.cache.get(instanceId);
-    if (cached) return cached.config; // 用过期的旧缓存
+    if (cached) return cached.config; // use the stale old cache
     return {
       memoryLimit: this.defaultMemoryLimit,
       creditLimit: this.defaultCreditLimit,

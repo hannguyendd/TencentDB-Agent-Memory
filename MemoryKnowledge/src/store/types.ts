@@ -18,10 +18,10 @@
 export type SyncStatus = "pending" | "processing" | "ready" | "failed";
 
 /**
- * Wiki 专属状态：在 SyncStatus 基础上多一个 `draft`——create 建壳时的初始态，
- * 表示"从未加工过、无内容、可被 ingest"。一旦 ingest 成功变 ready、失败变 failed，
- * 之后重跑 ingest 只会进 pending/processing，永远不再回 draft。
- * code-graph 不使用 draft（其 create 即入队建图，初始 pending 是真 in-flight）。
+ * Wiki-specific status: on top of SyncStatus, adds a `draft` — the initial state when create builds the shell,
+ * meaning "never processed, no content, can be ingested". Once ingest succeeds it becomes ready, on failure failed;
+ * afterwards re-running ingest only goes through pending/processing and never returns to draft.
+ * code-graph does not use draft (its create enqueues graph building immediately, so the initial pending is truly in-flight).
  */
 export type WikiStatus = SyncStatus | "draft";
 
@@ -175,7 +175,7 @@ export interface CreateResult<T> {
 }
 
 export interface ListOpts {
-  // Wiki 用 WikiStatus（含 draft）；code-graph 只用 SyncStatus，传 draft 会得到空集（无副作用）。
+  // Wiki uses WikiStatus (including draft); code-graph only uses SyncStatus, and passing draft yields an empty set (no side effects).
   syncStatus?: WikiStatus;
   limit?: number;
   offset?: number;

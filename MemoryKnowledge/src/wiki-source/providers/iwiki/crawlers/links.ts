@@ -1,26 +1,26 @@
 /**
- * 遍历策略之一：解析**页面正文里的超链接**来发现文档（类似爬虫）。
+ * One of the traversal strategies: parse the **hyperlinks in page bodies** to discover documents (similar to a crawler).
  *
- * 适用：不依赖平台层级 API —— 任何能拿到正文的平台都可用。
- * 特点：
- *   - 只能发现"被入口页链接到"的页面（不保证覆盖整个空间）
- *   - 需要拉正文来解析链接（有额外请求开销）
- *   - 默认只走一层（入口页的直接链接），避免请求量爆炸
+ * Applicable: does not depend on the platform hierarchy API — usable on any platform where the body can be obtained.
+ * Characteristics:
+ *   - Can only discover pages "linked to by the entry page" (full coverage of the space is not guaranteed)
+ *   - Needs to fetch bodies to parse links (extra request overhead)
+ *   - Goes only one level by default (direct links of the entry page), to avoid an explosion of requests
  */
 
 import type { RemotePageRef, SourceContext } from "../../../types.js";
 import { getDocument, getMetadata } from "../mcp-client.js";
 
 /**
- * 从正文中抽取文档 id（去重、保序）。
+ * Extract document ids from the body (deduplicated, order-preserving).
  *
- * 正则在**函数内创建**：带 `g` 标志的正则对象会持有 lastIndex 状态，
- * 模块级共享会在多次调用/多个正则交替匹配时互相污染（曾导致抽出 "2)" 这类脏 id）。
+ * Regexes are **created inside the function**: a regex object with the `g` flag holds lastIndex state,
+ * and sharing at module level would contaminate each other across multiple calls / alternating matches of multiple regexes (once produced dirty ids like "2)").
  */
 export function extractDocIds(markdown: string): string[] {
-  // markdown 链接语法：`[标题](https://.../p/123)` —— id 不含 `/?#)` 与空白
+  // markdown link syntax: `[title](https://.../p/123)` — the id contains no `/?#)` or whitespace
   const mdLinkRe = /\((?:https?:\/\/[^)\s]*?)?\/(?:p|pages?)\/([^/?#)\s]+)\)/gi;
-  // 裸 URL：任意位置的 `.../p/123`
+  // Bare URL: `.../p/123` at any position
   const bareUrlRe = /\/(?:p|pages?)\/([^/?#)\s]+)/gi;
 
   const out: string[] = [];
@@ -42,10 +42,10 @@ export function extractDocIds(markdown: string): string[] {
 }
 
 /**
- * 从入口页出发，按正文超链接逐层发现文档。
+ * Starting from the entry pages, discover documents level by level via body hyperlinks.
  *
- * @param rootIds   入口页 id 列表
- * @param maxDepth  最大层数；1 = 只取入口页直接链接到的文档（默认）
+ * @param rootIds   list of entry page ids
+ * @param maxDepth  maximum number of levels; 1 = only the documents directly linked from the entry pages (default)
  */
 export async function crawlLinks(
   ctx: SourceContext,
@@ -55,7 +55,7 @@ export async function crawlLinks(
   const out: RemotePageRef[] = [];
   const visited = new Set<string>(rootIds);
 
-  // 先取入口页自身
+  // First take the entry page itself
   let frontier: Array<{ id: string; parentId: string | null; depth: number }> = rootIds.map(
     (id) => ({ id, parentId: null, depth: 0 }),
   );
@@ -64,7 +64,7 @@ export async function crawlLinks(
     const next: typeof frontier = [];
 
     for (const item of frontier) {
-      // 标题优先从 metadata 取（getDocument 只回正文、不带 title）
+      // Prefer taking the title from metadata (getDocument returns only the body, without title)
       let title = item.id;
       let markdown = "";
       try {
@@ -75,7 +75,7 @@ export async function crawlLinks(
         if (meta?.title) title = meta.title;
         markdown = doc.markdown ?? "";
       } catch {
-        // 单页取不到不应中断整体遍历
+        // Failure to fetch a single page should not interrupt the whole traversal
         continue;
       }
 
@@ -87,7 +87,7 @@ export async function crawlLinks(
         isDir: false,
       });
 
-      // 深度到顶就不再展开
+      // Stop expanding once the depth limit is reached
       if (item.depth >= maxDepth) continue;
 
       for (const childId of extractDocIds(markdown)) {

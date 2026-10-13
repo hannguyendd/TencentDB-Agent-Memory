@@ -15,9 +15,9 @@ export interface SceneIndexEntry {
 }
 
 /**
- * 行视图后端的场景索引派生能力（P2-D2）：rowfs 模式下索引从 L2 行实时
- * 投影，`.metadata/scene_index.json` 不读不写。结构化鸭子类型，避免
- * scene ↔ storage 模块环依赖。
+ * Scene-index derivation for row-view backends (P2-D2): in rowfs mode the index is projected
+ * live from L2 rows, and `.metadata/scene_index.json` is neither read nor written. Structural
+ * duck typing, to avoid a scene ↔ storage module circular dependency.
  */
 interface SceneIndexDerivable {
   deriveSceneIndex(): Promise<SceneIndexEntry[]>;
@@ -59,7 +59,7 @@ async function fsReaddir(absDir: string, suffix: string): Promise<string[]> {
  * The LLM is sandboxed to scene_blocks/ and cannot access this file.
  */
 export async function readSceneIndex(dataDir: string, storage?: StorageAdapter): Promise<SceneIndexEntry[]> {
-  // P2-D2: rowfs 模式索引实时派生自 L2 行，不读 sidecar 文件。
+  // P2-D2: in rowfs mode the index is derived live from L2 rows; the sidecar file is not read.
   const derivable = asSceneIndexDerivable(storage);
   if (derivable) return derivable.deriveSceneIndex();
   try {
@@ -117,7 +117,7 @@ export async function writeSceneIndex(
  * Rebuild scene index by scanning all .md files in the scene_blocks directory.
  */
 export async function syncSceneIndex(dataDir: string, storage?: StorageAdapter): Promise<SceneIndexEntry[]> {
-  // P2-D2: rowfs 模式索引实时派生，不落盘（scene_index.json 退役）。
+  // P2-D2: in rowfs mode the index is derived live and not written to disk (scene_index.json retired).
   const derivable = asSceneIndexDerivable(storage);
   if (derivable) return derivable.deriveSceneIndex();
   let files: string[];

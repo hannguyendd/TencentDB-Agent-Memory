@@ -94,24 +94,24 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-// SKIP header sets 已合并到 common/constants.ts (codex 用 WITH_INTERNAL 版本)
+// SKIP header sets have been merged into common/constants.ts (codex uses the WITH_INTERNAL version)
 import { SKIP_REQUEST_HEADERS_WITH_INTERNAL as SKIP_REQUEST_HEADERS, filterResponseHeaders } from "../../common/constants.js";
 
-// ── TDAI L0 helpers (对齐 anthropicHandler / handler 姿势) ───────────────────
+// ── TDAI L0 helpers (aligned with the anthropicHandler / handler approach) ───────────────────
 
 /**
- * TDAI L0 客户端工厂 —— 跟 anthropicHandler.ts::createTdaiClient 语义一致。
- * spaceId 优先于 config 默认 serviceId, 便于多租户下 codex 请求上报到正确的
- * kernel 实例。config.tdai.memory.enabled=false 时返 null。
+ * TDAI L0 client factory — semantically consistent with anthropicHandler.ts::createTdaiClient.
+ * spaceId takes priority over the config default serviceId, so that codex requests in a multi-tenant setup are reported to the correct
+ * kernel instance. Returns null when config.tdai.memory.enabled=false.
  */
 const createCodexTdaiClient = buildTdaiClientForRequest;
 
 /**
- * 从 codex `input[]` 抽最后一条 role=user 的真实用户文本, 组装 TdaiMessage。
- * 相当于 tdai/recorder.ts::extractLatestUserMessage 的 codex 变体 —— 差别在
- * 遍历判据 (type==="message" && role==="user") 与文本取值 (content[].input_text)。
- * 复用 codexAdapter.extractUserText, 保证跟 codexHandler 里 langfuse traceInput
- * 使用同一份用户提问文本 (docs/2026-08-07-codex-integration-plan.md §9)。
+ * Extract the last real user text with role=user from codex `input[]` and assemble a TdaiMessage.
+ * Equivalent to the codex variant of tdai/recorder.ts::extractLatestUserMessage — the difference is in the
+ * traversal criterion (type==="message" && role==="user") and the text extraction (content[].input_text).
+ * Reuses codexAdapter.extractUserText, ensuring the same user question text is used as the langfuse traceInput in
+ * codexHandler (docs/2026-08-07-codex-integration-plan.md §9).
  */
 function extractLatestCodexUserMessage(input: unknown): TdaiMessage | null {
   if (!Array.isArray(input)) return null;
@@ -175,10 +175,10 @@ export function classifyCodexRequest(
  * Extract session_id from codex request.
  * Primary: `session-id` header. Fallback: `body.client_metadata.session_id`.
  *
- * subagent 归一：带 x-parent-conversation-id 的请求（并行 subagent）一律用
- * parent id 作为会话身份，复用主会话 session state，避免重弹 session-init 表单。
- * 与 workbuddyHandler.extractWorkbuddySessionId 完全镜像
- * （2026-09-20 修复 WorkBuddy 压缩后无限循环，详见 session/session-key.ts 注释）。
+ * subagent normalization: requests carrying x-parent-conversation-id (parallel subagents) always use the
+ * parent id as the session identity, reusing the main session state to avoid re-popping the session-init form.
+ * Fully mirrors workbuddyHandler.extractWorkbuddySessionId
+ * (fixed 2026-09-20: WorkBuddy infinite loop after compaction; see the comments in session/session-key.ts for details).
  */
 export function extractCodexSessionId(
   headers: Record<string, string>,
@@ -202,13 +202,13 @@ export function extractCodexSessionId(
  * calls and fabricates a `function_call_output.output` starting with
  * "request_user_input is unavailable in".
  *
- * 本函数是历史工具函数，实际拦截逻辑现已内化到 CB 状态机
- * （session/codebuddy/init.ts 的 codex-only pre-checks 段）。保留 export
- * 是因为 codex-handler.test.ts 有单测直接使用它验证结构识别。
+ * This function is a legacy utility; the actual interception logic is now internalized into the CB state machine
+ * (the codex-only pre-checks section of session/codebuddy/init.ts). The export is kept
+ * because codex-handler.test.ts has unit tests that use it directly to verify structure recognition.
  */
 export function detectDefaultModeGate(input: unknown): boolean {
   if (!Array.isArray(input)) return false;
-  // 只识别"input 最后一个 item 就是 gate output": 详见 codebuddy/init.ts 同名注释。
+  // Only recognizes "the last item of input is the gate output": see the same-named comment in codebuddy/init.ts for details.
   const last = input[input.length - 1] as Record<string, unknown> | null | undefined;
   if (!last || typeof last !== "object") return false;
   if (last.type !== "function_call_output") return false;
@@ -270,7 +270,7 @@ function buildUpstreamHeaders(
   return headers;
 }
 
-// filterResponseHeaders 合并到 common/constants.ts
+// filterResponseHeaders merged into common/constants.ts
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 
@@ -307,12 +307,12 @@ export async function runCodexPipeline(
   if (!parseResult.ok) {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
-  // ⚠️ `let` 不能改回 `const`: 下面 § 9 注入阶段 (line 770 附近)
-  // 会 `body = injectCodexAssets(body, ...)` 原地替换为注入后的新对象。
-  // c6fa775d (stageParseBody 迁移) 不小心改成了 const, 导致运行时
-  // 抛 "Assignment to constant variable", catch 后降级为**无注入透传** —
-  // codex 的 skill/memory/session_context 从此全丢。TS 2588 一直报警
-  // 但被当成"重构遗留基线错误"没人修。
+  // Warning: `let` must not be changed back to `const`: the § 9 injection stage below (around line 770)
+  // will replace in place with `body = injectCodexAssets(body, ...)`, the new injected object.
+  // c6fa775d (stageParseBody migration) accidentally changed it to const, causing runtime to
+  // throw "Assignment to constant variable", and after the catch it degraded to **passthrough without injection** —
+  // codex's skill/memory/session_context were all lost from then on. TS 2588 kept reporting a warning
+  // but it was treated as a "refactor-leftover baseline error" and nobody fixed it.
   let body = parseResult.body;
 
   // ── 3. Extract headers as plain object ─────────────────────────────────────
@@ -321,10 +321,10 @@ export async function runCodexPipeline(
     headers[k.toLowerCase()] = v;
   }
 
-  // ── Identity埋点 (bug B5 fix: 老 codex 不调 inspectAndRecord) ────────────
-  // 由 agent.stageGates.identityRecord 门控 (codex 现走 full preset, 恒 true)。
-  // 历史上 codex 起步 minimal 且需显式 flip; 后因 B1-B8 修复在 minimal 下不生效
-  // 而统一改为 full, 保留 gate 判据以便按档位回滚。
+  // ── Identity instrumentation (bug B5 fix: old codex did not call inspectAndRecord) ────────────
+  // Gated by agent.stageGates.identityRecord (codex now uses the full preset, always true).
+  // Historically codex started at minimal and needed an explicit flip; later, because the B1-B8 fixes do not take effect under minimal,
+  // it was uniformly changed to full; the gate criterion is kept so it can be rolled back by tier.
   const codexAgent = resolveAgentStrategy("codex");
   const reqHeadersForIdentity: Record<string, string> = {};
   for (const [k, v] of c.req.raw.headers.entries()) reqHeadersForIdentity[k] = v;
@@ -349,18 +349,18 @@ export async function runCodexPipeline(
   // ── 4. Classify request ────────────────────────────────────────────────────
   const requestKind = classifyCodexRequest(body, path, headers);
   const isAuxiliary = requestKind === "auxiliary";
-  // 调用签名是 resolveModelId(creditPricingConfig, requestedModel) —— 之前
-  // 错把 body 当第一参数（漏传 config）导致返回值是整个 body 对象。这个 bug
-  // 从 codex P1 接入首帧就存在，之前 codex 未接 langfuse 没被发现——接入后
-  // Langfuse trace name / observation name 都成了 " / usr-xxx" 空串前缀。
-  // 对齐 handler.ts:482 / anthropicHandler.ts 的调用姿势。
+  // The call signature is resolveModelId(creditPricingConfig, requestedModel) — previously
+  // body was wrongly passed as the first argument (config omitted), so the return value was the whole body object. This bug
+  // has existed since the very first frame of the codex P1 integration; it was not found earlier because codex had no langfuse integration — after integration
+  // the Langfuse trace name / observation name all became " / usr-xxx" with an empty-string prefix.
+  // Aligned with the call approach in handler.ts:482 / anthropicHandler.ts.
   const requestedModel = typeof body.model === "string" ? body.model : "";
 
-  // ── Model gate + alias (bug B8 fix: 老 codex 完全不检查 pricing table) ──
-  // 由 agent.stageGates.modelGate 门控 (codex 现走 full preset, 恒 true)。
-  // 等价 openai-chat + anthropic 行为。
-  // isCustomUpstream 判断: 复用 stageInstanceUpstreamEarly 已计算的 shouldOverride 结果
-  // (但 codex 老代码没走这个 early stage, 这里独立算一次 — 保守跳过 gate 只在 aux 场景)
+  // ── Model gate + alias (bug B8 fix: old codex did not check the pricing table at all) ──
+  // Gated by agent.stageGates.modelGate (codex now uses the full preset, always true).
+  // Equivalent to openai-chat + anthropic behavior.
+  // isCustomUpstream decision: reuse the shouldOverride result already computed by stageInstanceUpstreamEarly
+  // (but the old codex code did not go through this early stage, so it is computed independently here — conservatively skipping the gate only in aux scenarios)
   const _spaceIdForGate = extractSpaceIdFromPath(path) ?? "";
   let _codexIsCustomUpstream = false;
   if (codexAgent.stageGates.modelGate && !isAuxiliary) {
@@ -385,7 +385,7 @@ export async function runCodexPipeline(
   }
 
   const modelId = resolveModelId(config.creditPricing, requestedModel);
-  // 对外展示名只用于客户端请求；TokenHub 只接受价目表中登记的真实服务 ID。
+  // The external display name is only used for client requests; TokenHub only accepts the real service IDs registered in the price list.
   if (typeof body.model === "string" && modelId !== requestedModel) {
     body.model = modelId;
   }
@@ -395,7 +395,7 @@ export async function runCodexPipeline(
   // ── 5. Aux passthrough ─────────────────────────────────────────────────────
   if (isAuxiliary) {
     pipe.info("CODEX_AUX", `auxiliary request → passthrough (path=${path})`);
-    // aux 不上报 langfuse（跟 CC/CB 对齐——sidequery/fork 类 aux 不算真对话轮）
+    // aux does not report to langfuse (aligned with CC/CB — sidequery/fork-type aux are not real conversation turns)
     return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, null);
   }
 
@@ -408,10 +408,10 @@ export async function runCodexPipeline(
   const callerUserKey = apiKey || null;
 
   // ── 6b. Langfuse turn context (one trace = one turn) ────────────────────────
-  // codex 的 turn 序号从 body.input[] 里"人类输入"数量推导（同 CC/CB 惯例；
-  // 同 turn 内的工具循环请求会算出相同的 turnSeq → 同一 trace）。用户问题
-  // 走 codex adapter 的 extractUserText——codex 用 input[] 而非 messages[]，
-  // 通用 resolveLatestUserQuery 靠 costGuard profile 走 messages[]，这里不合用。
+  // codex's turn sequence number is derived from the number of "human inputs" in body.input[] (same as the CC/CB convention;
+  // tool-loop requests within the same turn compute the same turnSeq → the same trace). The user question
+  // goes through the codex adapter's extractUserText — codex uses input[] rather than messages[],
+  // and the generic resolveLatestUserQuery relies on the costGuard profile going through messages[], which does not fit here.
   const turnSeq = countHumanTurnsResponses(body.input);
   const userQuery = codexAdapter.extractUserText(body.input) ?? "";
   const lf: LangfuseTurnContext = {
@@ -420,7 +420,7 @@ export async function runCodexPipeline(
     traceName: `${modelId} / ${keyId}`,
     userId: keyId,
     sessionId: sessionKey,
-    // agent_source tag 标明客户端族群；protocol:responses 区分 codex 的 wire。
+    // The agent_source tag identifies the client family; protocol:responses distinguishes codex's wire.
     tags: [
       `agent_source:${agentSource}`,
       "protocol:responses",
@@ -431,11 +431,11 @@ export async function runCodexPipeline(
     userQuery,
   };
 
-  // ── 6c. Legacy /proxy/<spaceId> —— 只做路由 + 压缩 + 计费 ───────────────────
-  // 该前缀不带 agent 段，走到这里的客户端身份无从判断。记忆类功能全部跳过：
-  // 按错误的 agent 画像弹表单、拦 mem 命令、往上下文注入资产，比不做更糟。
-  // archiveCtx=null 同时关掉 skill 提取与 TDAI L0 写入；lf 仍然构造，压缩、
-  // 计费与 usage 落表照常。
+  // ── 6c. Legacy /proxy/<spaceId> — routing + compression + billing only ───────────────────
+  // This prefix carries no agent segment, so the client identity reaching here cannot be determined. Memory features are all skipped:
+  // showing a form by the wrong agent profile, intercepting mem commands, and injecting assets into the context is worse than doing nothing.
+  // archiveCtx=null turns off both skill extraction and TDAI L0 writes; lf is still constructed, compression,
+  // billing and usage table writes remain as usual.
   if (isLegacyProxyPath(path)) {
     pipe.info("CODEX_LEGACY_PROXY", `legacy /proxy prefix → route+compress only (path=${path})`);
     return forwardToUpstream(c, config, body, traceId, startTime, keyId, modelId, pipe, lf, null);
@@ -447,11 +447,11 @@ export async function runCodexPipeline(
   let injectionSkipped = false;
   let sessionJustRegistered = false;
   let _resetFlowResult: { agentName: string; agentIdShort: string; teamName?: string; teamId: string; taskName?: string | null; bypassed?: boolean } | null = null;
-  // 存 initResult 的 agent/task detail 供 § 9 注入阶段构造 <session_context>。
-  // handleSessionInit 内部本会通过 messages[0] 塞进 session_context，但那份
-  // messages 是我们传进去的临时 synthesizedMessages，不会回到 codex body。
-  // 这里显式抓 detail，让下面合成 body 时用 buildSessionContextBlockWithToggles
-  // 造同款 block 并预填到合成 system message 前面。
+  // Store the agent/task detail of initResult for the § 9 injection stage to construct <session_context>.
+  // handleSessionInit would have stuffed session_context into messages[0] internally, but that
+  // messages is the temporary synthesizedMessages we passed in, and does not return to the codex body.
+  // Here we explicitly capture the detail so that when synthesizing the body below, buildSessionContextBlockWithToggles
+  // builds the same block and pre-fills it in front of the synthesized system message.
   let cachedAgentDetail: unknown = null;
   let cachedTaskDetail: unknown = null;
 
@@ -471,19 +471,19 @@ export async function runCodexPipeline(
 
   // ── 7. Session-init state machine (reuses CB with agentSource="codex") ────
   //
-  // 老版本 7a (Default gate 独立拦截) + 7b.1 (MORE 独立拦截) 已收敛进 CB 状态机内部
-  // (session/codebuddy/init.ts 顶部 codex-only pre-checks 段)。codexHandler 只
-  // 负责把 body.input[] 透传给 reqCtx.codexAnswerInput 让状态机自己识别 gate/MORE。
-  // 首次 Default gate 命中会拿到 initResult.bypassReason === "default-gate", 由
-  // 本 handler 返一次 Plan 模式提示；后续同 session 请求 bypass 稳态透传。
+  // The old version's 7a (Default gate standalone interception) + 7b.1 (MORE standalone interception) have converged into the CB state machine
+  // (the codex-only pre-checks section at the top of session/codebuddy/init.ts). codexHandler is only
+  // responsible for passing body.input[] through to reqCtx.codexAnswerInput so the state machine recognizes the gate/MORE itself.
+  // The first Default gate hit gets initResult.bypassReason === "default-gate", and this
+  // handler returns a Plan mode hint once; later requests of the same session bypass in the steady state and pass through.
   if (config.sessionInit?.enabled && sessionId) {
     try {
-      // Round 18: session-init 主编排走 shared stageSessionInitOrchestrate;
-      // codex 4 个 callback:
+      // Round 18: the session-init main orchestration goes through the shared stageSessionInitOrchestrate;
+      // the 4 callbacks of codex:
       //   - synthesizeMessages: codexFormAnswersAsMessages(input)
       //   - buildRecoverInitResult: systemAppend + messages:[] (responses)
       //   - buildInterceptResponse: buildCodexFormResponse (Responses API SSE)
-      //   - buildDefaultGateResponse: codex 独有 Plan 提示 (处理在下方 bypassReason 分支)
+      //   - buildDefaultGateResponse: codex-only Plan hint (handled in the bypassReason branch below)
       const _orch = await stageSessionInitOrchestrate({
         agentSourceForState: agentSource,
         sessionKey, userId: userId || null, spaceId,
@@ -516,7 +516,7 @@ export async function runCodexPipeline(
           stream: isStream,
           modelId: modelId as string,
           protocol: "responses" as any,
-          // 把原始 input[] 交给 CB 状态机，用于识别 codex 客户端专属的 Default gate 字符串和 MORE 翻页标记
+          // Hand the original input[] to the CB state machine, to recognize the codex-client-specific Default gate string and MORE paging marker
           codexAnswerInput: input,
         }),
         buildInterceptResponse: (initResult) => {
@@ -530,31 +530,31 @@ export async function runCodexPipeline(
             teamPage: initResult.formData.teamPage ?? 0,
             agentPage: initResult.formData.agentPage ?? 0,
             taskPage: initResult.formData.taskPage ?? 0,
-            // Override stream with 当前请求的 stream flag (form 建时的值可能过期)
+            // Override stream with the current request's stream flag (the value at form creation time may be stale)
             stream: isStream,
             modelId: initResult.formData.modelId ?? (modelId as string),
           });
         },
-        // Default-gate 分支在下方保留 inline (需 access pipe.info + bypassReason 复杂文案分支)
+        // The Default-gate branch stays inline below (needs access to pipe.info + the complex wording branches of bypassReason)
       });
       if (!_orch.proceed) return _orch.response!;
       const initResult = _orch.initResult!;
 
-      // ── Default gate 首次命中：CB 状态机已经落 bypass state，本 handler
-      //    返一次 Plan 模式提示；下一轮请求 recovered.bypassed=true 会走
-      //    initialized 分支直接透传，Plan 提示不会再重复。
+      // ── Default gate first hit: the CB state machine has already persisted the bypass state, this handler
+      //    returns a Plan mode hint once; the next request's recovered.bypassed=true goes
+      //    through the initialized branch to pass through directly, so the Plan hint is not repeated.
       if ((initResult as any).bypassReason === "default-gate") {
         pipe.info("CODEX_GATE", "Default mode gate detected → notify user (first hit)");
         const { buildMemResponse } = await import("../../mem-command/response-builder.js");
-        // reset 场景下的 gate: 用户明确发了 mem:session-reset 命令,
-        // 但 codex 客户端不在 Plan 模式无法弹 form → 措辞需要 明确告知
-        // "reset 命令需要 Plan 模式" 而非笼统的"资产功能不启用"。
+        // Gate in the reset scenario: the user explicitly sent the mem:session-reset command,
+        // but the codex client is not in Plan mode and cannot show a form → the wording needs to state clearly
+        // "the reset command requires Plan mode" rather than the vague "asset features are not enabled".
         const gateText = (initResult as any).resetFlow
-          ? "⚠️ mem:session-reset 需要 Plan 模式支持。\n\n"
-            + "codex 客户端当前不在 Plan 模式，无法弹出资产选择表单。\n"
-            + "请切到 Plan 模式后再执行 mem:session-reset。"
-          : "检测到未开启 Plan 模式，本次对话不开启团队资产相关功能（Skill / Task / Agent 不参与）。"
-            + "如需使用，请切到 Plan 模式后重新开启新会话。";
+          ? "⚠️ mem:session-reset requires Plan mode support.\n\n"
+            + "The codex client is not currently in Plan mode, so the asset selection form cannot be shown.\n"
+            + "Please switch to Plan mode and then run mem:session-reset."
+          : "Plan mode was not detected as enabled; team-asset features (Skill / Task / Agent) will not be enabled for this conversation. "
+            + "To use them, please switch to Plan mode and start a new session.";
         return buildMemResponse(gateText, {
           protocol: "responses",
           stream: isStream,
@@ -581,8 +581,8 @@ export async function runCodexPipeline(
         warnPrefix: "[codex] asset-capability resolve failed:",
       });
 
-      // Prewarm 前置短路：mem-command 命中的 turn 不走 forward、不消费 hook-cache，
-      // 若照常 prewarm 会白花 2-3s + 3 次网络请求。见 handler.ts 对称位置详注。
+      // Prewarm pre-short-circuit: a turn hit by a mem-command does not go through forward and does not consume the hook-cache;
+      // prewarming as usual would waste 2-3s + 3 network requests. See the detailed note at the symmetric position in handler.ts.
       let memCommandPending = false;
       {
         try {
@@ -620,21 +620,21 @@ export async function runCodexPipeline(
       if (sessionInfo && !sessionInfo.space_id && spaceId) {
         sessionInfo.space_id = spaceId;
       }
-      // 缓存 detail 给下面 § 9 用（构造 <session_context> block）——两条分支都写：
-      // recovered 分支的 initResult 是我们手工组装的，walked-through 分支来自
-      // handleSessionInit 返回，字段都是 SessionInitResult 里的 agent/taskDetail。
+      // Cache the detail for § 9 below (constructing the <session_context> block) — written by both branches:
+      // the initResult of the recovered branch is assembled by hand by us, the walked-through branch comes from
+      // handleSessionInit's return; the fields are all the agent/taskDetail in SessionInitResult.
       cachedAgentDetail = initResult.agentDetail ?? null;
       cachedTaskDetail = initResult.taskDetail ?? null;
 
-      // 记录 resetFlow 到外层供块外返回确认响应
+      // Record resetFlow to the outer scope for returning the confirmation response outside the block
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
-          agentName: initResult.agentDetail?.name ?? "未知",
-          // agentIdShort 字段名沿用历史，但此处**存完整 agent_id**（如 agt-1celthr7yn）。
-          // 之前 slice(-8) 会截断成 "elthr7yn" 用户看不懂，与 team 截断问题对称。
+          agentName: initResult.agentDetail?.name ?? "Unknown",
+          // The agentIdShort field name keeps its historical name, but here **the full agent_id is stored** (e.g. agt-1celthr7yn).
+          // Previously slice(-8) truncated it to "elthr7yn" which users could not understand, symmetric with the team truncation issue.
           agentIdShort: initResult.sessionInfo?.agent_id
             ? String(initResult.sessionInfo?.agent_id) : "",
-          // teamName + 完整 teamId：见 handler.ts 对称注释。
+          // teamName + full teamId: see the symmetric comment in handler.ts.
           teamName: initResult.teamName ?? undefined,
           teamId: initResult.sessionInfo?.team_id
             ? String(initResult.sessionInfo?.team_id) : "",
@@ -648,7 +648,7 @@ export async function runCodexPipeline(
     }
   }
 
-  // ── mem:session-reset 完成确认 (via shared stage) ────────────────────────
+  // ── mem:session-reset completion confirmation (via shared stage) ────────────────────────
   if (_resetFlowResult) {
     return stageSessionResetConfirmation({
       resetFlowResult: _resetFlowResult,
@@ -660,10 +660,10 @@ export async function runCodexPipeline(
   // ── 8. mem-command intercept ────────────────────────────────────────────────
   // Position: after session-init, before injection (same as CC/CB).
   //
-  // ⚠️ 不走 parseMemCommand(body, ...) —— 该函数只解 body.messages[] (CC/CB
-  // 形态)，codex body 用 input[]，进去立即返 null → mem 命令全部静默透传给
-  // LLM，模型会编造"Memory synced" 之类假回复 (P0-1 QA 报告)。
-  // 直接用已提取的 userText 走 parseCommandFromText。
+  // Warning: do not go through parseMemCommand(body, ...) — that function only parses body.messages[] (CC/CB
+  // shape), and a codex body uses input[], so it returns null immediately → all mem commands silently pass through to the
+  // LLM, and the model fabricates fake replies like "Memory synced" (P0-1 QA report).
+  // Directly use the already-extracted userText to go through parseCommandFromText.
   // ── 8. mem-command intercept (via shared stage) ────────────────────────
   {
     const userText = codexAdapter.extractUserText(input);
@@ -713,17 +713,17 @@ export async function runCodexPipeline(
       const { getInjectionPipeline } = await import("../../injection/index.js");
       const pipeline = getInjectionPipeline(config);
 
-      // ── session_context 预填 ────────────────────────────────────────────────
-      // handleSessionInit 的 CB init 把 <session_context>（[Agent]+[Task] 描述）
-      // 塞进它内部持有的 messages[0]（我们传给它的临时数组），这份 messages
-      // 不会被返回给 codex handler；同时 initResult.systemAppend 只在 CC 分支
-      // 填充，CB 分支永远 undefined。结果 codex 侧只拿到 skill/memory/knowledge
-      // 段，**agent/task 描述完全没注入到最终 body 里**。
+      // ── session_context pre-fill ────────────────────────────────────────────────
+      // The CB init of handleSessionInit stuffs <session_context> ([Agent]+[Task] descriptions)
+      // into the messages[0] it holds internally (the temporary array we passed it), and this messages
+      // is not returned to the codex handler; meanwhile initResult.systemAppend is only
+      // filled on the CC branch, and always undefined on the CB branch. As a result the codex side only gets the skill/memory/knowledge
+      // segments, and **the agent/task description is not injected into the final body at all**.
       //
-      // 修法：直接用 buildSessionContextBlockWithToggles 从 handler 侧已经存好的
-      // agentDetail/taskDetail 构造同款 block，预填到合成 body 的 system
-      // message；下面 pipeline.process 会继续在同一 system message 后面 append
-      // 更多注入内容，最终 raw 模式一起抽出去 → developer 段包含 session_context。
+      // Fix: directly use buildSessionContextBlockWithToggles to build the same block from the
+      // agentDetail/taskDetail already stored on the handler side, and pre-fill it into the system
+      // message of the synthesized body; pipeline.process below continues to append
+      // more injected content after the same system message, and in the end raw mode extracts them together → the developer segment contains session_context.
       const { buildSessionContextBlockWithToggles } = await import("../../session/context-injector.js");
       const sessionContextBlock = buildSessionContextBlockWithToggles(
         cachedAgentDetail as any,
@@ -766,13 +766,13 @@ export async function runCodexPipeline(
       const injectedText = typeof sysMsg?.content === "string" ? sysMsg.content : "";
 
       if (injectedText.length > 0) {
-        // Pipeline 产出的 injectedText 已经是**成品 XML 文本**（含
+        // The injectedText produced by the Pipeline is already **finished XML text** (containing
         // <skill_tools> / <available_skills> / <user_memory> /
-        // <tdai_profile_memory> / <memory-tools-guide> 等多组内部 tag)，
-        // 与 CC / CB 客户端在 system message 里看到的内容字节一致。
-        // 走 raw 模式原样嵌入 <tdai_injections> wrapper 内层——不再套
-        // 内层 <available_skills> tag，也不 escape 内容里的 XML tag，
-        // 否则模型看到的会是转义字符（`&lt;user_memory&gt;`）读不出结构。
+        // multiple groups of internal tags such as <tdai_profile_memory> / <memory-tools-guide>),
+        // byte-identical to what CC / CB clients see in the system message.
+        // Go through raw mode and embed as is inside the <tdai_injections> wrapper — no longer wrapping
+        // an inner <available_skills> tag, and not escaping the XML tags inside the content,
+        // otherwise the model would see escaped characters (`&lt;user_memory&gt;`) and could not read the structure.
         body = injectCodexAssets(body, { raw: injectedText });
       }
     } catch (err: unknown) {
@@ -783,9 +783,9 @@ export async function runCodexPipeline(
 
   // ── 10. Build archive ctx (skill + tdai L0), forward, tap for hooks ──────
   //
-  // 只在 main dialog + 已初始化 + 未 bypass 的稳态下建 ctx —— injectionSkipped
-  // 场景与 CC/CB 的"跳过 L0/skill"分支对齐(sessionInfo 缺 team/user/agent 三件套
-  // triggerSkillExtractIfReady 本身也会早退, 但提前判可以省一次 fanout)。
+  // Only build ctx in the steady state of main dialog + initialized + not bypassed — the injectionSkipped
+  // scenario aligns with the CC/CB "skip L0/skill" branch (when sessionInfo lacks the team/user/agent trio,
+  // triggerSkillExtractIfReady itself also exits early, but deciding up front saves one fanout).
   const archiveCtx = buildArchiveCtx({
     config,
     sessionInfo: sessionInfo as Record<string, unknown> | null | undefined,
@@ -806,11 +806,11 @@ export async function runCodexPipeline(
 // ── Archive context (skill/conversation/add + TDAI L0 write) ─────────────────
 
 /**
- * 归档触发上下文 —— 打包 hook 所需的所有输入, 从 handleCodexEndpoint 造好后
- * 一路透到 consumeCodexStream 的 completeStream 尾部触发 skill/L0 hooks。
+ * Archive trigger context — packages all inputs the hook needs, built from handleCodexEndpoint and
+ * passed all the way to the tail of completeStream in consumeCodexStream to trigger the skill/L0 hooks.
  *
- * 只有 main 对话 + 已初始化 session + 未 bypass 才创建; 其它情况 archiveCtx=null,
- * forward 侧遇到 null 就跳过 hook (跟 CC/CB 的 isMainDialog 分支对齐)。
+ * Created only for main dialog + initialized session + not bypassed; in other cases archiveCtx=null,
+ * and the forward side skips the hooks on null (aligned with the isMainDialog branch of CC/CB).
  */
 export interface CodexArchiveCtx {
   config: ProxyConfig;
@@ -819,13 +819,13 @@ export interface CodexArchiveCtx {
   sessionInfo: Record<string, unknown>;
   spaceId: string;
   /**
-   * 原始 codex `input[]` —— skill 归档时按 protocol="responses" 走
-   * normalize-conversation 内部 convertCodexInputItem 展开。
+   * The original codex `input[]` — when skill archiving, with protocol="responses" it goes through
+   * normalize-conversation's internal convertCodexInputItem to expand.
    */
   input: unknown[];
   tdaiClient: TdaiClient | null;
   tdaiIdentity: TdaiIdentity | null;
-  /** 从 `input[]` 抽出的最新用户提问 (extractLatestCodexUserMessage 提取)。 */
+  /** The latest user question extracted from `input[]` (extracted by extractLatestCodexUserMessage). */
   tdaiUserMessage: TdaiMessage | null;
   assetCapabilities?: import("../../injection/types.js").AssetCapabilityFlags;
 }
@@ -871,18 +871,18 @@ function buildArchiveCtx(args: {
 }
 
 /**
- * 流结束后触发 skill/conversation/add + TDAI L0 write, 对齐 CC/CB 的
- * anthropicHandler.ts:1867-1948 段。
+ * After the stream ends, trigger skill/conversation/add + TDAI L0 write, aligned with the
+ * anthropicHandler.ts:1867-1948 section of CC/CB.
  *
- * 参数:
- *   assistantText: SSE accumulator 累积的 assistant 文本
- *   toolUseCount:  流里累积的 function_call 数 (round 边界判据)
+ * Parameters:
+ *   assistantText: assistant text accumulated by the SSE accumulator
+ *   toolUseCount:  number of function_calls accumulated in the stream (round boundary criterion)
  *
- * 失败静默(错误已 log), 绝不阻塞 upstream 响应链。
+ * Failures are silent (errors already logged), never blocking the upstream response chain.
  *
- * 内部走 shared stages/archive.ts::stageArchive (tdaiWriteMode="fire-and-forget-tracked"),
- * responses assistantMessage 形态 (type:"message", role:"assistant",
- * content:[{type:"output_text", text}]) 由本函数拼装后交给 stage。
+ * Goes through the shared stages/archive.ts::stageArchive (tdaiWriteMode="fire-and-forget-tracked"),
+ * the responses assistantMessage shape (type:"message", role:"assistant",
+ * content:[{type:"output_text", text}]) is assembled by this function and handed to the stage.
  */
 async function triggerCodexArchiveHooks(
   ctx: CodexArchiveCtx,
@@ -930,30 +930,30 @@ async function forwardToUpstream(
   lf: LangfuseTurnContext | null,
   archiveCtx: CodexArchiveCtx | null = null,
 ): Promise<Response> {
-  // Per-agent upstream override (upstream.agents.codex.url) 优先于全局 url。
-  // 对齐 anthropicHandler.ts:1029 的解析姿势。codex 通常需要单独指向支持
-  // Responses API 的兼容层——部分 OpenAI 兼容上游只实现
-  // messages/chat_completions，不支持 /responses，此处允许按 agent 覆盖。
+  // Per-agent upstream override (upstream.agents.codex.url) takes priority over the global url.
+  // Aligned with the resolution approach at anthropicHandler.ts:1029. codex usually needs to point separately at a compatibility layer
+  // that supports the Responses API — some OpenAI-compatible upstreams only implement
+  // messages/chat_completions and do not support /responses; overriding per agent is allowed here.
   const agentUpstreamEntry = config.upstream.agents?.["codex"];
   let upstreamBase = agentUpstreamEntry?.url || config.upstream.url;
   let upstreamUrl = joinUrl(upstreamBase, c.req.path);
   const upstreamHeaders = buildUpstreamHeaders(c, config);
   let skipCreditReport = false;
   upstreamHeaders["content-type"] = "application/json";
-  // 覆盖 apiKey 与 per-agent 策略一致：agentUpstreamEntry.apiKey 优先，
-  // 否则透传客户端 Bearer。
+  // Overriding apiKey is consistent with the per-agent policy: agentUpstreamEntry.apiKey takes priority,
+  // otherwise pass through the client Bearer.
   if (agentUpstreamEntry) {
     if (agentUpstreamEntry.apiKey) {
       upstreamHeaders["authorization"] = `Bearer ${agentUpstreamEntry.apiKey}`;
     }
-    // else: 保留 c.req.header('authorization') 里的客户端 key 透传
+    // else: keep the client key in c.req.header('authorization') and pass it through
   }
 
   // ── Instance upstream config override (codex has no cost-guard routing) ──
-  // v2 model groups(§7.3): 走 shared stageInstanceUpstreamResponses (与 wb 共享)。
-  // 4 态处理: blocked/unmanaged → 400; override → 替换上游; official → 保持。
-  // `/proxy/<spaceId>` 不带 agent 段: 强制 official (forceOfficial=true), 避免
-  // 实例没把 codex 写进 agents 列表时 unmanaged → 400 把协议路由堵死。
+  // v2 model groups (§7.3): go through the shared stageInstanceUpstreamResponses (shared with wb).
+  // 4-state handling: blocked/unmanaged → 400; override → replace upstream; official → keep.
+  // `/proxy/<spaceId>` carries no agent segment: force official (forceOfficial=true), to avoid
+  // unmanaged → 400 blocking the protocol route when the instance has not written codex into the agents list.
   const spaceId = extractSpaceIdFromPath(c.req.path) ?? "";
   const _upstreamResolve = await stageInstanceUpstreamResponses({
     agent: "codex",
@@ -970,7 +970,7 @@ async function forwardToUpstream(
     if (_upstreamResolve.headerUpdates?.authorization) {
       upstreamHeaders["authorization"] = _upstreamResolve.headerUpdates.authorization;
     }
-    // codex 无 x-api-key 支持, deleteXApiKey 无操作
+    // codex has no x-api-key support, deleteXApiKey is a no-op
     if (_upstreamResolve.bodyModelOverride && typeof body.model === "string") {
       body.model = _upstreamResolve.bodyModelOverride;
     }
@@ -1008,11 +1008,11 @@ async function forwardToUpstream(
 
   pipe.forwardStart(upstreamUrl);
 
-  // ── Opik: create trace (bug B7 fix 迁移时丢失, 本次补回) ──────────────────
-  // 与 anthropic.ts / openai-chat.ts 对齐: 必须在 span 之前 create trace,
-  // 否则收尾的 opikCreateLlmSpan 会带着空 trace_id 被 Opik 拒 (422 traceId
-  // must not be null), 整条 codex 链路在 Opik 侧完全不可见。
-  // opik.enabled=false 时内部 no-op (返 "")。
+  // ── Opik: create trace (bug B7 fix lost during migration, restored this time) ──────────────────
+  // Aligned with anthropic.ts / openai-chat.ts: the trace must be created before the span,
+  // otherwise the closing opikCreateLlmSpan would carry an empty trace_id and be rejected by Opik (422 traceId
+  // must not be null), making the whole codex chain completely invisible on the Opik side.
+  // When opik.enabled=false it is an internal no-op (returns "").
   let forkTraceId: string | undefined;
   try {
     const { extractSimpleMessages: extractForOpik } = await import("../../mem-command/index.js");
@@ -1036,13 +1036,13 @@ async function forwardToUpstream(
     pipe.error("OPIK_TRACE", opikErr instanceof Error ? opikErr : new Error(String(opikErr)));
   }
 
-  // Bug B9 fix (handler-audit): 老 codex 无 AbortSignal.timeout, 上游卡死时 fetch
-  // 永久 hang, pod OOM 才终止。加超时兜底 (跟 openai-chat/anthropic 对齐)。
+  // Bug B9 fix (handler-audit): the old codex had no AbortSignal.timeout; when upstream hangs, fetch
+  // hangs forever until the pod is OOM-killed. Add a timeout fallback (aligned with openai-chat/anthropic).
   const forwardTimeoutMs = config.server?.forwardTimeoutMs ?? 600_000;
 
-  // Bug B1 fix (handler-audit): 老 codex 完全不接 enforceRateLimit, 上游 quota 被
-  // 打爆时无法保护自家运营账号。由 codex agent.stageGates.rateLimit 门控 (现走 full
-  // preset, 恒 true)。custom upstream (用户自付) 时用户自己管 quota, 跳过。
+  // Bug B1 fix (handler-audit): the old codex did not wire enforceRateLimit at all, so when the upstream quota was
+  // blown it could not protect the operator's own account. Gated by codex agent.stageGates.rateLimit (now on the full
+  // preset, always true). With a custom upstream (user-paid) the user manages their own quota, so it is skipped.
   const codexAgentForForward = resolveAgentStrategy("codex");
   if (codexAgentForForward.stageGates.rateLimit && !skipCreditReport) {
     try {
@@ -1078,7 +1078,7 @@ async function forwardToUpstream(
     } else {
       pipe.error("CODEX_FORWARD", err instanceof Error ? err : new Error(String(err)));
     }
-    // 上报 langfuse 失败（转发异常 —— 上游未回响应体，只有本地 fetch 抛错）
+    // Report langfuse failure (forwarding exception — upstream returned no response body, only a local fetch error was thrown)
     if (lf) {
       try {
         langfuseReportFailure({
@@ -1115,10 +1115,10 @@ async function forwardToUpstream(
     traceId,
   });
 
-  // ── 上游 4xx/5xx：拷贝一份 body 文本用于 langfuse 错误上报；成功则 tap ──
-  // codex Responses API 只有 SSE 流式响应，不区分 stream / non-stream 处理。
+  // ── Upstream 4xx/5xx: copy the body text for langfuse error reporting; on success, tap ──
+  // The codex Responses API only has SSE streaming responses, with no stream / non-stream distinction.
   if (upstreamResp.status >= 400) {
-    // 4xx/5xx 通常返 JSON error（很小），完整读出来带进 langfuse 便于排查
+    // 4xx/5xx usually return a JSON error (very small); read it fully and include it in langfuse for easier troubleshooting
     const errText = await upstreamResp.text();
     if (lf) {
       try {
@@ -1144,7 +1144,7 @@ async function forwardToUpstream(
   }
 
   const responseHeaders = filterResponseHeaders(upstreamResp.headers);
-  // 上游请求 id —— 跨系统追溯用：客户端拿到的 x-request-id → 我方 usage_logs → 上游日志。
+  // Upstream request id — for cross-system tracing: the x-request-id the client gets → our usage_logs → upstream logs.
   const upstreamRequestId = upstreamResp.headers.get("x-request-id") ?? "";
   const contentType = upstreamResp.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {
@@ -1197,7 +1197,7 @@ async function forwardToUpstream(
         spaceId,
         modelId, usage, protocol: "responses",
       }).catch((rlErr: unknown) => pipe.error("RATE_LIMIT_RECORD", rlErr));
-      // stageCredit 统一走 shared 计费实现 (与 openai-chat / anthropic 对齐)
+      // stageCredit uniformly goes through the shared billing implementation (aligned with openai-chat / anthropic)
       const _creditResult = await stageCredit({
         skipCreditReport,
         config,
@@ -1218,7 +1218,7 @@ async function forwardToUpstream(
         responseHeaders.set("x-credit-report-error", _creditResult.responseErrorHeader);
       }
     }
-    // 最后一公里：notify / 日志 / 计费都已经看过原始响应，这里才动给客户端的那份。
+    // Last mile: notify / logging / billing have all seen the original response; only now do we touch the copy for the client.
     const clientResponseText = stripCfqFromResponseText(
       "responses",
       responseText,
@@ -1231,14 +1231,14 @@ async function forwardToUpstream(
     });
   }
 
-  // 2xx: aux 场景 (lf=null && archiveCtx=null) 直接透传不 tap; 主对话场景 tap
-  // 一份用于 langfuse 上报 + skill/L0 归档 hook (P1-P2 gap 修复)。
-  // 只要有 lf 或 archiveCtx 任一非空就必须 tee 一份 tap 流。
+  // 2xx: aux scenarios (lf=null && archiveCtx=null) pass through directly without tap; main-dialog scenarios tap
+  // one copy for langfuse reporting + the skill/L0 archive hooks (P1-P2 gap fix).
+  // As long as either lf or archiveCtx is non-null, a tap stream must be tee'd.
   // Main turns are tapped for observability/archive; auxiliary Responses calls
   // are tapped for credit only.
   const needTap = Boolean(lf) || Boolean(archiveCtx) || !skipCreditReport;
   if (!needTap || !upstreamResp.body) {
-    // 不 tap 也要剥离：注入与否跟观测无关，客户端校验一样会拒。
+    // Strip even without tap: whether injection happened is unrelated to observability, and client-side validation rejects it equally.
     return new Response(
       upstreamResp.body
         ? upstreamResp.body.pipeThrough(createCfqStripStream(
@@ -1267,8 +1267,8 @@ async function forwardToUpstream(
     keyId,
     sessionKey: lf?.sessionId ?? keyId,
     spaceId,
-    // Opik trace id —— 必须是 opikCreateTrace 生成的那个 (pipeline 内部
-    // traceId 与它同值, 但显式传递避免以后两者分叉时静默错位)。
+    // Opik trace id — must be the one generated by opikCreateTrace (the pipeline's internal
+    // traceId has the same value, but passing it explicitly avoids silent misalignment if the two diverge in the future).
     traceId,
     forkTraceId,
     upstreamRequestId,
@@ -1277,7 +1277,7 @@ async function forwardToUpstream(
     archiveCtx,
   });
 
-  // CFQ 剥离排在最后：tap 走的是另一条 tee 分支，读到的仍是模型原始输出。
+  // CFQ stripping comes last: the tap goes through another tee branch and still reads the model's raw output.
   return new Response(
     rawClientStream.pipeThrough(createCfqStripStream(
       "responses",
@@ -1293,15 +1293,15 @@ async function forwardToUpstream(
 
 // ── Langfuse helpers ─────────────────────────────────────────────────────────
 
-// countHumanTurnsCodex 合并到 turnSeq.ts::countHumanTurnsResponses (Round 7)。
-// 保留别名 export 供 backward-compat (老测试还 import 这个名字)。
+// countHumanTurnsCodex merged into turnSeq.ts::countHumanTurnsResponses (Round 7).
+// Alias export kept for backward-compat (old tests still import this name).
 export { countHumanTurnsResponses as countHumanTurnsCodex } from "../../turnSeq.js";
 
 /**
- * 构造送 langfuse 的 input —— codex 的 input[] 已经是结构化的对话历史，
- * 直接原样透传即可（跟 anthropic 的 buildLangfuseInput 目的一致：让
- * langfuse UI 上能看清"这一次调用的输入是啥"）。instructions 段单独带上,
- * 补齐上下文（codex 的 system prompt 在 body.instructions 而非 input）。
+ * Build the input sent to langfuse — codex's input[] is already a structured conversation history,
+ * and can be passed through as is (same purpose as anthropic's buildLangfuseInput: to make
+ * the langfuse UI show clearly "what the input of this call was"). The instructions segment is carried separately,
+ * to complete the context (codex's system prompt is in body.instructions rather than input).
  */
 function buildCodexLangfuseInput(body: Record<string, unknown>): unknown {
   const out: Record<string, unknown> = { input: body.input };
@@ -1313,8 +1313,8 @@ function buildCodexLangfuseInput(body: Record<string, unknown>): unknown {
 
 export interface CodexTapContext {
   /**
-   * langfuse trace context; null 表示 aux 场景不上报 langfuse 但可能仍需
-   * 归档 (理论上 aux 不会带 archiveCtx, 两者同时 null 时上游 tap 干脆不启动)。
+   * langfuse trace context; null means an aux scenario that does not report to langfuse but may still need
+   * archiving (in theory aux never carries archiveCtx; when both are null the upstream tap simply does not start).
    */
   lf: LangfuseTurnContext | null;
   modelId: string;
@@ -1327,13 +1327,13 @@ export interface CodexTapContext {
   keyId?: string;
   sessionKey?: string;
   /**
-   * Opik trace id —— 由 forwardToUpstream 里的 opikCreateTrace 生成。
-   * ⚠️ 与 lf.traceId (Langfuse, sha256 hex) 是两套独立 id，不能混用:
-   *   Opik 要求 v7 UUID，传 Langfuse 的 32 位 hex 会被 400 拒。
-   * 缺省 (undefined) 时 span 上报会带空 trace_id 被 Opik 422 拒。
+   * Opik trace id — generated by opikCreateTrace in forwardToUpstream.
+   * Warning: it is a separate id from lf.traceId (Langfuse, sha256 hex) and must not be mixed:
+   *   Opik requires a v7 UUID; passing Langfuse's 32-char hex gets rejected with 400.
+   * When omitted (undefined), the span report carries an empty trace_id and is rejected by Opik with 422.
    */
   traceId?: string;
-  /** Opik fork trace id (request_log 项目)；opik 关闭时 undefined。 */
+  /** Opik fork trace id (request_log project); undefined when opik is off. */
   forkTraceId?: string;
   /** Tenant the usage is billed to; ClickHouse filters on it. */
   spaceId?: string;
@@ -1343,21 +1343,21 @@ export interface CodexTapContext {
   /** Opaque counters from the preparation stage, recorded with the usage log. */
   preparedStats?: Record<string, unknown> | null;
   /**
-   * skill 归档 + TDAI L0 write hook 上下文;
-   * null 表示当前请求不需要触发归档 (aux / session 未初始化 / bypass)。
+   * Context of the skill archive + TDAI L0 write hooks;
+   * null means the current request does not need to trigger archiving (aux / session not initialized / bypass).
    */
   archiveCtx?: CodexArchiveCtx | null;
 }
 
 /**
- * 消费 codex Responses API SSE 流，提取 usage + assistant output，上报 langfuse。
+ * Consume the codex Responses API SSE stream, extract usage + assistant output, and report to langfuse.
  *
- * codex SSE 关键帧（见 docs/2026-08-05-codex-onboarding.md §7.5.2/3）：
- *   - response.output_text.delta:  {delta: "..."}                → 累积 assistant 文本
- *   - response.function_call_arguments.delta: {delta: "..."}     → 累计 tool_use 参数（观察用）
- *   - response.completed: {response: {usage, output, status, ...}} → 收尾，取 usage
+ * codex SSE key frames (see docs/2026-08-05-codex-onboarding.md §7.5.2/3):
+ *   - response.output_text.delta:  {delta: "..."}                → accumulate assistant text
+ *   - response.function_call_arguments.delta: {delta: "..."}     → accumulate tool_use arguments (for observation)
+ *   - response.completed: {response: {usage, output, status, ...}} → closing, take usage
  *
- * 失败静默——埋点绝不影响业务链路。
+ * Failures are silent — instrumentation must never affect the business chain.
  */
 export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: CodexTapContext): void {
   const { lf, modelId, startTime, upstreamUrl, inputBody, pipe, archiveCtx } = ctx;
@@ -1371,7 +1371,7 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
     let toolCalls: UpstreamToolCall[] = [];
     let stopReason: string | undefined;
     let streamCompleted = false;
-    // 5 分钟兜底：客户端断开可能让上游流卡住，这里超时也强制收尾一次。
+    // 5-minute fallback: a client disconnect may leave the upstream stream stuck; on timeout here, also force a closing once.
     const timeoutHandle = setTimeout(() => {
       if (!streamCompleted) {
         pipe.error("STREAM_TIMEOUT", "Codex stream reading exceeded 5 minutes");
@@ -1398,8 +1398,8 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
         }, pipe);
       }
       if (ctx.config && Object.keys(usage).length > 0) {
-        // codex 老行为: writeLog(usage) 无 gate 恒写 (B6 已在 pipeline 迁移时补齐,
-        // 不套 stageGates.writeLogUsage 以避免任何 preset 档位让 codex 停写)
+        // Legacy codex behavior: writeLog(usage) always writes with no gate (B6 was already restored during the pipeline migration,
+        // not wrapped in stageGates.writeLogUsage to avoid any preset tier making codex stop writing)
         stageWriteUsageLog({
           config: ctx.config, pipe,
           timestamp: endTime, modelId,
@@ -1415,8 +1415,8 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
         });
       }
       if (ctx.config && ctx.requestPath) {
-        // stageCredit 统一走 shared 计费实现 (与 openai-chat / anthropic stream 分支对齐)
-        // stream 场景客户端已收到, 响应头写不进去 (但 stage 内部仍会 log + CH raw 兜底)
+        // stageCredit uniformly goes through the shared billing implementation (aligned with the openai-chat / anthropic stream branch)
+        // In the stream scenario the client has already received it and headers cannot be written (but the stage still logs + falls back to CH raw internally)
         await stageCredit({
           skipCreditReport: ctx.skipCreditReport,
           config: ctx.config,
@@ -1483,9 +1483,9 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
             : null;
         stageOpikStreamSpan({
           config: ctx.config, gates: codexAgent.stageGates, pipe,
-          // Opik trace id 来自 ctx.traceId (由 forwardToUpstream 的
-          // opikCreateTrace 产出)。缺失说明 opik 关闭 → stage 内部会因
-          // opik.enabled=false 而 no-op, 不会发空 trace_id 的请求。
+          // The Opik trace id comes from ctx.traceId (produced by opikCreateTrace
+          // in forwardToUpstream). If missing it means opik is off → the stage internally no-ops because
+          // opik.enabled=false, and will not send a request with an empty trace_id.
           traceId: ctx.traceId ?? "",
           forkTraceId: ctx.forkTraceId,
           keyId: ctx.keyId ?? "unknown",
@@ -1496,11 +1496,11 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
           retried: false,
           upstreamUrl,
           streamTag: "stream",
-          // codex 特色 "codex" tag 追加保留在这里, stageOpikStreamSpan 内部走 streamTag + retry tag
+          // The codex-specific "codex" tag append is kept here; stageOpikStreamSpan internally uses streamTag + retry tag
         });
-        // stageOpikStreamSpan 只能带 stream / retry tag; codex 独有 "codex" tag 单独通过 forkMetadata 处理
-        // 也可以直接在 stageOpikStreamSpan 输出后由 caller 追加, 但 opikCreateLlmSpan 是幂等 sink 无二次调用
-        // 决定: 不严格保留 "codex" tag (老行为里只是分类标, opik 侧 tag 不影响 UI 主路径)
+        // stageOpikStreamSpan can only carry the stream / retry tag; the codex-only "codex" tag is handled separately via forkMetadata
+        // It could also be appended by the caller after the stageOpikStreamSpan output, but opikCreateLlmSpan is an idempotent sink with no second call
+        // Decision: do not strictly keep the "codex" tag (in the old behavior it was just a classification label; the opik-side tag does not affect the main UI path)
       }
 
       // ── ModelIntent telemetry (bug B4 fix, gated by stageGates.modelIntentTelemetry) ──
@@ -1518,16 +1518,16 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
       if (ctx.config && Object.keys(usage).length > 0) {
         await stageRecordTokenUsage({
           config: ctx.config, gates: codexAgent.stageGates,
-          isCustomUpstream: !!ctx.skipCreditReport,  // codex 用 skipCreditReport 当 custom 标志
+          isCustomUpstream: !!ctx.skipCreditReport,  // codex uses skipCreditReport as the custom flag
           spaceId: ctx.spaceId,
           modelId, usage, protocol: "responses",
         }).catch((rlErr: unknown) => pipe.error("RATE_LIMIT_RECORD", rlErr));
       }
 
-      // ── Skill/conversation/add + TDAI L0 归档 hook ──
-      // 对齐 anthropicHandler.ts 的 stream 分支 (line 1867-1948): langfuse 上报后
-      // 触发 skill 归档 + L0 write。失败静默 (内部已 warn), 不阻塞客户端 SSE。
-      // archiveCtx=null (aux / 未初始化 session / bypass) 直接跳过。
+      // ── Skill/conversation/add + TDAI L0 archive hook ──
+      // Aligned with the stream branch of anthropicHandler.ts (line 1867-1948): after langfuse reporting,
+      // trigger skill archiving + L0 write. Failures are silent (already warned internally), not blocking the client SSE.
+      // archiveCtx=null (aux / uninitialized session / bypass) skips directly.
       if (archiveCtx) {
         try {
           await triggerCodexArchiveHooks(archiveCtx, outputText, toolUseCount);
@@ -1571,12 +1571,12 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
               if (resp?.usage) {
                 Object.assign(usage, resp.usage as Record<string, unknown>);
               }
-              // 终态 `output[]` 带完整的 call_id 与逐字 arguments，比累积
-              // response.function_call_arguments.delta 更可靠。
+              // The terminal `output[]` carries the complete call_id and verbatim arguments, more reliable than accumulating
+              // response.function_call_arguments.delta.
               if (resp?.output) toolCalls = collectResponsesToolCalls(resp.output);
               stopReason = (resp?.status as string) ?? "completed";
             } else if (evtType === "response.incomplete") {
-              // max_output_tokens / 其它中断（Responses API 标准）
+              // max_output_tokens / other interruptions (Responses API standard)
               const resp = evt.response as Record<string, unknown> | undefined;
               const details = resp?.incomplete_details as Record<string, unknown> | undefined;
               stopReason = `incomplete:${details?.reason ?? "unknown"}`;
@@ -1584,7 +1584,7 @@ export function consumeCodexStream(stream: ReadableStream<Uint8Array>, ctx: Code
               if (resp?.output) toolCalls = collectResponsesToolCalls(resp.output);
             }
           } catch {
-            // ignore malformed frames — 埋点级别的问题不阻塞
+            // ignore malformed frames — instrumentation-level problems do not block
           }
         }
       }

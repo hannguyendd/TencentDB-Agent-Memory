@@ -1,23 +1,23 @@
 /**
- * Langfuse 过滤型 SpanProcessor（门面层）。
+ * Langfuse filtering SpanProcessor (facade layer).
  *
- * 只转发 LLM 相关的 span（ai.* / gen_ai.* 前缀）到 Langfuse OTLP 端点，
- * 其他工程调用 span 被丢弃，避免流量过大。
+ * Forwards only LLM-related spans (ai.* / gen_ai.* prefixes) to the Langfuse OTLP endpoint;
+ * other engineering call spans are dropped to avoid excessive traffic.
  *
- * 设计原则：
- * - 不影响现有 span 生命周期
- * - exporter 失败时静默忽略
- * - 配置缺失时 graceful degradation
+ * Design principles:
+ * - Does not affect the existing span lifecycle
+ * - Silently ignores exporter failures
+ * - Graceful degradation when configuration is missing
  *
- * 公开 API 签名保持不变，调用方无需修改。
- * 具体实现由 ILLMTraceBackend 提供。
+ * The public API signature is unchanged; callers need no modification.
+ * The concrete implementation is provided by ILLMTraceBackend.
  */
 
 import { getObservabilityBackend } from "./factory.js";
 import type { ISpanProcessor } from "./types.js";
 
 // ============================
-// 配置类型（保持向后兼容导出）
+// Config type (exported for backward compatibility)
 // ============================
 
 export interface LangfuseConfigEnabled {
@@ -34,19 +34,19 @@ export interface LangfuseConfigDisabled {
 export type LangfuseConfig = LangfuseConfigEnabled | LangfuseConfigDisabled;
 
 // ============================
-// 配置解析（保持向后兼容导出）
+// Config parsing (exported for backward compatibility)
 // ============================
 
 /**
- * 从环境变量解析 Langfuse 配置。
+ * Parse Langfuse configuration from environment variables.
  *
- * 环境变量：
- * - LANGFUSE_ENABLED    : "true" 启用（默认 "false"）
- * - LANGFUSE_HOST       : Langfuse 实例地址（如 http://langfuse.example.local:3000）
- * - LANGFUSE_PUBLIC_KEY : 公钥
- * - LANGFUSE_SECRET_KEY : 私钥
+ * Environment variables:
+ * - LANGFUSE_ENABLED    : "true" to enable (default "false")
+ * - LANGFUSE_HOST       : Langfuse instance address (e.g. http://langfuse.example.local:3000)
+ * - LANGFUSE_PUBLIC_KEY : public key
+ * - LANGFUSE_SECRET_KEY : secret key
  *
- * 任何必要配置缺失时返回 { enabled: false }。
+ * Returns { enabled: false } when any required configuration is missing.
  */
 export function parseLangfuseConfig(): LangfuseConfig {
   const enabled = process.env.LANGFUSE_ENABLED === "true";
@@ -58,7 +58,7 @@ export function parseLangfuseConfig(): LangfuseConfig {
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
   const secretKey = process.env.LANGFUSE_SECRET_KEY;
 
-  // 任何必要配置缺失时 graceful degradation
+  // graceful degradation when any required configuration is missing
   if (!host || !publicKey || !secretKey) {
     return { enabled: false };
   }
@@ -67,17 +67,17 @@ export function parseLangfuseConfig(): LangfuseConfig {
 }
 
 // ============================
-// Span 过滤逻辑（保持向后兼容导出）
+// Span filtering logic (exported for backward compatibility)
 // ============================
 
 /**
- * 判断 span 是否为 LLM 相关。
+ * Determine whether a span is LLM-related.
  *
- * 放行规则（Vercel AI SDK 的 experimental_telemetry 产生的 span）：
- * - `ai.*`     : ai.generateText, ai.streamText, ai.toolCall, ai.generateObject 等
- * - `gen_ai.*` : gen_ai.chat, gen_ai.embeddings 等（OpenTelemetry GenAI 语义约定）
+ * Pass-through rules (spans produced by the Vercel AI SDK's experimental_telemetry):
+ * - `ai.*`     : ai.generateText, ai.streamText, ai.toolCall, ai.generateObject, etc.
+ * - `gen_ai.*` : gen_ai.chat, gen_ai.embeddings, etc. (OpenTelemetry GenAI semantic conventions)
  *
- * 其他所有 span（gateway.*, core.*, queue.*, http.* 等）被过滤。
+ * All other spans (gateway.*, core.*, queue.*, http.*, etc.) are filtered out.
  */
 export function isLLMRelatedSpan(spanName: string): boolean {
   if (!spanName) return false;
@@ -85,25 +85,25 @@ export function isLLMRelatedSpan(spanName: string): boolean {
 }
 
 // ============================
-// Vercel AI SDK metadata → Langfuse OTel 原生属性 映射
+// Vercel AI SDK metadata → Langfuse OTel native attribute mapping
 // ============================
 
 /**
- * Vercel AI SDK 会把 experimental_telemetry.metadata 里每个 key 序列化为
- * `ai.telemetry.metadata.<key>` 前缀的 span attribute。但当我们**直接**用
- * OTLP HTTP exporter 发到 Langfuse（不经过官方 Langfuse SDK 桥），Langfuse
- * 只识别其原生约定的属性名（见 https://langfuse.com/integrations/native/opentelemetry）。
+ * The Vercel AI SDK serializes each key in experimental_telemetry.metadata as a span attribute
+ * prefixed with `ai.telemetry.metadata.<key>`. But when we send **directly** with the
+ * OTLP HTTP exporter to Langfuse (without going through the official Langfuse SDK bridge), Langfuse
+ * only recognizes its natively-defined attribute names (see https://langfuse.com/integrations/native/opentelemetry).
  *
- * 为让 Langfuse UI 上的 Trace name / SessionId / UserId / Tags 生效，
- * 这里把 AI SDK 的 metadata 键翻译成 Langfuse 原生键。
+ * To make Trace name / SessionId / UserId / Tags take effect in the Langfuse UI,
+ * the AI SDK metadata keys are translated here into Langfuse native keys.
  *
- * 映射规则（源缺失或空值时不写目标；目标已存在时不覆盖）：
+ * Mapping rules (the target is not written when the source is missing or empty; an existing target is not overwritten):
  *   ai.telemetry.metadata.langfuseTraceName  → langfuse.trace.name
  *   ai.telemetry.metadata.sessionId          → langfuse.session.id
  *   ai.telemetry.metadata.userId             → langfuse.user.id
  *   ai.telemetry.metadata.tags               → langfuse.trace.tags
  *
- * 返回**新对象**，包含所有原属性 + 增补的 langfuse.* 键。不修改入参。
+ * Returns a **new object** containing all original attributes + the added langfuse.* keys. Does not modify its input.
  */
 export function mapAiTelemetryToLangfuseAttrs(
   attrs: Record<string, unknown> | undefined | null,
@@ -116,7 +116,7 @@ export function mapAiTelemetryToLangfuseAttrs(
     sourceKey: string,
     check: (v: unknown) => boolean,
   ): void => {
-    if (out[targetKey] !== undefined) return; // 尊重用户显式设置
+    if (out[targetKey] !== undefined) return; // respect explicit user settings
     const v = attrs[sourceKey];
     if (v === undefined || v === null) return;
     if (!check(v)) return;
@@ -153,14 +153,14 @@ export function mapAiTelemetryToLangfuseAttrs(
 }
 
 // ============================
-// LangfuseFilteringProcessor（门面层）
+// LangfuseFilteringProcessor (facade layer)
 // ============================
 
 /**
- * 创建 Langfuse SpanProcessor 实例。
- * 通过 ILLMTraceBackend 接口获取实际的 processor。
+ * Create a Langfuse SpanProcessor instance.
+ * Obtains the actual processor via the ILLMTraceBackend interface.
  *
- * @returns SpanProcessor 实例，或 null（如果 Langfuse 未启用）
+ * @returns a SpanProcessor instance, or null (if Langfuse is not enabled)
  */
 export function createLangfuseSpanProcessor(): ISpanProcessor | null {
   try {
@@ -171,28 +171,28 @@ export function createLangfuseSpanProcessor(): ISpanProcessor | null {
 }
 
 /**
- * 兼容层：LangfuseFilteringProcessor 类。
- * 保持向后兼容，内部委托给 ILLMTraceBackend。
+ * Compatibility layer: the LangfuseFilteringProcessor class.
+ * Keeps backward compatibility, delegating internally to ILLMTraceBackend.
  *
- * 当 ILLMTraceBackend 返回有效 processor 时，委托给它处理；
- * 否则回退到使用传入的 exporter 做过滤 + export（直接转发 LLM span）。
+ * When ILLMTraceBackend returns a valid processor, delegates to it;
+ * otherwise falls back to filtering + exporting with the provided exporter (forwarding LLM spans directly).
  */
 export class LangfuseFilteringProcessor implements ISpanProcessor {
-  /** 来自 ILLMTraceBackend 的 processor（仅在无 exporter 时使用） */
+  /** Processor from ILLMTraceBackend (used only when there is no exporter) */
   private _processor: ISpanProcessor | null;
-  /** 由 otel-sdk-init.ts 传入的真正 exporter（优先级最高） */
+  /** The real exporter passed in by otel-sdk-init.ts (highest priority) */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _exporter: any;
 
   constructor(exporter?: unknown) {
     if (exporter) {
-      // 当传入了 exporter 时，优先使用 exporter 做实际 export。
-      // otel-sdk-init.ts 已经创建了指向 Langfuse OTLP 端点的 HttpTraceExporter，
-      // 这里直接使用它，不再委托给 ILLMTraceBackend（其 processor 可能是空壳）。
+      // When an exporter is provided, prefer using it for the actual export.
+      // otel-sdk-init.ts has already created an HttpTraceExporter pointing at the Langfuse OTLP endpoint;
+      // it is used directly here instead of delegating to ILLMTraceBackend (whose processor may be an empty shell).
       this._exporter = exporter;
       this._processor = null;
     } else {
-      // 无 exporter 时，尝试从 ILLMTraceBackend 获取 processor
+      // With no exporter, try to get a processor from ILLMTraceBackend
       this._processor = getObservabilityBackend().llmTrace.createSpanProcessor();
       this._exporter = null;
     }
@@ -205,15 +205,15 @@ export class LangfuseFilteringProcessor implements ISpanProcessor {
   onEnd(span: unknown): void {
     try {
       const s = span as { name?: string; attributes?: Record<string, unknown> };
-      // 统一过滤：只转发 LLM 相关 span
+      // Unified filtering: forward only LLM-related spans
       if (!s.name || !isLLMRelatedSpan(s.name)) {
         return;
       }
 
       if (this._exporter) {
-        // 在导出前把 Vercel AI SDK 的 metadata 翻译成 Langfuse 原生属性，
-        // 这样 Langfuse UI 上的 Trace name / SessionId / UserId / Tags 才生效。
-        // 为避免影响 span 后续被其他 processor 使用，这里构造一个浅拷贝 span 对象。
+        // Before export, translate the Vercel AI SDK metadata into Langfuse native attributes,
+        // so that Trace name / SessionId / UserId / Tags take effect in the Langfuse UI.
+        // To avoid affecting later use of the span by other processors, a shallow-copied span object is constructed here.
         const enrichedAttrs = mapAiTelemetryToLangfuseAttrs(s.attributes);
         const enrichedSpan =
           enrichedAttrs === s.attributes
@@ -221,14 +221,14 @@ export class LangfuseFilteringProcessor implements ISpanProcessor {
             : Object.assign(Object.create(Object.getPrototypeOf(span) ?? {}), span, {
                 attributes: enrichedAttrs,
               });
-        // 使用真正的 exporter 发送到 Langfuse OTLP 端点
+        // Use the real exporter to send to the Langfuse OTLP endpoint
         this._exporter.export([enrichedSpan], () => {});
       } else if (this._processor) {
-        // 委托给 ILLMTraceBackend 的 processor
+        // Delegate to the processor of ILLMTraceBackend
         this._processor.onEnd(span);
       }
     } catch {
-      // 静默失败，不影响其他 SpanProcessor
+      // Silent failure; does not affect other SpanProcessors
     }
   }
 

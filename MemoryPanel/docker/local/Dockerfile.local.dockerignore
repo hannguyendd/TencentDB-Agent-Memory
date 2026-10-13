@@ -1,13 +1,13 @@
-# Dockerfile.local 专用忽略清单（BuildKit：<dockerfile>.dockerignore 优先于根 .dockerignore）
-# 目的：缩小构建上下文，并避免把宿主机产物拷进镜像
-#   —— 尤其是 node_modules（better-sqlite3 原生二进制按宿主机平台编译，入镜像会崩，
-#      镜像内会重新 npm install 重编），以及 data/（含真实用户 SQLite 数据）。
+# Ignore list dedicated to Dockerfile.local (BuildKit: <dockerfile>.dockerignore takes precedence over the root .dockerignore)
+# Purpose: shrink the build context and avoid copying host artifacts into the image
+#   — especially node_modules (the better-sqlite3 native binary is compiled for the host platform and would crash inside the image;
+#      it is re-installed and recompiled with npm install inside the image), and data/ (containing real user SQLite data).
 
-# 依赖（镜像内重新安装）
+# Dependencies (re-installed inside the image)
 **/node_modules
 .pnpm-store/
 
-# 构建产物（镜像内重新构建）
+# Build artifacts (re-built inside the image)
 **/dist
 **/build
 **/*.js.map
@@ -15,9 +15,9 @@
 frontend/src/**/*.js
 frontend/src/**/*.js.map
 
-# 环境与本地数据（禁止入镜像）
-# ⚠️ config/*.json 含真实 kernel api_key（bearer token），必须通过运行时挂载或
-#    K8s Secret 注入，绝不能打进镜像。运行时映射示例：
+# Environment and local data (must not go into the image)
+# ⚠️ config/*.json contains the real kernel api_key (bearer token); it must be injected via a runtime mount or
+#    K8s Secret, and must never be baked into the image. Runtime mapping example:
 #      -v /path/to/metadata-instances.json:/app/config/metadata-instances.json:ro
 .env
 .env.*
@@ -30,14 +30,14 @@ data/
 **/*.db-wal
 **/*.sqlite
 
-# 日志 / 覆盖率 / e2e 输出
+# Logs / coverage / e2e output
 **/logs
 **/*.log
 coverage/
 frontend/test-results/
 frontend/playwright-report/
 
-# 版本控制与工具元数据
+# Version control and tool metadata
 .git
 .gitignore
 .idea/
@@ -45,22 +45,22 @@ frontend/playwright-report/
 .iwiki
 .codebuddy
 
-# OS / 编辑器杂项
+# OS / editor miscellany
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
 *~
 
-# 临时目录
+# Temporary directories
 tmp/
 .tmp/
 
-# 文档不参与运行（可选，进一步瘦身上下文）
+# Docs do not take part in runtime (optional, to slim the context further)
 docs/
 
-# 测试脚本不参与 runtime（shell 里硬编码内部路径 `/root/git.woa.com/cloud_nosql/tdai`，
-# 打进镜像会泄漏内部 GitLab 域名与部署习惯）
+# Test scripts do not take part in runtime (the shell hardcodes the internal path `/root/git.woa.com/cloud_nosql/tdai`,
+# baking them into the image would leak the internal GitLab domain and deployment habits)
 tests/
 **/*.e2e.sh
 e2e-*.sh

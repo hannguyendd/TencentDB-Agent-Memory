@@ -1,16 +1,16 @@
 /**
- * 实体引用存在性校验工具。
+ * Entity reference existence validation utility.
  *
- * 供 v3-meta-router handler 在业务调用前校验输入的带前缀元数据 ID
- * 是否在 store 中存在；不存在则抛 MetadataError（→ 404）。
+ * Lets v3-meta-router handlers verify, before the business call, that input prefixed metadata IDs
+ * exist in the store; if not, throws MetadataError (→ 404).
  *
- * 使用方式：
+ * Usage:
  *   await requireEntity(svc, EntityType.User, d.user_id);
  */
 
 import { MetadataService, MetadataError } from "../service/metadata-service.js";
 
-/** 元数据实体类型枚举，用于 requireEntity 调用。 */
+/** Enum of metadata entity types, used by requireEntity calls. */
 export const enum EntityType {
   User = "user",
   Team = "team",
@@ -42,11 +42,11 @@ const ERROR_CODE: Record<EntityType, string> = {
 };
 
 /**
- * 校验单个实体 ID 存在性，不存在则抛 MetadataError（映射为 404）。
+ * Validate that a single entity ID exists; if not, throw MetadataError (mapped to 404).
  *
- * @param svc  当前实例的 MetadataService
- * @param type 实体类型枚举
- * @param id   带前缀的实体 ID
+ * @param svc  MetadataService of the current instance
+ * @param type entity type enum
+ * @param id   prefixed entity ID
  */
 export async function requireEntity(
   svc: MetadataService,

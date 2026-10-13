@@ -1,12 +1,12 @@
 /**
- * CopyButton — GuidePage 内复用的“复制到剪贴板”按钮。
+ * CopyButton -- the reusable "copy to clipboard" button within GuidePage.
  *
- * 从 GuidePage/index.tsx 抽出，供快速接入 / 记忆指令等多个子模块共享，
- * 避免重复实现复制逻辑与 copied 态反馈。
+ * Extracted from GuidePage/index.tsx and shared by multiple submodules such as quick start / memory commands,
+ * avoiding duplicated copy logic and copied-state feedback.
  *
- * 复制实现复用项目统一的 copyToClipboard：优先安全上下文下的 Clipboard API，
- * 在非安全上下文（http:// + 内网 IP 访问的面板）下自动降级到
- * document.execCommand('copy') 的临时 textarea 方案，避免直接复制失败。
+ * The copy implementation reuses the project's shared copyToClipboard: it prefers the Clipboard API in a secure context,
+ * and automatically degrades to the temporary textarea approach with
+ * document.execCommand('copy') in non-secure contexts (a panel accessed via http:// + an intranet IP), avoiding outright copy failure.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,9 +1,9 @@
 /**
- * State Backend — 接口 + 默认实现导出 + 后端工厂。
+ * State Backend — interface + default implementation exports + backend factory.
  *
- * 默认实现 (LocalStateBackend) 跟接口同住 core，自带可用。
- * 远程状态后端在运行时按需动态加载；如果当前构建未包含对应实现，
- * 当配置要求使用远程后端时会抛出明确错误。
+ * The default implementation (LocalStateBackend) lives in core alongside the interface and works out of the box.
+ * Remote state backends are dynamically loaded at runtime on demand; if the current build does not include the corresponding implementation,
+ * an explicit error is thrown when the configuration requires a remote backend.
  */
 
 export type {
@@ -40,11 +40,11 @@ export interface StateBackendConfig {
 }
 
 /**
- * 工厂函数：根据配置创建对应的 State Backend。
+ * Factory function: creates the corresponding State Backend according to the configuration.
  *
- * - type === "local": 内置 LocalStateBackend，零外部依赖
- * - remote backend: 动态加载远程状态后端实现；如果当前构建未包含，
- *   抛出明确错误。
+ * - type === "local": built-in LocalStateBackend, zero external dependencies
+ * - remote backend: dynamically loads the remote state backend implementation; if the current build does not include it,
+ *   throws an explicit error.
  */
 export async function createStateBackend(config: StateBackendConfig): Promise<IStateBackend> {
   if (config.type === "redis") {

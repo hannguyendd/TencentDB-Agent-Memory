@@ -1,34 +1,34 @@
 /**
- * 回给 agent 之前，把注入的 `context_focus_question` 从 tool_call 参数里摘掉。
+ * Before handing a response back to the agent, strip the injected `context_focus_question` out of the tool_call arguments.
  *
- * 为什么要摘：注入这个字段是为了拿到压缩线索，线索在响应 tap 阶段就已经进了 Redis
- * 侧信道，下一轮由 backfill 注回**转发给上游**的请求体——agent 全程不需要看见它。
- * 而它看见了会出事：客户端按自己的 tool schema 校验参数，多出来的字段被判成
- * `InputValidationError: An unexpected parameter ... was provided`，工具拒绝执行。
+ * Why strip it: this field is injected to obtain compression hints; the hints already went into the Redis
+ * side channel at the response-tap stage, and on the next turn backfill re-injects them into the request body **forwarded upstream** -- the agent never needs to see it.
+ * And seeing it causes trouble: the client validates parameters against its own tool schema, and the extra field is judged as
+ * `InputValidationError: An unexpected parameter ... was provided`, and the tool refuses to execute.
  *
- * ── 流式为什么要「延后一帧」而不是直接删 ──────────────────────────────────
- * tool_call 的参数在 SSE 里是一串 JSON 分片（Anthropic 的 `input_json_delta`、
- * Responses 的 `function_call_arguments.delta`），单个分片可能断在 key 名中间、
- * 转义符中间，没法逐片删 key——必须等整串拼完。
+ * -- Why streaming "defers by one frame" instead of deleting directly --------------------------------
+ * Tool_call arguments in SSE are a series of JSON fragments (Anthropic's `input_json_delta`,
+ * Responses' `function_call_arguments.delta`); a single fragment may break in the middle of a key name,
+ * or in the middle of an escape sequence, so keys cannot be deleted fragment by fragment -- we must wait until the whole string is assembled.
  *
- * 但也不能「攒着不发、最后补一个新事件」：Responses 的事件带 `sequence_number`，
- * 凭空插帧会让序号对不上。所以这里始终**扣住最后一个分片事件**：先到的分片照常发出
- * 去、只是把载荷换成空串，等参数收齐了再把扣住的那一帧连同完整的清理结果发出去。
- * 客户端做的是字符串拼接，`"" + "" + 完整串` 与原来等价，而事件数量、顺序、序号、
- * `item_id` 全部原样保留。
+ * But we also cannot "hold everything back and emit a new event at the end": Responses events carry `sequence_number`,
+ * and inserting a frame out of thin air would break the numbering. So here we always **hold back the last fragment event**: earlier fragments are emitted as usual,
+ * only with the payload replaced by an empty string; once the arguments are complete, the held-back frame is emitted along with the full cleaned result.
+ * The client does string concatenation, so `"" + "" + full string` is equivalent to the original, while the event count, order, sequence numbers and
+ * `item_id` are all preserved as-is.
  *
- * 代价是工具参数不再逐字出现在客户端 UI 上，而是在该块结束时整体出现。功能无影响：
- * 客户端本来也要等 JSON 完整才能执行工具。
+ * The cost is that tool arguments no longer appear character by character in the client UI, but all at once when the block ends. No functional impact:
+ * the client has to wait for complete JSON before executing the tool anyway.
  *
- * OpenAI Chat 的 chunk 虽然没有序号，插帧看似安全，但客户端会按自己认得的形状校验
- * tool_call（CodeBuddy 要求 `type: "function"`），补发的 chunk 无论带不带这些字段
- * 都可能被判非法——带了又可能被按字符串累加成 `"functionfunction"`。所以它也走扣帧。
+ * Although OpenAI Chat chunks have no sequence number, so inserting frames seems safe, the client validates tool_call
+ * against shapes it recognizes (CodeBuddy requires `type: "function"`), and a re-emitted chunk, with or without these fields,
+ * may be judged invalid -- if included, it may even be accumulated as a string into `"functionfunction"`. So it also uses frame holding.
  *
- * 所有解析失败一律原样透传：坏掉的上游响应应该原样暴露给客户端，不该在这里被二次加工。
+ * Any parse failure passes through as-is: a broken upstream response should be exposed to the client as-is and not processed a second time here.
  */
 
-// 字段名归压缩扩展所有，宿主只经由 adapter 调用，扩展不在时整条链路自动退化为
-// 空操作——扩展不在就没有注入，也就没有要摘的东西。
+// The field name belongs to the compression extension; the host only calls it via the adapter, and when the extension is absent the whole chain automatically degrades to
+// a no-op -- without the extension there is no injection, hence nothing to strip.
 import {
   hasInjectedToolCleanup,
   shouldStripInjectedTool,
@@ -173,11 +173,11 @@ function trackEligible(
   };
 }
 
-// ── SSE 帧处理 ───────────────────────────────────────────────────────────────
+// -- SSE frame handling -----------------------------------------------------------------
 
 /**
- * 一个 SSE 事件块。`event:` 等非 data 行原样保留——Responses 客户端靠 `event:` 头
- * 分派，重建时动了它就全乱了。
+ * An SSE event block. Non-data lines such as `event:` are preserved as-is -- Responses clients dispatch by the `event:` header,
+ * and touching it when rebuilding would throw everything off.
  */
 interface SseFrame {
   lines: string[];
@@ -195,16 +195,16 @@ function parseFrame(block: string): SseFrame | null {
   return null;
 }
 
-/** 用新的 data 载荷重建事件块（含结尾空行）。 */
+/** Rebuild the event block with a new data payload (including the trailing blank line). */
 function rebuildFrame(frame: SseFrame, data: unknown): string {
   const lines = frame.lines.slice();
   lines[frame.dataLineIdx] = `data: ${JSON.stringify(data)}`;
   return `${lines.join("\n")}\n\n`;
 }
 
-// ── 非流式 ───────────────────────────────────────────────────────────────────
+// -- Non-streaming -------------------------------------------------------------------
 
-/** Anthropic `content[]` 里的 tool_use 块。 */
+/** The tool_use block in Anthropic `content[]`. */
 function stripAnthropicBody(
   body: Record<string, unknown>,
   shouldStrip: ShouldStripTool,
@@ -227,7 +227,7 @@ function stripAnthropicBody(
   return changed;
 }
 
-/** OpenAI Chat `choices[].message.tool_calls[]`。 */
+/** OpenAI Chat `choices[].message.tool_calls[]`. */
 function stripChatBody(
   body: Record<string, unknown>,
   shouldStrip: ShouldStripTool,
@@ -261,7 +261,7 @@ function stripChatBody(
   return changed;
 }
 
-/** Responses `output[]` 里的 function_call item。 */
+/** The function_call item in Responses `output[]`. */
 function stripResponsesOutput(
   output: unknown,
   shouldStrip: ShouldStripTool,
@@ -295,7 +295,7 @@ function stripResponsesBody(
   shouldStrip: ShouldStripTool,
   mark: MarkStripped,
 ): boolean {
-  // 顶层 `output[]`，以及 `response.output[]`（SSE 终帧与部分非流式包装）。
+  // Top-level `output[]`, and `response.output[]` (the SSE final frame and some non-streaming wrappers).
   const nested = body.response as Record<string, unknown> | undefined;
   const a = stripResponsesOutput(body.output, shouldStrip, mark);
   const b = nested ? stripResponsesOutput(nested.output, shouldStrip, mark) : false;
@@ -303,9 +303,9 @@ function stripResponsesBody(
 }
 
 /**
- * 非流式响应体剥离。无改动时返回原始字符串，避免无意义的重新序列化。
+ * Strip a non-streaming response body. When nothing changes, returns the original string to avoid pointless re-serialization.
  *
- * 必须在 `notifyUpstreamResponse` 之后调用——侧信道要的是模型原始输出。
+ * Must be called after `notifyUpstreamResponse` -- the side channel wants the model's raw output.
  */
 export function stripCfqFromResponseText(
   protocol: CfqStripProtocol,
@@ -335,9 +335,9 @@ export function stripCfqFromResponseText(
   return changed ? JSON.stringify(body) : text;
 }
 
-// ── 流式 ─────────────────────────────────────────────────────────────────────
+// -- Streaming -----------------------------------------------------------------------
 
-/** 被扣住的分片事件：等参数收齐后带着完整载荷补发。 */
+/** A held-back fragment event: re-emitted with the full payload once the arguments are complete. */
 interface HeldDelta {
   frame: SseFrame;
   evt: Record<string, unknown>;
@@ -346,8 +346,8 @@ interface HeldDelta {
 type Emit = (chunk: string) => void;
 
 /**
- * 一个协议的剥离器。`flush` 负责在流结束时补发仍被扣住的帧——上游中途断掉时，
- * 扣住的那一帧如果跟着一起丢了，客户端拿到的就是个空参数的 tool_call。
+ * A per-protocol stripper. `flush` is responsible for re-emitting still-held frames when the stream ends -- if the upstream breaks midway,
+ * and the held-back frame is lost along with it, the client ends up with a tool_call with empty arguments.
  */
 interface Stripper {
   onBlock: (block: string) => void;
@@ -355,7 +355,7 @@ interface Stripper {
 }
 
 /**
- * Anthropic：按 block index 扣帧，`content_block_stop` 时结算。
+ * Anthropic: hold frames per block index, settle on `content_block_stop`.
  */
 function makeAnthropicStripper(
   emit: Emit,
@@ -367,7 +367,7 @@ function makeAnthropicStripper(
   const held = new Map<number, HeldDelta>();
   const toolMeta = new Map<number, { id: string; name: string }>();
 
-  /** 补发扣住的那一帧，载荷换成 `partialJson`。 */
+  /** Re-emit the held-back frame with the payload replaced by `partialJson`. */
   const release = (index: number, partialJson: string): void => {
     const h = held.get(index);
     if (!h) return;
@@ -405,7 +405,7 @@ function makeAnthropicStripper(
           id: typeof cb.id === "string" ? cb.id : `anthropic:${index}`,
           name: toolName!,
         });
-        // `input` 此时通常是 {}，但上游偶尔会直接带上完整参数。
+        // `input` is usually {} at this point, but upstreams occasionally include the full arguments directly.
         if (stripCfqFromInput(cb.input)) {
           const meta = toolMeta.get(index)!;
           mark(meta.id, meta.name);
@@ -421,7 +421,7 @@ function makeAnthropicStripper(
       const delta = evt.delta as Record<string, unknown> | undefined;
       if (delta?.type === "input_json_delta" && typeof delta.partial_json === "string") {
         buf.set(index, (buf.get(index) ?? "") + delta.partial_json);
-        release(index, ""); // 让位：先到的分片发空串
+        release(index, ""); // Yield: earlier fragments are emitted as empty strings
         held.set(index, { frame, evt });
         return;
       }
@@ -463,16 +463,16 @@ function makeAnthropicStripper(
 }
 
 /**
- * Responses：按 item_id 扣帧，`function_call_arguments.done` 时结算。
- * 终帧里的 `output[]` 也要清理——客户端可能只认终帧那份完整 item。
+ * Responses: hold frames per item_id, settle on `function_call_arguments.done`.
+ * The `output[]` in the final frame must also be cleaned -- the client may only recognize the complete item in the final frame.
  *
- * 三个已知缺口，当前客户端（codex）未暴露问题，暂不处理：
- *   - 扣住的帧要等同一 item 的下一片才发，夹在中间的事件会插到它前面，
- *     `sequence_number` 因此非单调（并行 function_call 交错时尤其明显）。
- *   - 剥离资格只在 `output_item.added` 带 `name` 时注册；`name` 延后给出的
- *     实现里，参数分片会带着 CFQ 原样发出，只有终帧那份被清理。
- *   - 终态事件只覆盖 `completed` / `incomplete`，`response.failed` 里的
- *     `output[]` 不会被清理。
+ * Three known gaps; the current client (codex) has not exposed problems, so they are not handled for now:
+ *   - A held-back frame is only emitted when the next fragment of the same item arrives, so events in between get inserted ahead of it,
+ *     making `sequence_number` non-monotonic (especially visible when parallel function_calls interleave).
+ *   - Strip eligibility is only registered when `output_item.added` carries `name`; in implementations
+ *     where `name` is given later, argument fragments go out with the CFQ intact, and only the one in the final frame is cleaned.
+ *   - Terminal events only cover `completed` / `incomplete`; the `output[]` in
+ *     `response.failed` is not cleaned.
  */
 function makeResponsesStripper(
   emit: Emit,
@@ -538,7 +538,7 @@ function makeResponsesStripper(
       itemId &&
       eligibleItemIds.has(itemId)
     ) {
-      // `.done` 带的是权威全量参数；拿不到才退回自己拼的。
+      // `.done` carries the authoritative full arguments; fall back to our own assembly only if it is unavailable.
       const raw = typeof evt.arguments === "string" ? evt.arguments : (buf.get(itemId) ?? "");
       const stripped = stripCfqFromArguments(raw);
       const cleaned = stripped ?? raw;
@@ -583,24 +583,24 @@ function makeResponsesStripper(
 }
 
 /**
- * OpenAI Chat：按 `choice:tool_call` 序号扣帧，收到 finish chunk 时结算。
+ * OpenAI Chat: hold frames by `choice:tool_call` index, settle when the finish chunk arrives.
  *
- * 跟另外两个协议同一套路（见文件头注释）：不凭空造 chunk，只改扣住那一帧里
- * `function.arguments` 的内容。chat 的分片 tool_call 条目允许只带 `index` +
- * `function.arguments`，但客户端对「自己没见过的形状」很挑剔（CodeBuddy 会按
- * `type` 校验 tool_call），补发出来的 chunk 少一个字段就会被判非法；扣帧则保证
- * 客户端收到的每一帧都跟上游原样一致。
+ * Same approach as the other two protocols (see the file header comment): no chunks are fabricated; only the contents of
+ * `function.arguments` in the held-back frame are changed. Chat's fragmented tool_call entries are allowed to carry only `index` +
+ * `function.arguments`, but the client is picky about "shapes it has not seen" (CodeBuddy validates tool_call by
+ * `type`), and a re-emitted chunk missing one field would be judged invalid; holding frames guarantees
+ * that every frame the client receives is identical to the upstream's as-is.
  */
 function makeChatStripper(
   emit: Emit,
   shouldStrip: ShouldStripTool,
   mark: MarkStripped,
 ): Stripper {
-  /** 扣住的 chat chunk：一帧里可能同时承载多个 tool_call 的分片。 */
+  /** Held-back chat chunk: one frame may carry fragments of multiple tool_calls at once. */
   interface HeldChunk {
     frame: SseFrame;
     evt: Record<string, unknown>;
-    /** key -> 该帧里承载参数的 `function` 对象，结算时往里写清理后的全量参数。 */
+    /** key -> the `function` object in that frame carrying the arguments; the cleaned full arguments are written into it at settlement. */
     slots: Map<string, Record<string, unknown>>;
   }
 
@@ -620,7 +620,7 @@ function makeChatStripper(
     emit(rebuildFrame(held.frame, held.evt));
   };
 
-  /** 把收齐的参数清理后写回扣住的那个分片。 */
+  /** Write the cleaned, fully collected arguments back into the held-back fragment. */
   const settle = (key: string, fn: Record<string, unknown>): void => {
     const raw = buf.get(key) ?? "";
     const cleaned = stripCfqFromArguments(raw);
@@ -680,8 +680,8 @@ function makeChatStripper(
         const t = tc as Record<string, unknown> | null;
         const fn = t?.function as Record<string, unknown> | undefined;
         if (!t) continue;
-        // 依赖上游给 index（chat 流式规范里是必填）。真缺了的话并行 tool_call 会
-        // 塌到同一个 key，参数被拼在一起——目前所有上游都带，暂不额外兜底。
+        // Relies on the upstream giving index (mandatory in the chat streaming spec). If really missing, parallel tool_calls would
+        // collapse into the same key and their arguments get concatenated together -- all upstreams currently provide it, so no extra fallback for now.
         const tcIndex = typeof t.index === "number" ? t.index : 0;
         const key = `${choiceIndex}:${tcIndex}`;
         const toolName = typeof fn?.name === "string" ? fn.name : undefined;
@@ -695,9 +695,9 @@ function makeChatStripper(
         }
         buf.set(key, (buf.get(key) ?? "") + fn.arguments);
 
-        // 让位：同一个 tool_call 又来了新分片，早到的那片一律换成空串。
-        // 两片落在同一帧里时只能换载荷，不能把这帧提前发走——它还在手上，
-        // 提前发等于把没清理的原文漏出去，之后结算又会把整帧再发一次。
+        // Yield: when a new fragment of the same tool_call arrives, the earlier fragment is always replaced with an empty string.
+        // When two fragments land in the same frame, only the payload can be replaced; the frame cannot be sent early -- it is still in hand,
+        // and sending early would leak the uncleaned original, then settlement would send the whole frame again.
         const previous = heldByKey.get(key);
         if (previous) {
           const slot = previous.slots.get(key);
@@ -717,7 +717,7 @@ function makeChatStripper(
 
     if (current) {
       if (finished) {
-        // 收尾帧自己就带着最后一批分片：先结清更早扣住的帧，再原样发出自己。
+        // The closing frame itself carries the last batch of fragments: first settle the earlier held-back frames, then emit itself as-is.
         flush();
         for (const [key, fn] of current.slots) settle(key, fn);
         for (const key of current.slots.keys()) heldByKey.delete(key);
@@ -728,7 +728,7 @@ function makeChatStripper(
       return;
     }
 
-    // 结算必须排在 finish chunk 之前，否则客户端已经收尾了。
+    // Settlement must come before the finish chunk, otherwise the client has already wrapped up.
     if (finished) flush();
     emit(`${block}\n\n`);
   };
@@ -737,7 +737,7 @@ function makeChatStripper(
 }
 
 /**
- * 客户端方向的 CFQ 剥离流。挂在响应的最后一公里，tap 那一路不受影响。
+ * The client-direction CFQ stripping stream. Attached at the last mile of the response, leaving the tap path unaffected.
  */
 export function createCfqStripStream(
   protocol: CfqStripProtocol,
@@ -761,7 +761,7 @@ export function createCfqStripStream(
   const tracker = createStripTracker(protocol, true, observer);
   const shouldStrip = trackEligible(selection, tracker.markEligible);
 
-  // `emit` 在每次回调里重新绑定到当前 controller，剥离器本身不持有 controller。
+  // `emit` is rebound to the current controller on every callback; the stripper itself does not hold the controller.
   let emit: Emit = () => {};
   const forward: Emit = (text) => emit(text);
   const stripper =
@@ -786,8 +786,8 @@ export function createCfqStripStream(
     },
     flush(controller) {
       emit = (text) => controller.enqueue(encoder.encode(text));
-      // 先结清扣住的帧，再把残留的半截帧原样吐出去——残留的必然是个不完整事件，
-      // 交给剥离器只会给它补上一个不该有的事件结束符。
+      // First settle the held-back frames, then spit out the leftover half-frame as-is -- the leftover must be an incomplete event,
+      // and handing it to the stripper would only append an event terminator that should not be there.
       stripper.flush();
       if (sseBuf) controller.enqueue(encoder.encode(sseBuf));
       tracker.report();

@@ -1,25 +1,25 @@
 /**
- * Log 结构化日志门面 — Debug/Info/Warn/Error
+ * Log structured logging facade — Debug/Info/Warn/Error
  *
- * 使用方式：
+ * Usage:
  *
  *   import { log } from "./core/report/log.js";
  *
  *   log.info("recall completed", { count: 10, latencyMs: 42 });
  *   log.error("embedding failed", { provider: "zhipu", error: err.message });
  *
- * 底层通过 ILogBackend 发送结构化日志（内部环境：OTel Logs API → 智研 + ClickHouse）。
- * 自动关联当前 Trace 上下文（如果在 Span 内打日志，Log 自动带 TraceID/SpanID）。
- * 同时写入本地日志文件（通过 FileLogger）。
- * 如果后端未初始化，fallback 到 文件 + console。
+ * Structured logs are sent via ILogBackend (internal environment: OTel Logs API → Zhiyan + ClickHouse).
+ * Automatically correlates the current Trace context (logs written inside a Span automatically carry TraceID/SpanID).
+ * Also writes to the local log file (via FileLogger).
+ * If the backend is not initialized, falls back to file + console.
  *
- * 公开 API 签名保持不变，调用方无需修改。
+ * The public API signature is unchanged; callers need no modification.
  */
 
 import { FileLogger } from "./file-logger.js";
 import { getObservabilityBackend } from "./factory.js";
 
-// 初始化文件写入器（降级策略：初始化失败不影响业务）
+// initialize the file writer (degradation strategy: initialization failure does not affect the business)
 const fileLogger = new FileLogger({
   path: process.env.LOG_PATH || "/data/log/",
   filename: "core.log",
@@ -28,12 +28,12 @@ const fileLogger = new FileLogger({
 });
 
 /**
- * 发送一条结构化日志。
- * 通过 ILogBackend 上报，同时写入本地文件。
+ * Send one structured log entry.
+ * Reported via ILogBackend, and also written to the local file.
  */
 function emit(level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string, data?: Record<string, unknown>): void {
   try {
-    // 构建属性（只接受原始类型）
+    // build attributes (accept primitive types only)
     const attrs: Record<string, string | number | boolean> = {};
     if (data) {
       for (const [key, value] of Object.entries(data)) {
@@ -44,7 +44,7 @@ function emit(level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string, data?
       }
     }
 
-    // 通过 ILogBackend 上报
+    // report via ILogBackend
     const backend = getObservabilityBackend().log;
     switch (level) {
       case "DEBUG":
@@ -61,10 +61,10 @@ function emit(level: "DEBUG" | "INFO" | "WARN" | "ERROR", message: string, data?
         break;
     }
 
-    // 同时写入本地日志文件（无论后端是否可用）
+    // also write to the local log file (regardless of whether the backend is available)
     fileLogger.write(level, message, data);
   } catch {
-    // 不阻塞业务
+    // do not block the business
   }
 }
 

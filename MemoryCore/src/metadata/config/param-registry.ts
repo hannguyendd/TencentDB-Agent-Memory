@@ -1,15 +1,15 @@
 /**
- * 配置参数注册表 — 加载并校验 metadata_config_params.json。
+ * Config parameter registry — loads and validates metadata_config_params.json.
  *
- * 导出 CONFIG_PARAM_REGISTRY 供 ConfigParamService / Router 使用。
- * 禁止在业务代码中硬编码默认参数值，一切以本注册表为准。
+ * Exports CONFIG_PARAM_REGISTRY for use by ConfigParamService / Router.
+ * Hardcoding default parameter values in business code is forbidden; this registry is the single source of truth.
  */
 
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ── 类型定义 ──
+// ── Type definitions ──
 
 export type ConfigParamScope = "global" | "user";
 
@@ -33,12 +33,12 @@ export interface ConfigParamsFile {
 
 export type ConfigParamRegistry = Map<string, ModuleDef>;
 
-// ── 校验正则 ──
+// ── Validation regexes ──
 
 const MODULE_RE = /^[a-z][a-z0-9_]*$/;
 const PARAM_NAME_RE = /^[a-z][a-z0-9_.]*$/;
 
-// ── 加载与校验 ──
+// ── Loading and validation ──
 
 export class ParamRegistryError extends Error {
   constructor(message: string) {
@@ -48,7 +48,7 @@ export class ParamRegistryError extends Error {
 }
 
 /**
- * 从 JSON 文件路径加载并校验配置注册表。
+ * Load and validate the config registry from a JSON file path.
  */
 export function loadParamRegistry(filePath: string): ConfigParamRegistry {
   let raw: string;
@@ -69,7 +69,7 @@ export function loadParamRegistry(filePath: string): ConfigParamRegistry {
 }
 
 /**
- * 从已解析的对象构建注册表（可用于测试）。
+ * Build the registry from an already-parsed object (usable in tests).
  */
 export function buildRegistry(data: ConfigParamsFile): ConfigParamRegistry {
   if (!data.version || !Array.isArray(data.modules)) {
@@ -152,7 +152,7 @@ export function buildRegistry(data: ConfigParamsFile): ConfigParamRegistry {
   return registry;
 }
 
-// ── 查询辅助方法 ──
+// ── Query helpers ──
 
 export function getModuleDef(
   registry: ConfigParamRegistry,
@@ -203,7 +203,7 @@ export function isModuleGlobalOnly(
   return mod.params.every((p) => !p.allowed_scopes.includes("user"));
 }
 
-// ── 默认加载（模块初始化时执行） ──
+// ── Default loading (executed at module initialization) ──
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -214,7 +214,7 @@ const DEFAULT_CONFIG_PATH = resolve(
 );
 
 /**
- * 加载默认配置文件的注册表。可通过 overridePath 指定替代路径。
+ * Load the registry from the default config file. A replacement path can be given via overridePath.
  */
 export function loadDefaultRegistry(overridePath?: string): ConfigParamRegistry {
   const filePath = overridePath || DEFAULT_CONFIG_PATH;

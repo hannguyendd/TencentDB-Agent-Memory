@@ -7,18 +7,18 @@ export interface KernelCredentials {
   userKey?: string;
   timeoutMs: number;
   requestId?: string;
-  /** 额外请求头（task-source 令牌注入等）。不进日志。 */
+  /** Extra request headers (task-source token injection, etc.). Not logged. */
   extraHeaders?: Record<string, string>;
 }
 
-/** 单次内核元数据调用的运行时凭证（middleware 从 Header + 注册表组装）。 */
+/** Runtime credentials for a single kernel metadata call (assembled by middleware from Header + registry). */
 export interface MetaCallContext {
   instanceId: string;
   gatewayEndpoint: string;
   gatewayApiKey: string;
   userKey?: string;
   reqId?: string;
-  /** 额外请求头（task-source 令牌注入等）。不进日志。 */
+  /** Extra request headers (task-source token injection, etc.). Not logged. */
   extraHeaders?: Record<string, string>;
 }
 

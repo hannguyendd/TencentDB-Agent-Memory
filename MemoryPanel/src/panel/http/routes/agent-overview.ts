@@ -104,8 +104,8 @@ function ownChatMemoryCount(
 }
 
 /**
- * 1× summary-by-agents（内核）+ skills 来自 Skill list（语义不变）。
- * 前端 counts 路径依赖此结果；bootstrap.counts 保留兼容。
+ * 1x summary-by-agents (kernel) + skills come from the Skill list (semantics unchanged).
+ * The frontend counts path depends on this result; bootstrap.counts is kept for compatibility.
  */
 export async function buildMountedCounts(
   deps: PanelDeps,
@@ -179,8 +179,8 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
         team_id: teamId,
         asset_type: "skill",
         action: "read",
-        // 与 SkillsPanel "团队资产" tab 保持一致：初始化资产选择器只列
-        // team-shared 的 skill，不包含私密（含自己 owner 的私密）。
+        // Consistent with the SkillsPanel "Team assets" tab: the asset selector at initialization only lists
+        // team-shared skills, excluding private ones (including the caller's own private ones).
         visibility: "team",
       }),
       fetchAllMetaListItems<KnowledgeAssetMetaRaw>(
@@ -212,20 +212,20 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
         team_id: teamId,
         asset_type: "chat_memory",
         action: "read",
-        // 不限制 visibility：list-accessible 已经按 caller 的 read 权限过滤
-        // （private 只有 owner 能看到自己的、team 全员可见）。这样：
-        //   - Owner 能看到自己所有 chat_memory（含 private，用于选自己的记忆挂到别的 agent）
-        //   - 其他成员只看到 team 可见的
-        //   - 已被 owner 撤回私密的记忆 → 其他成员看不到（list-accessible 会过滤）
-        // 之前硬编码 visibility='team' 会误伤"自己 owner 的 private" —— 创建/编辑
-        // agent 时看不到自己的记忆池；且外部借入这些私密后即使已解除也会残留在
-        // 选择列表里造成困惑。
+        // Do not restrict visibility: list-accessible already filters by the caller's read permission
+        // (private is visible only to the owner, team to all members). This way:
+        //   - the Owner sees all their own chat_memory (including private, for picking their own memory to attach to another agent)
+        //   - other members only see team-visible ones
+        //   - memory the owner has withdrawn to private -> other members cannot see it (list-accessible filters it)
+        // Previously hardcoding visibility='team' wrongly hit the "owner's own private" -- when creating/editing an
+        // agent the user could not see their own memory pool; and after others borrowed these private ones, even once released they would linger in
+        // the selection list and cause confusion.
       }),
-      // 分页拉全量：limit 上限 100，团队 agent > 100 时裸 invoke 会截断
-      // （新建 Agent 的"挂到哪个 agent"选择器、self memory 判断都会漏）
+      // Page through everything: limit caps at 100; with more than 100 team agents a bare invoke would truncate
+      // (the new-Agent "attach to which agent" selector and the self memory check would both miss entries)
       fetchAllMetaListItems<AgentRaw>(deps, ctx, "agent/list", { team_id: teamId }),
-      // skill 真实归属：skill 内核 list（按 owner_agent_id 统计），运行时注入
-      // <available_skills> 读的就是这张表，是权威源。
+      // True skill ownership: the skill kernel list (counted by owner_agent_id); runtime injection of
+      // <available_skills> reads this table, so it is the authoritative source.
       deps.skillKernel.invoke(
         "list",
         {
@@ -250,16 +250,16 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
       wikiAssetsRes.status === "fulfilled"
         ? wikiAssetsRes.value.filter((a) => isActiveMetaAsset(a.status))
         : [];
-    // chat_memory 资产池 = asset/list visibility='team' 的结果（已限定「已共享」）。
-    // 不再按 id 前缀 chat_memory-{team}-* 过滤 self memory —— 该前缀只能判断
-    // 「是不是某 agent 的自身记忆」，无法区分「未共享的 self memory」与
-    // 「已被用户显式共享到团队的 agent 记忆」。self memory 默认 visibility=private
-    // （见本文件下方 memory-block 构造：默认 'private'），根本不会被 visibility='team'
-    // 查询命中；只有用户主动共享后才变 team —— 而这正是应允许其它 agent 绑定的场景。
-    // 旧的前缀过滤会把这类「已共享的 agent 记忆」一并误杀，导致新建 Agent 时选不到、
-    // 绑不上团队共享 memory（与 Chat_Memory 页「团队资产」tab 展示不一致）。
-    // 「当前 agent 自己的 self memory 默认绑定、不可解绑」由前端按 selfChatMemoryId 处理，
-    // 与团队级资产池无关。
+    // chat_memory asset pool = result of asset/list with visibility='team' (already limited to "shared").
+    // No longer filter self memory by id prefix chat_memory-{team}-* -- that prefix can only tell
+    // "whether it is some agent's own memory", and cannot distinguish "an unshared self memory" from
+    // "an agent memory the user explicitly shared to the team". self memory defaults to visibility=private
+    // (see the memory-block construction below in this file: default 'private'), so it is never matched by the visibility='team'
+    // query; it only becomes team after the user shares it actively -- and that is exactly the scenario where other agents should be allowed to bind it.
+    // The old prefix filter would also kill such "shared agent memory", so it could not be selected when creating a new Agent
+    // and team-shared memory could not be bound (inconsistent with the "Team assets" tab on the Chat_Memory page).
+    // "The current agent's own self memory is bound by default and cannot be unbound" is handled by the frontend via selfChatMemoryId,
+    // unrelated to the team-level asset pool.
     const chatTeamAssets =
       chatTeamAssetsRes.status === "fulfilled"
         ? chatTeamAssetsRes.value.filter((a) => isActiveStatus(a.status))
@@ -274,8 +274,8 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
         : agents.map((a) => a.agent_id);
     const selfMemoryAgentIds = new Set(agents.map((a) => a.agent_id));
 
-    // skillCounts 从 skill 内核 list 按 owner_agent_id 统计（含 fork 副本）。
-    // 这是 skill 真实归属源，运行时注入 <available_skills> 读的就是它。
+    // skillCounts are counted from the skill kernel list by owner_agent_id (including fork copies).
+    // This is the true skill ownership source; runtime injection of <available_skills> reads it.
     const skillCounts = new Map<string, number>();
     if (skillListRes.status === "fulfilled" && skillListRes.value.code === 0) {
       const items =
@@ -300,8 +300,8 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
       joinKnowledgeAssetsWithKs(deps, ctx, wikiMeta, ASSET_TYPE_WIKI).catch(
         () => [],
       ),
-      // counts 全部读真实源：skills 来自 skill 表；code_graph/llm_wiki/chat_memory
-      // 来自 agent-fixed-asset 表（summary-by-agents）。不再读 metadata_json.ui。
+      // counts all read from real sources: skills from the skill table; code_graph/llm_wiki/chat_memory
+      // from the agent-fixed-asset table (summary-by-agents). No longer reads metadata_json.ui.
       buildMountedCounts(
         deps,
         ctx,
@@ -322,9 +322,9 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
       }),
     ]);
 
-    // assets.chatMemories 只放真正 team-shared 的 chat_memory（chatTeamAssets 已过滤 self memory）。
-    // 不再注入 myAgents 的 self memory：前端 AgentEditDialog 会自己注入当前 agent 的 self memory，
-    // 后端注入会把"我作为 owner 的其他 agent 的 self memory"也塞进来，污染其他 agent 的资产池。
+    // assets.chatMemories only contains truly team-shared chat_memory (chatTeamAssets has already filtered self memory).
+    // No longer inject myAgents' self memory: the frontend AgentEditDialog injects the current agent's self memory itself,
+    // and backend injection would also stuff in "self memory of other agents I own as owner", polluting other agents' asset pools.
     const memoryItems = new Map<string, ReturnType<typeof toMountable>>();
     for (const asset of chatTeamAssets) {
       memoryItems.set(
@@ -345,8 +345,8 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
               id: item.knowledge_id,
               title: item.name || item.repo_url || item.knowledge_id,
               group: "CODE",
-              // slug 用 knowledge_id（cg-xxx），与 skill/wiki 统一展示资产 id；
-              // 仓库地址已在 title 中体现，无需再用 repo_url 覆盖副标题。
+              // slug uses knowledge_id (cg-xxx), consistent with skill/wiki in showing the asset id;
+              // the repo address is already reflected in the title, so there is no need to override the subtitle with repo_url.
               slug: item.knowledge_id,
               status: item.status,
             }),
@@ -361,7 +361,7 @@ export function registerAgentOverviewRoutes(api: Hono, deps: PanelDeps): void {
           ),
           chatMemories: Array.from(memoryItems.values()),
         },
-        /** @deprecated 前端 counts 可继续消费；内部已改用 summary-by-agents，不再 N× list */
+        /** @deprecated the frontend counts may keep consuming it; internally now uses summary-by-agents, no longer N× list */
         counts,
       }),
     );

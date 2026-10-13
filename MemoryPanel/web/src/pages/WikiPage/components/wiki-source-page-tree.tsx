@@ -1,14 +1,14 @@
 /**
- * WikiSourcePageTree —— 外部来源文档树（勾选）。
+ * WikiSourcePageTree -- external-source document tree (checkable).
  *
- * 后端 `pages` 是**扁平数组**（含目录节点），靠 parentId 表达层级。
- * 直接 map 渲染会把父子平铺成一列，看不出层级，用户会误以为"没有子文档"。
+ * The backend `pages` is a **flat array** (including directory nodes), expressing hierarchy via parentId.
+ * Rendering it directly with map would flatten parents and children into one column with no visible hierarchy, and users would think there are "no child documents".
  *
- * 实测规模（真实空间 CSIGCDB）：5748 节点 / 6 层 / 4183 篇文档。
- * 全展开会渲染数千 DOM 导致卡顿，故：
- *   - **默认只展开根级目录**（depth 0 的目录可见其直接子级），深层折叠，按需展开
- *   - 缩进体现层级
- *   - 勾选父目录 = 勾选其下全部后代文档（目录本身不可导入，仅作快捷选择）
+ * Measured scale (real space CSIGCDB): 5748 nodes / 6 levels / 4183 documents.
+ * Fully expanding would render thousands of DOM nodes and lag, therefore:
+ *   - **Only root-level directories are expanded by default** (a depth-0 directory shows its direct children); deeper levels are collapsed and expanded on demand
+ *   - Indentation reflects hierarchy
+ *   - Checking a parent directory = checking all descendant documents under it (a directory itself cannot be imported; it is only a quick-select shortcut)
  */
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -20,7 +20,7 @@ interface TreeNode extends WikiRemotePageRef {
   children: TreeNode[];
 }
 
-/** 扁平 → 树。parentId 为空/null 即根级；孤儿节点（父不在列表里）也挂到根，避免丢失。 */
+/** Flat -> tree. An empty/null parentId means root level; orphan nodes (parent not in the list) are also attached to the root to avoid loss. */
 function buildTree(pages: WikiRemotePageRef[]): TreeNode[] {
   const nodes = new Map<string, TreeNode>();
   for (const p of pages) nodes.set(p.externalId, { ...p, children: [] });
@@ -34,7 +34,7 @@ function buildTree(pages: WikiRemotePageRef[]): TreeNode[] {
   return roots;
 }
 
-/** 收集某目录下全部非目录后代 id（目录自身不可导入）。 */
+/** Collect the ids of all non-directory descendants under a directory (a directory itself cannot be imported). */
 function collectLeafIds(node: TreeNode, out: string[] = []): string[] {
   for (const c of node.children) {
     if (c.isDir) collectLeafIds(c, out);
@@ -44,8 +44,8 @@ function collectLeafIds(node: TreeNode, out: string[] = []): string[] {
 }
 
 /**
- * 默认折叠：depth >= DEFAULT_EXPAND_DEPTH 的目录。
- * 只展开根级目录 → 首屏约「根目录数 + 其直接子」行，大空间也不卡。
+ * Collapsed by default: directories with depth >= DEFAULT_EXPAND_DEPTH.
+ * Only expanding root-level directories -> the first screen is about "number of root directories + their direct children" rows, so even large spaces don't lag.
  */
 const DEFAULT_EXPAND_DEPTH = 1;
 
@@ -78,9 +78,9 @@ export function WikiSourcePageTree({
 }: {
   pages: WikiRemotePageRef[];
   selectedPageIds: string[];
-  /** 勾选/取消单个文档。 */
+  /** Check/uncheck a single document. */
   onToggleLeaf: (id: string, checked: boolean) => void;
-  /** 勾选/取消一批文档（目录快捷全选 / 全选）。 */
+  /** Check/uncheck a batch of documents (directory quick select-all / select all). */
   onToggleDir: (ids: string[], checked: boolean) => void;
 }) {
   const { t } = useTranslation();

@@ -1,19 +1,19 @@
 /**
- * /api/v1/knowledge/source/* —— 外部来源（工蜂 / GitHub / GitLab）薄封装。
+ * /api/v1/knowledge/source/* -- thin wrapper for external sources (Gongfeng / GitHub / GitLab).
  *
- * 设计约束：Panel 不含业务逻辑，来源清单与凭据存储的唯一真相源都在 KS。
- * Panel 只做三件事：
- *   1. 校验调用者身份（team 门控 + user_id）
- *   2. 带上实例凭证、x-tdai-team-id 与 x-tdai-user-id 转发给 KS
- *   3. 把 KS 的 envelope 原样返回
+ * Design constraint: Panel contains no business logic; the single source of truth for the source list and credential storage is KS.
+ * Panel only does three things:
+ *   1. Verify the caller's identity (team gate + user_id)
+ *   2. Forward to KS with instance credentials, x-tdai-team-id and x-tdai-user-id
+ *   3. Return KS's envelope as-is
  *
- * 凭据挂在**资源**上（resource_type + resource_id），与用户解耦。
- * team 门控由 KS 侧完成（校验 resource_id 属于 x-tdai-team-id），Panel 只把
- * requireTeamMember 通过后的 gate.userId + gate.teamId 透传。
+ * Credentials are attached to the **resource** (resource_type + resource_id), decoupled from users.
+ * The team gate is done by KS (verifying resource_id belongs to x-tdai-team-id); Panel only passes through
+ * gate.userId + gate.teamId after requireTeamMember passes.
  *
- * 安全边界：
- *   - 明文令牌**只**在 PUT 请求体里经 Panel 转发给 KS，不落 Panel 日志、不回吐。
- *   - Panel 不接受 body 里的 user_id / team_id，防止 A 改 B 的资源。
+ * Security boundary:
+ *   - The plaintext token goes **only** through the PUT request body, forwarded to KS by Panel; it is not written to Panel logs and not echoed back.
+ *   - Panel does not accept user_id / team_id in the body, to prevent A from modifying B's resources.
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -30,7 +30,7 @@ import {
 
 const VALID_TYPES: readonly ResourceType[] = ['code-graph', 'wiki'];
 
-/** 从 body / query 解析并校验 resource_type + resource_id。 */
+/** Parse and validate resource_type + resource_id from body / query. */
 function parseRef(body: Record<string, unknown>): { type: ResourceType; id: string } | string {
   const type = str(body, 'resource_type');
   const id = str(body, 'resource_id');
@@ -42,7 +42,7 @@ function parseRef(body: Record<string, unknown>): { type: ResourceType; id: stri
 export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  // 已启用的 codegraph 来源列表（前端下拉数据源）
+  // List of enabled codegraph sources (data source for the frontend dropdown)
   api.post('/knowledge/source/providers', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -54,7 +54,7 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     return runKs(c, () => kc.sourceProviderListCode());
   });
 
-  // 已启用的 wiki 来源列表（前端下拉数据源）
+  // List of enabled wiki sources (data source for the frontend dropdown)
   api.post('/knowledge/source/wiki-providers', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -66,7 +66,7 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     return runKs(c, () => kc.sourceProviderListWiki());
   });
 
-  // 列远端文档树（注册 wiki 时勾选）
+  // List the remote document tree (selected when registering a wiki)
   // body: { team_id, wiki_id, source_url, provider_id }
   api.post('/knowledge/source/wiki/list', mw, async (c) => {
     const ctx = buildCtx(c);
@@ -92,7 +92,7 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     );
   });
 
-  // 导入远端文档（拉取 + 写盘，不触发 ingest）
+  // Import remote documents (fetch + write to disk, without triggering ingest)
   // body: { team_id, wiki_id, source_url, provider_id, page_ids? }
   api.post('/knowledge/source/wiki/import', mw, async (c) => {
     const ctx = buildCtx(c);
@@ -122,7 +122,7 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     );
   });
 
-  // 某资源的凭据状态（仅元数据）
+  // Credential status of a resource (metadata only)
   // body: { team_id, resource_type, resource_id }
   api.post('/knowledge/source/credential/status', mw, async (c) => {
     const ctx = buildCtx(c);
@@ -141,9 +141,9 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     );
   });
 
-  // 写入 / 更新令牌
+  // Write / update the token
   // body: { team_id, resource_type, resource_id, provider_id, secret, cred_kind?, username? }
-  // ⚠ secret 只在本次请求体内转发给 KS；不写日志、不回吐、不落 Panel 任何存储。
+  // WARNING: the secret is only forwarded to KS within this request body; not logged, not echoed back, not persisted in any Panel storage.
   api.post('/knowledge/source/credential', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -160,7 +160,7 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     if ('error' in gate) return gate.error;
     const username = str(body, 'username') ?? undefined;
     const kc = deps.knowledgeClientFactory(ctx.instanceId);
-    // 只回 KS 给的元数据（KS 保证不含 secret），不回显请求体。
+    // Only return the metadata given by KS (KS guarantees it contains no secret); do not echo the request body.
     return runKs(c, () =>
       kc.sourceCredentialPut(ref.type, ref.id, { teamId, userId: gate.userId }, {
         provider_id: providerId,
@@ -171,7 +171,7 @@ export function registerKnowledgeSourceRoutes(api: Hono, deps: PanelDeps): void 
     );
   });
 
-  // 删除令牌
+  // Delete the token
   // body: { team_id, resource_type, resource_id }
   api.post('/knowledge/source/credential/delete', mw, async (c) => {
     const ctx = buildCtx(c);

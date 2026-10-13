@@ -1,5 +1,5 @@
 /**
- * API trace 日志脱敏与序列化（多模块复用）。
+ * API trace log redaction and serialization (shared across modules).
  */
 import { maskKeyValue } from "../metadata/utils/user-key.js";
 

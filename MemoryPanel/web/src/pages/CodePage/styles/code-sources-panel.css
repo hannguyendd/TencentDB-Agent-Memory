@@ -1,15 +1,15 @@
-/* code-sources-panel.css — Code_Graph 详情页（_codedetail-）特有样式 + 差异化覆盖。
+/* code-sources-panel.css -- Code_Graph detail page (_codedetail-) specific styles + differentiated overrides.
  *
- * 视觉对齐 Memory 项目的 Code.css：颜色全部走 Tea Design Token（--tea-color-*），
- * 间距/圆角/字号取设计白名单，className 统一 _codedetail- 前缀，避免与 Tea 内置
- * 类名冲突。
+ * Visually aligned with the Memory project's Code.css: all colors use Tea Design Tokens (--tea-color-*),
+ * spacing/radius/font size take the design whitelist, and the className uniformly uses the _codedetail- prefix to avoid conflicts with
+ * Tea's built-in class names.
  *
- * 列表页的页面外层 / 统计条 / 工具栏 / 骨架屏 / 卡片网格等公共结构已收敛到
- * ResourcePage/components/asset-card.css（与 Wiki 页共用），此处仅保留
- * Code 特有的列表差异（branch 列 / 删除按钮）与详情页样式。
+ * Shared list page structures such as the page outer layer / stats bar / toolbar / skeleton / card grid have been consolidated into
+ * ResourcePage/components/asset-card.css (shared with the Wiki page); only Code-specific list differences (branch column / delete button)
+ * and detail page styles are kept here.
  */
 
-/* ── 注册弹窗：访问令牌「如何获取令牌？」指引链接（必须显眼）── */
+/* ── Register dialog: access token "How to get a token?" guide link (must be prominent) ── */
 ._codelist-token-doc {
   display: inline-block;
   margin-left: 4px;
@@ -23,7 +23,7 @@
   color: var(--tea-color-text-link-hover, #0052cc);
 }
 
-/* ── 列表页差异化：branch 列（纵向 stack） ── */
+/* ── List page differences: branch column (vertical stack) ── */
 ._codelist-branch {
   display: flex;
   min-width: 0;
@@ -37,7 +37,7 @@
 }
 
 /* ============================================================
-   详情页（CodeDetailPanel / subView=detail）
+   Detail page (CodeDetailPanel / subView=detail)
    ============================================================ */
 
 ._codedetail-root {
@@ -46,7 +46,7 @@
   gap: 12px;
 }
 
-/* 返回面包屑 */
+/* Back breadcrumb */
 ._codedetail-breadcrumb {
   display: flex;
   align-items: center;
@@ -105,7 +105,7 @@
   margin: 0;
 }
 
-/* ── 统计（MetricsBoard 一行） ── */
+/* ── Stats (MetricsBoard one row) ── */
 ._codedetail-stats {
   display: flex;
   gap: 12px;
@@ -116,7 +116,7 @@
   min-width: 160px;
 }
 
-/* ── 仓库信息 ── */
+/* ── Repository info ── */
 ._codedetail-info-grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -124,7 +124,7 @@
   align-items: baseline;
 }
 
-/* ── 代码搜索 / 代码探索 ── */
+/* ── Code search / Code exploration ── */
 ._codedetail-hint {
   margin-bottom: 8px;
   line-height: 18px;

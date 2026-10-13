@@ -1,14 +1,14 @@
 /**
- * Knowledge 抽取任务内存态（本期临时方案，下期持久化）。
+ * In-memory state of Knowledge extraction tasks (temporary solution for this release; persisted next release).
  *
- * 背景：KS → Panel 的 status-callback 是 S2S，没有 owner user_key，
- * 无法直接以 owner 身份打内核 /v3/meta/asset/create（ForCaller 路由要求
- * caller.user_id === owner_user_id）。所以 Panel 在 code-graph/create
- * （前端发起、带 user_key）时把 owner key 临时记进内存，等 callback
- * ready 时取出来以 owner 身份注册 meta asset。
+ * Background: the KS -> Panel status-callback is S2S and has no owner user_key,
+ * so it cannot directly call kernel /v3/meta/asset/create as the owner (the ForCaller route requires
+ * caller.user_id === owner_user_id). So when code-graph/create happens in Panel
+ * (initiated by the frontend, carrying user_key), the owner key is temporarily recorded in memory, and when the callback
+ * is ready it is taken out to register the meta asset as the owner.
  *
- * 进程重启会丢任务——已知 corner，由前端 register-meta 兜底补建，
- * 下期持久化后根治。
+ * A process restart loses tasks -- a known corner case, covered by the frontend register-meta fallback,
+ * and fixed at the root once persisted next release.
  */
 
 export interface KnowledgeTask {
@@ -16,13 +16,13 @@ export interface KnowledgeTask {
   type: 'wiki' | 'code-graph';
   team_id: string;
   owner_user_id: string;
-  /** callback S2S 注册 asset 时以 owner 身份打 meta API 用。 */
+  /** Used to call the meta API as the owner when the callback registers the asset via S2S. */
   owner_user_key: string;
   service_id: string;
   created_at: number;
 }
 
-const DEFAULT_TTL_MS = 60 * 60 * 1000; // 1h：codegraph 构建通常数分钟，留足余量
+const DEFAULT_TTL_MS = 60 * 60 * 1000; // 1h: a codegraph build usually takes a few minutes, leaving ample margin
 
 export class KnowledgeTaskRegistry {
   private readonly tasks = new Map<string, KnowledgeTask>();
@@ -42,7 +42,7 @@ export class KnowledgeTaskRegistry {
     return this.tasks.get(knowledgeId);
   }
 
-  /** 取出并删除——callback 注册成功后调用，清掉已完结任务。 */
+  /** Take out and delete -- called after the callback registers successfully, clearing finished tasks. */
   take(knowledgeId: string): KnowledgeTask | undefined {
     const t = this.tasks.get(knowledgeId);
     this.tasks.delete(knowledgeId);
@@ -53,7 +53,7 @@ export class KnowledgeTaskRegistry {
     return this.tasks.size;
   }
 
-  /** 删掉过期任务，防泄漏。record/peek 时顺手调。 */
+  /** Delete expired tasks to prevent leaks. Called opportunistically on record/peek. */
   sweep(now: number = Date.now()): void {
     for (const [id, t] of this.tasks) {
       if (now - t.created_at > this.ttlMs) this.tasks.delete(id);

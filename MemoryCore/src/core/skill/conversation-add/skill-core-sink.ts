@@ -1,27 +1,26 @@
 /**
- * SkillCoreSink — 把 SkillConversationExtractWorker 抽出的 candidates 兜底
- * 登记 skill asset。
+ * SkillCoreSink — registers a fallback skill asset for the candidates extracted by SkillConversationExtractWorker.
  *
- * ⚠️ 语义澄清（跟老 `/v3/skill/extract` 同步分支的兜底路径完全对齐）：
- *   SkillExtractor 内部走的是 tool-calling review agent —— agent 通过
- *   `<skill_tools>` 里的 create tool 直接调 `SkillCore.create` 把 skill 落库了，
- *   candidate 只是"事后回执"（带上 skill_id / name / action="create"）。
+ * ⚠️ Semantic clarification (fully aligned with the fallback path of the old `/v3/skill/extract` synchronous branch):
+ *   SkillExtractor internally runs a tool-calling review agent — the agent calls `SkillCore.create`
+ *   directly through the create tool in `<skill_tools>` to persist the skill,
+ *   and a candidate is only an "after-the-fact receipt" (carrying skill_id / name / action="create").
  *
- *   所以 sink **不应该** 再调一遍 SkillCore.create，否则会：
- *     1) 同名/同 team 冲突 → SKILL_NAME_DUPLICATE 抛错
- *     2) candidate 里 content 通常也没有（extractor 用 tool-call 参数直接落，
- *        result payload 只保 skill_id / name 摘要）
+ *   So the sink **should not** call SkillCore.create again, otherwise it would:
+ *     1) conflict on the same name / same team → throw SKILL_NAME_DUPLICATE
+ *     2) the candidate usually has no content either (the extractor persists directly with tool-call parameters,
+ *        and the result payload keeps only a skill_id / name summary)
  *
- *   sink 只做兜底 asset 登记 —— standalone 模式下 SkillVersioning 没挂
- *   onSkillCreated 钩子（避免 core 耦合 metadata），要靠这里补登记 asset；
- *   service 模式下 buildSkillCore 已挂钩子，这里调 ensureSkillAsset 幂等，
- *   属于双保险。
+ *   The sink only does fallback asset registration — in standalone mode SkillVersioning has no
+ *   onSkillCreated hook attached (to avoid coupling core with metadata), so asset registration must be filled in here;
+ *   in service mode buildSkillCore has already attached the hook, and calling ensureSkillAsset here is idempotent,
+ *   serving as a double safeguard.
  */
 
 import type { ExtractedCandidate, ExtractorLogger } from "../queue/types.js";
 import type { SkillCandidatesSink } from "./extract-worker.js";
 
-/** 与 gateway 侧 MetadataService 使用的形状对齐（只用到 ensureSkillAsset）。 */
+/** Aligned with the shape used by the gateway-side MetadataService (only ensureSkillAsset is used). */
 export interface MetadataServiceLike {
   ensureSkillAsset(input: {
     skill_id: string;
@@ -32,14 +31,14 @@ export interface MetadataServiceLike {
 }
 
 export interface SkillCoreSinkOptions {
-  /** 可选 —— 有 metadata service 时兜底登记 asset。缺失时 sink 是 no-op。 */
+  /** Optional — registers the asset as a fallback when a metadata service is present. When missing the sink is a no-op. */
   metadata?: MetadataServiceLike;
   logger: ExtractorLogger;
 }
 
 /**
- * SkillCoreSink 只做 asset 兜底登记, 不再 create skill。
- * skill 本身已由 SkillExtractor 的 tool-call review agent 通过 SkillCore.create 落库。
+ * SkillCoreSink only does fallback asset registration and no longer creates skills.
+ * The skill itself has already been persisted by SkillExtractor's tool-call review agent via SkillCore.create.
  */
 export class SkillCoreSink implements SkillCandidatesSink {
   constructor(private readonly opts: SkillCoreSinkOptions) {}
@@ -58,11 +57,11 @@ export class SkillCoreSink implements SkillCandidatesSink {
     const { metadata, logger } = this.opts;
     const { task, candidates, workerId } = input;
     if (!candidates.length) return;
-    if (!metadata) return; // 没有 metadata → sink 是 no-op（asset 登记只能靠钩子）
+    if (!metadata) return; // no metadata → the sink is a no-op (asset registration can only rely on the hook)
 
     for (const c of candidates) {
       if (c.action !== "create") {
-        // 目前只 asset 化 create；patch/update 不需要重新登记 asset（skill_id 不变）
+        // currently only create is assetized; patch/update need no re-registration of the asset (skill_id unchanged)
         continue;
       }
       const skillId = c.skill_id;
@@ -81,8 +80,8 @@ export class SkillCoreSink implements SkillCandidatesSink {
           name,
         });
       } catch (err) {
-        // asset 登记失败不影响主流程 —— skill 已经在 skills 表里，
-        // 前端管控页可能显示不到，运维再补
+        // asset registration failure does not affect the main flow — the skill is already in the skills table,
+        // the frontend control page may not show it, and ops can fill it in later
         logger.warn(
           `[skill-core-sink] worker=${workerId} ensureSkillAsset failed skill_id=${skillId}: ` +
             (err instanceof Error ? err.message : String(err)),

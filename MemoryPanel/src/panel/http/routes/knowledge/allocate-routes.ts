@@ -1,11 +1,11 @@
 /**
  * /api/v1/knowledge/allocate | unbind | agent-fixed | set-visibility | grant
  *
- * req#3 分配：把 knowledge meta_asset 绑定给 agent / 设可见性 / 授权，均走 meta
- * 权威系统（ForCaller）。仿 chat-memory allocate/unbind：list → append/remove → set
- * （agent-fixed-asset 无增量端点）。
+ * req#3 allocation: bind a knowledge meta_asset to an agent / set visibility / grant authorization, all via the meta
+ * authoritative system (ForCaller). Modeled after chat-memory allocate/unbind: list -> append/remove -> set
+ * (agent-fixed-asset has no incremental endpoint).
  *
- * injection_mode = 'tool'（knowledge 是工具型注入，Proxy 渲染 <knowledge_tools>）。
+ * injection_mode = 'tool' (knowledge is tool-style injection; the Proxy renders <knowledge_tools>).
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -50,7 +50,7 @@ const VALID_VISIBILITY = ['private', 'team', 'restricted', 'agent', 'task'];
 export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  // 分配：绑定 knowledge asset 给 agent
+  // Allocate: bind a knowledge asset to an agent
   api.post('/knowledge/allocate', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -86,10 +86,10 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     const agent = agentEnv.data as AgentRaw;
     if (agent.team_id !== teamId) return respondControlError(c, 400, 'AGENT_NOT_IN_TEAM');
 
-    // 关键：必须分页聚合拉取全量 binding。内核 DEFAULT_PAGINATION=20，
-    // 不传 limit 会导致当 agent 已绑定 ≥21 条资产时，老 binding 排在 20 之外被截断，
-    // append 后 set 全量替换会静默覆盖那些老绑定。
-    // 同时：list 出错必须透传而不是当"空列表"，否则 set 全量替换会清空现有绑定。
+    // Key: all bindings must be fetched via paginated aggregation. The kernel DEFAULT_PAGINATION=20,
+    // and without passing a limit, when an agent already has >=21 bound assets the old bindings beyond the first 20 get truncated,
+    // and the full-replace set after append would silently overwrite those old bindings.
+    // Also: a list error must be passed through rather than treated as an "empty list", otherwise the full-replace set would wipe the existing bindings.
     let bindListError: MetaEnvelope<unknown> | null = null;
     const bindings = await fetchAllMetaListItems<BindingRaw>(
       deps,
@@ -120,7 +120,7 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     return respondEnvelope(c, okEnvelope(c, { allocated: true, agent_id: agentId, knowledge_id: knowledgeId }));
   });
 
-  // 解绑
+  // Unbind
   api.post('/knowledge/unbind', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -137,8 +137,8 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     if (!agent) return respondControlError(c, 404, 'AGENT_NOT_FOUND');
     if (agent.owner_user_id !== caller) return respondControlError(c, 403, 'NOT_YOUR_AGENT');
 
-    // 同 allocate：必须分页拉全量，否则未在第一页的 binding 永远解不干净；
-    // list 出错透传，避免被误判为 BINDING_NOT_FOUND。
+    // Same as allocate: must page through everything, otherwise bindings not on the first page can never be fully unbound;
+    // pass list errors through, to avoid being misjudged as BINDING_NOT_FOUND.
     let bindListError: MetaEnvelope<unknown> | null = null;
     const bindings = await fetchAllMetaListItems<BindingRaw>(
       deps,
@@ -171,7 +171,7 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     return respondEnvelope(c, okEnvelope(c, { unbound: true, agent_id: agentId, knowledge_id: knowledgeId }));
   });
 
-  // 固定资产 tab：列出 agent 绑定的 wiki / code_graph
+  // Fixed assets tab: list the wiki / code_graph bound to the agent
   api.post('/knowledge/agent-fixed', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -194,15 +194,15 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     }
     const applyVisibility = !isOwner;
 
-    // 类型过滤下推：core `agent-fixed-asset/list-with-detail` 支持
-    // `asset_types` 参数（v3-meta-schemas.ts:fixedAssetListWithDetailSchema），
-    // 在 SQL 层按类型过滤 —— 无关类型（skill / chat_memory）不会占分页额度。
-    // 之前"拉全量再内存 filter(KNOWLEDGE_ASSET_TYPES.includes(...))"的写法，
-    // 在 skill 特别多的 agent 上（如实际线上 519 skill 场景）会浪费 5+ 次
-    // kernel 调用只为翻过 skill 分页；且如果 wiki/code_graph 绑定按
-    // priority DESC/created_at DESC 排在 500 位之外，同样会被硬上限截断
-    // 让"固定资产"tab 空白。
-    // list 出错透传，避免把"查询失败"误显示为"无绑定"。
+    // Type filter pushed down: core `agent-fixed-asset/list-with-detail` supports
+    // the `asset_types` parameter (v3-meta-schemas.ts:fixedAssetListWithDetailSchema),
+    // filtering by type at the SQL layer -- irrelevant types (skill / chat_memory) do not consume pagination quota.
+    // The earlier approach of "fetch everything then filter(KNOWLEDGE_ASSET_TYPES.includes(...)) in memory",
+    // on agents with very many skills (e.g. the real online case of 519 skills) would waste 5+
+    // kernel calls just to page past skills; and if wiki/code_graph bindings sorted by
+    // priority DESC/created_at DESC fall beyond position 500, they would likewise be cut by the hard cap
+    // leaving the "fixed assets" tab blank.
+    // Pass list errors through, to avoid showing "query failed" as "no bindings".
     let listError: MetaEnvelope<unknown> | null = null;
     const rawItems = await fetchAllMetaListItems<FixedAssetDetailRaw>(
       deps,
@@ -249,7 +249,7 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     return respondEnvelope(c, okEnvelope(c, { items: out, total: out.length }));
   });
 
-  // 设可见性（asset/update，ForCaller owner-only 由内核保证）
+  // Set visibility (asset/update; ForCaller owner-only is guaranteed by the kernel)
   api.post('/knowledge/set-visibility', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -263,7 +263,7 @@ export function registerKnowledgeAllocateRoutes(api: Hono, deps: PanelDeps): voi
     return respondEnvelope(c, env);
   });
 
-  // 授权（acl/grant，owner-only 由内核保证）
+  // Authorization (acl/grant; owner-only is guaranteed by the kernel)
   api.post('/knowledge/grant', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);

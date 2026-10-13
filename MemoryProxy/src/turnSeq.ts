@@ -1,30 +1,30 @@
 /**
- * Turn 序号计数 —— 宿主侧无状态推导。
+ * Turn sequence counting -- stateless derivation on the host side.
  *
- * 一个 trace = 一个 turn（一次用户输入）。一个 turn 内的工具循环会产生多次 upstream
- * 请求，它们必须算出**相同**的 turn 序号，才能在 Langfuse 中归并到同一个 trace。
+ * One trace = one turn (one user input). The tool loop within a turn produces multiple upstream
+ * requests, which must compute the **same** turn sequence number so they merge into the same trace in Langfuse.
  *
- * 由于宿主侧没有逐请求的持久状态（turn 计数器在私有模块内部，不对外
- * 暴露逐 turn 序号），这里直接从 `messages` 历史推导：统计消息序列里"人类输入轮次"的
- * 数量。规则与私有模块的 turn 检测逻辑对齐：
- *   - Anthropic：user 消息含非 <system-reminder> 的 text block 即为人类输入；
- *     纯 tool_result / 纯 system-reminder 是工具循环延续。
- *   - OpenAI：role=user 且含非 <system-reminder> 文本为人类输入；role=tool 是工具循环。
+ * Since the host side has no per-request persistent state (the turn counter lives inside a private module and does not
+ * expose per-turn sequence numbers), we derive it directly from the `messages` history: count the number of
+ * "human input rounds" in the message sequence. The rules align with the private module's turn detection logic:
+ *   - Anthropic: a user message containing a text block other than <system-reminder> is human input;
+ *     pure tool_result / pure system-reminder is a tool loop continuation.
+ *   - OpenAI: role=user with non-<system-reminder> text is human input; role=tool is the tool loop.
  *
- * 因此：一个 turn 的首次请求与其后续工具循环请求，因为"人类轮次数"相同，turnSeq 一致。
- * 下一个 turn 的请求会多出一条人类输入 → turnSeq +1 → 新 trace。
+ * Therefore: the first request of a turn and its subsequent tool-loop requests have the same "human round count", so turnSeq is identical.
+ * The next turn's request has one more human input -> turnSeq +1 -> new trace.
  *
- * 注意：依赖客户端发送完整历史（Claude Code / CodeBuddy 均如此）。若客户端截断历史，
- * turnSeq 可能偏移，但同一 turn 内仍保持一致（只是绝对值漂移），不影响"同 turn 归一 trace"。
- * 绝对值漂移会让序号**回退**（现网见过 97 → 1），与该会话早先写出的用量行撞号——
- * 开了 Redis 时由 `resolveMonotonicTurnSeq()` 把本地推导值换成会话级单调序号。
+ * Note: relies on the client sending the full history (both Claude Code and CodeBuddy do). If the client truncates history,
+ * turnSeq may drift, but stays consistent within the same turn (only the absolute value drifts), so "same turn, same trace" is unaffected.
+ * Absolute drift can make the sequence number **go backwards** (seen in production: 97 -> 1), colliding with usage rows written earlier in that session --
+ * when Redis is enabled, `resolveMonotonicTurnSeq()` replaces the locally derived value with a session-level monotonic sequence.
  */
 
 import type { ProxyConfig } from "./types.js";
 import { getRedisClient } from "./db/redis-client.js";
 import { log } from "./report/log.js";
 
-/** 判断单条 user 消息内容是否为人类输入（非工具循环延续）。 */
+/** Determine whether a single user message's content is human input (not a tool loop continuation). */
 function isHumanUserContent(content: unknown): boolean {
   if (typeof content === "string") {
     return !content.startsWith("<system-reminder>");
@@ -43,16 +43,16 @@ function isHumanUserContent(content: unknown): boolean {
 }
 
 /**
- * 统计 messages 中"人类输入轮次"的数量，作为当前 turn 序号。
+ * Count the "human input rounds" in messages, used as the current turn sequence number.
  *
- * 返回值 ≥ 1（至少当前这一轮）；空消息或无人类输入时返回 0。
+ * Returns >= 1 (at least the current round); returns 0 for empty messages or no human input.
  */
 export function countHumanTurns(messages: unknown[], protocol: "openai" | "anthropic"): number {
   let count = 0;
   for (const msg of messages) {
     const m = msg as Record<string, unknown>;
     if (m?.role !== "user") continue;
-    // OpenAI 的工具响应是 role=tool（不会进入这里）；user 消息按内容判断。
+    // OpenAI tool responses are role=tool (never reach here); user messages are judged by content.
     if (protocol === "openai" || protocol === "anthropic") {
       if (isHumanUserContent(m.content)) count += 1;
     }
@@ -61,13 +61,13 @@ export function countHumanTurns(messages: unknown[], protocol: "openai" | "anthr
 }
 
 /**
- * OpenAI Responses API (codex / workbuddy) 版本 —— 数 body.input[] 里
- * type="message" && role="user" 的项。
+ * OpenAI Responses API (codex / workbuddy) version -- counts items in body.input[]
+ * with type="message" && role="user".
  *
- * 与 openai/anthropic 版本对齐: 同 turn 内的工具循环 (function_call +
- * function_call_output) 不新增 user message → 相同 turnSeq → 同一 langfuse trace。
+ * Aligned with the openai/anthropic versions: the tool loop within a turn (function_call +
+ * function_call_output) adds no user message -> same turnSeq -> same langfuse trace.
  *
- * 迁移前 codex/wb runner 各自复制了一份实现 (blueprint §2.4 复制粘贴)。
+ * Before migration, the codex/wb runners each kept their own copy of the implementation (blueprint §2.4 copy-paste).
  */
 export function countHumanTurnsResponses(input: unknown): number {
   if (!Array.isArray(input)) return 0;
@@ -82,28 +82,28 @@ export function countHumanTurnsResponses(input: unknown): number {
   return count;
 }
 
-// ─── 会话级单调 turn 序号（Redis） ────────────────────────────────────────────
+// --- Session-level monotonic turn sequence (Redis) ---------------------------------------
 
 /**
- * 序号状态独占的 key 前缀。
+ * Key prefix exclusively owned by the sequence state.
  *
- * 不复用 `config.redis.keyPrefix`（`cg:sess:`）：RedisSessionStore 在
- * `cg:sess:turnseq:<session>` 上放的是一个 INCR 字符串计数器，这里存的是 hash，
- * 同名会直接 WRONGTYPE。
+ * Does not reuse `config.redis.keyPrefix` (`cg:sess:`): RedisSessionStore puts an INCR string counter at
+ * `cg:sess:turnseq:<session>`, while a hash is stored here;
+ * the same name would directly cause WRONGTYPE.
  */
 const TURN_SEQ_KEY_PREFIX = "turnseq:";
 
 const DEFAULT_TURN_SEQ_TTL_DAYS = 30;
 
 /**
- * 分配会话级单调 turn 序号。单 key EVAL，多实例下由 Redis 串行化。
+ * Allocate a session-level monotonic turn sequence number. Single-key EVAL, serialized by Redis across instances.
  *
- * hash 字段：`seq` = 该会话已发出的最大序号；`k:<lane>` / `s:<lane>` = 每条轨道
- * 上一次的本地标记与对应序号。
+ * Hash fields: `seq` = the largest sequence number issued for the session; `k:<lane>` / `s:<lane>` = the last local marker
+ * of each lane and its corresponding sequence number.
  *
- * 标记没变（同一 turn 的工具循环）就复用上次的序号；标记一变就取
- * `max(已发最大值 + 1, 本地值)`：历史完整时序号仍等于人类轮次数，历史被截短
- * （本地值回落）时改走 +1，于是只会前进、不会撞回旧 turn。
+ * If the marker is unchanged (tool loop of the same turn), reuse the previous sequence number; if the marker changes, take
+ * `max(max issued + 1, local value)`: when history is complete the sequence still equals the human round count; when history is truncated
+ * (local value falls back) it goes +1 instead, so it only moves forward and never collides with an old turn.
  */
 const ALLOCATE_TURN_SEQ_LUA = `
 local markField = "k:" .. ARGV[1]
@@ -123,14 +123,14 @@ return seq
 `;
 
 /**
- * 把本地推导的 turn 序号换成该会话在 Redis 上的单调序号。
+ * Replace the locally derived turn sequence number with the session's monotonic sequence number on Redis.
  *
- * `lane` 用于把共用 sessionKey、但历史长度完全不同的请求流分开计数：Claude Code
- * 的 sidequery / fork 历史只有一两条，与主对话放同一条轨道会互相判成"新 turn"，
- * 把一个 turn 的工具循环拆成两个 trace。
+ * `lane` separates request streams that share a sessionKey but have completely different history lengths: Claude Code's
+ * sidequery / fork history has only one or two entries, and putting it on the same lane as the main conversation would make them judge each other as a "new turn",
+ * splitting one turn's tool loop into two traces.
  *
- * 任何一步不可用都原样返回 `localTurnSeq`（Redis 没开、拿不到 client、EVAL 失败、
- * 序号本身就是 0），保持与开 Redis 之前一致的行为——观测口径不值得挡请求。
+ * If any step is unavailable, return `localTurnSeq` as-is (Redis not enabled, no client available, EVAL failed,
+ * sequence number itself is 0), keeping behavior identical to before Redis was enabled -- observability accounting is not worth blocking requests.
  */
 export async function resolveMonotonicTurnSeq(
   config: ProxyConfig,

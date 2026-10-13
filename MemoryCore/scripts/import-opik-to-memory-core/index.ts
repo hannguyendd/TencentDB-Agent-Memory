@@ -86,50 +86,50 @@ const MAX_MESSAGES_PER_REQUEST = 100;
 
 function usage(): string {
   return `
-从 Opik 导入对话 Trace 到 Memory Core L0。
+Import conversation Traces from Opik into Memory Core L0.
 
-用法：
-  npm run import:opik -- [选项]
+Usage:
+  npm run import:opik -- [options]
 
-数据源：
-  --opik-url <url>       Opik UI 或 API 地址；也可用 OPIK_URL
-                         例如 http://opik.example.com:5173/default/projects?size=25
-  --workspace <name>     Opik workspace，默认 OPIK_WORKSPACE 或 URL 首段/default
-  --project <name>       只导入指定项目；可重复或逗号分隔，默认全部项目
-  --page-size <n>        Opik 每页数量，默认 100
-  --max-traces <n>       本次最多处理 Trace 数，0 表示不限，默认 0
+Data source:
+  --opik-url <url>       Opik UI or API address; OPIK_URL also works
+                         e.g. http://opik.example.com:5173/default/projects?size=25
+  --workspace <name>     Opik workspace, defaults to OPIK_WORKSPACE or the first URL segment/default
+  --project <name>       Import only the specified project; repeatable or comma-separated, defaults to all projects
+  --page-size <n>        Opik page size, default 100
+  --max-traces <n>       Max Traces to process this run, 0 means unlimited, default 0
   --max-session-messages <n>
-                         单个目标 Session 最多导入的 L0 消息数，默认 40000；0 禁用保护
+                         Max L0 messages imported for a single target Session, default 40000; 0 disables the guard
   --large-session-strategy <tail|error>
-                         超限时仅导入去重后的末尾消息，或直接报错；默认 tail
+                         When exceeded, import only the deduplicated tail messages, or fail outright; default tail
 
 Memory Core：
-  --memory-url <url>     Gateway 地址，默认 MEMORY_CORE_URL 或 http://127.0.0.1:8420
-  --service-id <id>      x-tdai-service-id；也可用 MEMORY_CORE_SERVICE_ID
-  --team-id <id>         目标 team；也可用 MEMORY_CORE_TEAM_ID
-  --agent-id <id>        目标 agent；也可用 MEMORY_CORE_AGENT_ID
-  --user-id <id>         目标 user；也可用 MEMORY_CORE_USER_ID
-  --task-id <id>         可选目标 task；也可用 MEMORY_CORE_TASK_ID
+  --memory-url <url>     Gateway address, defaults to MEMORY_CORE_URL or http://127.0.0.1:8420
+  --service-id <id>      x-tdai-service-id; MEMORY_CORE_SERVICE_ID also works
+  --team-id <id>         Target team; MEMORY_CORE_TEAM_ID also works
+  --agent-id <id>        Target agent; MEMORY_CORE_AGENT_ID also works
+  --user-id <id>         Target user; MEMORY_CORE_USER_ID also works
+  --task-id <id>         Optional target task; MEMORY_CORE_TASK_ID also works
 
-执行控制：
-  --state-file <path>    断点文件，默认 .opik-memory-import-state.json
-  --no-resume            忽略已有断点
-  --dry-run              拉取并转换，但不写 Memory Core/断点
-  --include-system       将 system/developer 消息以 user 消息导入
-  --wait-every <n>       每 N 个写请求等待 L1 空闲；0 禁用，默认 20
-  --no-final-wait        完成后不等待 L1/L2/L3 全部空闲
-  --poll-ms <n>          Pipeline 轮询间隔，默认 1000
-  --max-wait-ms <n>      单次等待上限，默认 600000
-  --timeout-ms <n>       HTTP 请求超时，默认 30000
-  --retries <n>          429/5xx/网络错误重试次数，默认 4
-  -h, --help             显示帮助
+Execution control:
+  --state-file <path>    Checkpoint file, defaults to .opik-memory-import-state.json
+  --no-resume            Ignore the existing checkpoint
+  --dry-run              Fetch and convert, but do not write Memory Core/checkpoint
+  --include-system       Import system/developer messages as user messages
+  --wait-every <n>       Wait for L1 to be idle every N write requests; 0 disables, default 20
+  --no-final-wait        Do not wait for L1/L2/L3 to all be idle after completion
+  --poll-ms <n>          Pipeline poll interval, default 1000
+  --max-wait-ms <n>      Max single wait, default 600000
+  --timeout-ms <n>       HTTP request timeout, default 30000
+  --retries <n>          Retries for 429/5xx/network errors, default 4
+  -h, --help             Show help
 
-密钥仅从环境变量读取：
-  OPIK_API_KEY           可选；原样写入 Opik Authorization header
-  OPIK_AUTH_SCHEME       可选，如 Bearer；默认不加前缀
-  MEMORY_CORE_API_KEY    必填（dry-run 除外）
+Secrets are read only from environment variables:
+  OPIK_API_KEY           Optional; written as-is into the Opik Authorization header
+  OPIK_AUTH_SCHEME       Optional, e.g. Bearer; no prefix by default
+  MEMORY_CORE_API_KEY    Required (except for dry-run)
 
-示例：
+Example:
   OPIK_URL='http://opik.example.com:5173/default/projects?size=25' \\
   MEMORY_CORE_URL='http://127.0.0.1:8420' \\
   MEMORY_CORE_API_KEY='***' MEMORY_CORE_SERVICE_ID='default' \\
@@ -143,19 +143,19 @@ function parsePositiveInt(value: string | undefined, fallback: number, name: str
   if (value == null || value === "") return fallback;
   const parsed = Number(value);
   const valid = Number.isSafeInteger(parsed) && (allowZero ? parsed >= 0 : parsed > 0);
-  if (!valid) throw new Error(`${name} 必须是${allowZero ? "非负" : "正"}整数`);
+  if (!valid) throw new Error(`${name} must be a ${allowZero ? "non-negative" : "positive"} integer`);
   return parsed;
 }
 
 function required(value: string | undefined, name: string): string {
   const normalized = value?.trim();
-  if (!normalized) throw new Error(`缺少 ${name}`);
+  if (!normalized) throw new Error(`Missing ${name}`);
   return normalized;
 }
 
 function parseOpikBase(raw: string, explicitWorkspace?: string): { apiBase: string; workspace: string } {
   const url = new URL(raw);
-  if (url.username || url.password) throw new Error("OPIK_URL 不允许包含凭据，请使用环境变量传递密钥");
+  if (url.username || url.password) throw new Error("OPIK_URL must not contain credentials; pass secrets via environment variables");
 
   const parts = url.pathname.split("/").filter(Boolean);
   const workspaceFromUi = parts[0] && !["api", "v1"].includes(parts[0]) ? parts[0] : undefined;
@@ -217,14 +217,14 @@ function parseCli(argv: string[]): CliOptions {
     process.exit(0);
   }
 
-  const rawOpikUrl = required((values["opik-url"] as string | undefined) ?? process.env.OPIK_URL, "--opik-url 或 OPIK_URL");
+  const rawOpikUrl = required((values["opik-url"] as string | undefined) ?? process.env.OPIK_URL, "--opik-url or OPIK_URL");
   const opik = parseOpikBase(rawOpikUrl, (values.workspace as string | undefined) ?? process.env.OPIK_WORKSPACE);
   const projectValues = (values.project as string[] | undefined) ?? [];
   const projects = projectValues.flatMap((item) => item.split(",")).map((item) => item.trim()).filter(Boolean);
   const dryRun = Boolean(values["dry-run"]);
   const largeSessionStrategy = (values["large-session-strategy"] as string | undefined) ?? "tail";
   if (largeSessionStrategy !== "tail" && largeSessionStrategy !== "error") {
-    throw new Error("--large-session-strategy 必须是 tail 或 error");
+    throw new Error("--large-session-strategy must be tail or error");
   }
 
   if (!dryRun) required(process.env.MEMORY_CORE_API_KEY, "MEMORY_CORE_API_KEY");
@@ -234,11 +234,11 @@ function parseCli(argv: string[]): CliOptions {
     memoryUrl: ((values["memory-url"] as string | undefined) ?? process.env.MEMORY_CORE_URL ?? "http://127.0.0.1:8420").replace(/\/$/, ""),
     workspace: opik.workspace,
     projects,
-    teamId: required((values["team-id"] as string | undefined) ?? process.env.MEMORY_CORE_TEAM_ID, "--team-id 或 MEMORY_CORE_TEAM_ID"),
-    agentId: required((values["agent-id"] as string | undefined) ?? process.env.MEMORY_CORE_AGENT_ID, "--agent-id 或 MEMORY_CORE_AGENT_ID"),
-    userId: required((values["user-id"] as string | undefined) ?? process.env.MEMORY_CORE_USER_ID, "--user-id 或 MEMORY_CORE_USER_ID"),
+    teamId: required((values["team-id"] as string | undefined) ?? process.env.MEMORY_CORE_TEAM_ID, "--team-id or MEMORY_CORE_TEAM_ID"),
+    agentId: required((values["agent-id"] as string | undefined) ?? process.env.MEMORY_CORE_AGENT_ID, "--agent-id or MEMORY_CORE_AGENT_ID"),
+    userId: required((values["user-id"] as string | undefined) ?? process.env.MEMORY_CORE_USER_ID, "--user-id or MEMORY_CORE_USER_ID"),
     taskId: ((values["task-id"] as string | undefined) ?? process.env.MEMORY_CORE_TASK_ID)?.trim() || undefined,
-    serviceId: required((values["service-id"] as string | undefined) ?? process.env.MEMORY_CORE_SERVICE_ID, "--service-id 或 MEMORY_CORE_SERVICE_ID"),
+    serviceId: required((values["service-id"] as string | undefined) ?? process.env.MEMORY_CORE_SERVICE_ID, "--service-id or MEMORY_CORE_SERVICE_ID"),
     pageSize: parsePositiveInt(values["page-size"] as string | undefined, 100, "--page-size"),
     maxTraces: parsePositiveInt(values["max-traces"] as string | undefined, 0, "--max-traces", true),
     maxSessionMessages: parsePositiveInt(values["max-session-messages"] as string | undefined, 40_000, "--max-session-messages", true),
@@ -391,7 +391,7 @@ export function mergeMessages(input: MemoryMessage[], output: MemoryMessage[]): 
   }
 
   let overlap = 0;
-  // 重叠不可能超过 output 长度；只扫描 input 尾部，避免大量独立 Trace 时退化为 O(n²)。
+  // The overlap cannot exceed the output length; scan only the tail of input, to avoid degrading to O(n²) with many independent Traces.
   const inputStart = Math.max(0, input.length - output.length);
   for (let index = inputStart; index < input.length; index++) {
     const identity = messageIdentity(input[index]!);
@@ -489,8 +489,8 @@ export function buildLargeSessionPlans(
     for (const entry of group) uniqueMessages = mergeMessages(uniqueMessages, entry.messages);
     if (strategy === "error") {
       throw new Error(
-        `Session ${sourceSessionId} 预计写入 ${sourceMessageCount} 条 L0（跨 Trace 去重后 ${uniqueMessages.length} 条），`
-        + `超过安全上限 ${maxSessionMessages}`,
+        `Session ${sourceSessionId} is expected to write ${sourceMessageCount} L0 entries (${uniqueMessages.length} after cross-Trace dedup), `
+        + `exceeding the safety limit ${maxSessionMessages}`,
       );
     }
 
@@ -512,7 +512,7 @@ export function buildLargeSessionPlans(
 function loadState(path: string, resume: boolean): ImportState {
   if (!resume || !existsSync(path)) return { version: 1, completed: {} };
   const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<ImportState>;
-  if (parsed.version !== 1 || !isRecord(parsed.completed)) throw new Error(`断点文件格式不支持: ${path}`);
+  if (parsed.version !== 1 || !isRecord(parsed.completed)) throw new Error(`Unsupported checkpoint file format: ${path}`);
   return parsed as ImportState;
 }
 
@@ -547,7 +547,7 @@ class HttpClient {
           try {
             return JSON.parse(text) as T;
           } catch {
-            throw new Error(`HTTP ${response.status} 返回非 JSON: ${text.slice(0, 500)}`);
+            throw new Error(`HTTP ${response.status} returned non-JSON: ${text.slice(0, 500)}`);
           }
         }
       } catch (error) {
@@ -558,7 +558,7 @@ class HttpClient {
         clearTimeout(timer);
       }
       const delay = Math.min(1000 * 2 ** attempt, 10_000) + Math.floor(Math.random() * 250);
-      console.warn(`[retry] ${attempt + 1}/${this.opts.retries}，${delay}ms 后重试: ${String(lastError)}`);
+      console.warn(`[retry] ${attempt + 1}/${this.opts.retries}, retrying after ${delay}ms: ${String(lastError)}`);
       await sleep(delay);
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -585,7 +585,7 @@ class OpikClient {
     const url = `${this.opts.opikApiBase}${path}?${params.toString()}`;
     const page = await this.http.json<Page<T>>(url, { headers: this.headers() });
     if (!Array.isArray(page.content) || typeof page.total !== "number") {
-      throw new Error(`Opik 分页响应格式异常: ${url}`);
+      throw new Error(`Unexpected Opik pagination response format: ${url}`);
     }
     return page;
   }
@@ -639,7 +639,7 @@ class MemoryCoreClient {
       headers: this.headers(),
       body: JSON.stringify(body),
     });
-    if (response.code !== 0) throw new Error(`${path} 失败: code=${response.code} message=${response.message} request_id=${response.request_id ?? "-"}`);
+    if (response.code !== 0) throw new Error(`${path} failed: code=${response.code} message=${response.message} request_id=${response.request_id ?? "-"}`);
     return response;
   }
 
@@ -669,15 +669,15 @@ class MemoryCoreClient {
         l3: { idle: boolean; queued: number; running: number };
       }>("/v2/pipeline/status", {});
       const status = response.data;
-      if (!status) throw new Error("/v2/pipeline/status 缺少 data");
+      if (!status) throw new Error("/v2/pipeline/status is missing data");
       const idle = mode === "l1" ? status.l1.idle : status.l1.idle && status.l2.idle && status.l3.idle;
       if (idle) {
-        console.log(`[pipeline] ${label} 已空闲`);
+        console.log(`[pipeline] ${label} is now idle`);
         return;
       }
       await sleep(this.opts.pollMs);
     }
-    console.warn(`[pipeline] ${label} 等待超过 ${this.opts.maxWaitMs}ms，导入数据已落 L0，后台将继续处理`);
+    console.warn(`[pipeline] ${label} waited more than ${this.opts.maxWaitMs}ms; imported data has landed in L0, background processing will continue`);
   }
 }
 
@@ -696,8 +696,8 @@ async function main(): Promise<void> {
     ? allProjects
     : allProjects.filter((project) => opts.projects.includes(project.name) || opts.projects.includes(project.id));
   const missingProjects = opts.projects.filter((name) => !selected.some((project) => project.name === name || project.id === name));
-  if (missingProjects.length > 0) throw new Error(`Opik 项目不存在: ${missingProjects.join(", ")}`);
-  console.log(`[opik] 找到 ${allProjects.length} 个项目，本次处理 ${selected.length} 个`);
+  if (missingProjects.length > 0) throw new Error(`Opik project does not exist: ${missingProjects.join(", ")}`);
+  console.log(`[opik] found ${allProjects.length} projects, processing ${selected.length} this run`);
 
   let seenTraces = 0;
   let importedTraces = 0;
@@ -721,7 +721,7 @@ async function main(): Promise<void> {
       const messages = extractMessages(trace, opts.includeSystem);
       if (messages.length === 0) {
         skippedTraces++;
-        console.warn(`[skip] project=${project.name} trace=${trace.id} 原始 input/output 中没有可导入对话`);
+        console.warn(`[skip] project=${project.name} trace=${trace.id} no importable conversation in the original input/output`);
         continue;
       }
       entries.push({ traceId: trace.id, sessionId: buildSessionId(project, trace), messages });
@@ -730,7 +730,7 @@ async function main(): Promise<void> {
     const largeSessionPlans = buildLargeSessionPlans(entries, opts.maxSessionMessages, opts.largeSessionStrategy);
     const largeSessionIds = new Set(largeSessionPlans.map((plan) => plan.sourceSessionId));
 
-    // 超大 Session 先写去重后的最新尾部，且写入独立快照 Session，避免单 Session 超过 L1 安全阈值。
+    // For an oversized Session, first write the deduplicated latest tail, into a separate snapshot Session, to prevent a single Session from exceeding the L1 safety threshold.
     for (const plan of largeSessionPlans) {
       console.warn(
         `[large-session] source=${plan.sourceSessionId} target=${plan.targetSessionId} traces=${plan.traceIds.length} `
@@ -749,7 +749,7 @@ async function main(): Promise<void> {
 
         const accepted = await memory.add(plan.targetSessionId, batch);
         if (accepted !== batch.length) {
-          throw new Error(`Memory Core 接收数量不一致: session=${plan.targetSessionId} expected=${batch.length} accepted=${accepted}`);
+          throw new Error(`Memory Core accepted count mismatch: session=${plan.targetSessionId} expected=${batch.length} accepted=${accepted}`);
         }
         state.completed[checkpointKey] = { imported_at: new Date().toISOString(), accepted };
         saveState(opts.stateFile, state);
@@ -764,7 +764,7 @@ async function main(): Promise<void> {
       if (wrotePlan) importedTraces += plan.traceIds.length;
     }
 
-    // 未超限的 Session 保持原有逐 Trace 写入和断点键，兼容已有导入状态。
+    // A Session within the limit keeps the original per-Trace writes and checkpoint keys, compatible with existing import state.
     for (const entry of entries) {
       if (largeSessionIds.has(entry.sessionId)) continue;
       const sourceBatches = chunk(entry.messages, MAX_MESSAGES_PER_REQUEST);
@@ -780,7 +780,7 @@ async function main(): Promise<void> {
         }
 
         const accepted = await memory.add(entry.sessionId, batch);
-        if (accepted !== batch.length) throw new Error(`Memory Core 接收数量不一致: trace=${entry.traceId} expected=${batch.length} accepted=${accepted}`);
+        if (accepted !== batch.length) throw new Error(`Memory Core accepted count mismatch: trace=${entry.traceId} expected=${batch.length} accepted=${accepted}`);
         state.completed[checkpointKey] = { imported_at: new Date().toISOString(), accepted };
         saveState(opts.stateFile, state);
         importedMessages += accepted;
@@ -799,7 +799,7 @@ async function main(): Promise<void> {
 
   if (!opts.dryRun && opts.finalWait && writeCount > 0) await memory.waitForIdle("all", "final");
   console.log(`[done] seen_traces=${seenTraces} imported_traces=${importedTraces} skipped_traces=${skippedTraces} writes=${writeCount} imported_messages=${importedMessages}`);
-  if (!opts.dryRun) console.log(`[done] 断点文件: ${opts.stateFile}`);
+  if (!opts.dryRun) console.log(`[done] checkpoint file: ${opts.stateFile}`);
 }
 
 const entry = process.argv[1] ? pathToFileURL(resolvePath(process.argv[1])).href : "";

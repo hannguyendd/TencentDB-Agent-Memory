@@ -1,28 +1,28 @@
 /**
- * Trace Context 跨异步边界传播工具（门面层）
+ * Trace Context propagation utilities across async boundaries (facade layer)
  *
- * 用于在异步任务中序列化/反序列化 OTel Trace Context，
- * 实现 HTTP 请求 → Pipeline Worker 的跨异步链路关联。
+ * Used to serialize/deserialize the OTel Trace Context in async tasks,
+ * achieving cross-async correlation from an HTTP request → Pipeline Worker.
  *
- * 使用方式：
- *   // 入队时：序列化当前 Trace Context 到 TaskPayload.data
+ * Usage:
+ *   // on enqueue: serialize the current Trace Context into TaskPayload.data
  *   const traceCtx = serializeTraceContext();
  *   task.data = { ...task.data, ...traceCtx };
  *
- *   // 消费时：从 TaskPayload.data 反序列化恢复 Trace Context
+ *   // on consume: deserialize and restore the Trace Context from TaskPayload.data
  *   const parentCtx = deserializeTraceContext(task.data);
- *   // 在 parentCtx 中创建 CONSUMER Span
+ *   // create a CONSUMER Span in parentCtx
  *
- * 公开 API 签名保持不变，调用方无需修改。
+ * The public API signature is unchanged; callers need no modification.
  */
 
 import { getObservabilityBackend } from "./factory.js";
 
 /**
- * 序列化当前 Trace Context 到一个 plain object。
- * 返回的 object 可以直接 spread 到 TaskPayload.data 中。
+ * Serialize the current Trace Context into a plain object.
+ * The returned object can be spread directly into TaskPayload.data.
  *
- * 如果当前没有有效的 Span Context，返回空对象。
+ * If there is currently no valid Span Context, returns an empty object.
  */
 export function serializeTraceContext(): Record<string, string | number> {
   try {
@@ -33,10 +33,10 @@ export function serializeTraceContext(): Record<string, string | number> {
 }
 
 /**
- * 从 TaskPayload.data 反序列化恢复 Trace Context。
+ * Deserialize and restore the Trace Context from TaskPayload.data.
  *
- * 返回一个 OTel Context，可以用于创建 follow-from link 的 CONSUMER Span。
- * 如果 data 中没有 trace 信息，返回 ROOT_CONTEXT。
+ * Returns an OTel Context that can be used to create a CONSUMER Span with a follow-from link.
+ * If data has no trace information, returns ROOT_CONTEXT.
  */
 export function deserializeTraceContext(
   data?: Record<string, unknown>,

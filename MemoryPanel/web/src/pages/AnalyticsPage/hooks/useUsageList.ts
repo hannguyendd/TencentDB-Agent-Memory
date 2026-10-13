@@ -1,8 +1,8 @@
 /**
- * useUsageList — 单请求级用量明细分页（usage/list）。
+ * useUsageList -- per-request usage detail pagination (usage/list).
  *
- * 供下钻抽屉使用：按 model_id 或 user_id 精确过滤（内核支持的两个维度）。
- * enabled 由抽屉可见性 + 当前 Tab 控制，关闭抽屉即停止请求。
+ * Used by the drill-down drawer: exact filtering by model_id or user_id (the two dimensions the kernel supports).
+ * enabled is controlled by drawer visibility + the current Tab; closing the drawer stops requests.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -31,7 +31,7 @@ export function useUsageList(params: {
 
   const seqRef = useRef(0);
 
-  // 过滤条件变化时回到第一页，避免停留在越界 offset
+  // Return to the first page when filters change, to avoid staying on an out-of-range offset
   useEffect(() => {
     setOffset(0);
   }, [days, spaceId, userId, modelId]);

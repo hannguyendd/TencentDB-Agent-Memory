@@ -817,7 +817,7 @@ export class VectorStore implements IMemoryStore {
         updated_at TEXT NOT NULL
       )
     `);
-    // 在线迁移：老库补 agent_id 列（预留 binding 维度，绑定权威在 meta_assets）
+    // Online migration: add the agent_id column to old databases (reserves the binding dimension; the binding authority is in meta_assets)
     try { this.db.exec("ALTER TABLE entity_knowledge ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE entity_teams ADD COLUMN user_ids_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
     try { this.db.exec("ALTER TABLE entity_teams ADD COLUMN agent_ids_json TEXT NOT NULL DEFAULT '[]'"); } catch { /* exists */ }
@@ -832,12 +832,12 @@ export class VectorStore implements IMemoryStore {
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_entity_knowledge_team ON entity_knowledge(team_id)");
     this.db.exec("CREATE INDEX IF NOT EXISTS idx_entity_knowledge_team_type ON entity_knowledge(team_id, type)");
 
-    // ── Memory Audit (修改审计) ──
-    // 设计要点（per user 决策）：
-    //   - 原始 L0/L1/L2/L3 表完全不动，本表只追加事件
-    //   - 不存历史 content / 旧值，只记"什么时间、由谁、改了哪条"
-    //   - team/agent/user/task 来自外部请求 IdFields（不是 record 原值）
-    //   - L0 不参与（不可变流水）；L1/L2/L3 update + delete 各记一条
+    // ── Memory Audit (modification audit) ──
+    // Design notes (per user decision):
+    //   - the original L0/L1/L2/L3 tables are left completely untouched; this table only appends events
+    //   - does not store historical content / old values, only records "when, by whom, which one was changed"
+    //   - team/agent/user/task come from the external request IdFields (not the record's original values)
+    //   - L0 does not participate (immutable stream); L1/L2/L3 each record one entry for update + delete
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS memory_audit (
         audit_id      TEXT PRIMARY KEY,
@@ -2538,8 +2538,8 @@ export class VectorStore implements IMemoryStore {
    * Returns the count of actually deleted rows.
    */
   deleteL0BySession(sessionId: string, filter?: IsolationFilter): number {
-    // 空 sessionId 会匹配所有 session_key/session_id 为空的历史 legacy 行，
-    // 造成远超预期的删除范围。空 session 不是有效删除目标，直接拒绝。
+    // An empty sessionId would match all legacy rows whose session_key/session_id is empty,
+    // causing a deletion scope far beyond expectations. An empty session is not a valid deletion target, so reject directly.
     const sessionIdTrimmed = (sessionId ?? "").trim();
     if (!sessionIdTrimmed) {
       throw new Error("[sqlite] deleteL0BySession requires a non-empty sessionId");
@@ -2548,9 +2548,9 @@ export class VectorStore implements IMemoryStore {
     if (this.degraded) return 0;
 
     try {
-      // 必须把 rowMatchesIsolation 会检查的**所有**列都取出来
-      // （team_id / task_id 早期漏取，导致带 teamId 的 isolation filter
-      // 永远判不匹配 → 按session 删除恒返回 0）。
+      // All columns checked by rowMatchesIsolation **must** be fetched
+      // (team_id / task_id were missed early on, so an isolation filter with teamId
+      // never matched → delete-by-session always returned 0).
       const rows = this.db.prepare(
         "SELECT record_id, session_key, session_id, team_id, task_id, user_id, agent_id FROM l0_conversations WHERE session_key = ? OR session_id = ?"
       ).all(sessionIdTrimmed, sessionIdTrimmed) as Array<{
@@ -2588,11 +2588,11 @@ export class VectorStore implements IMemoryStore {
   }
 
   /**
-   * 清空某个 (team, agent) 下的全部 L0 + L1 内容（含向量 / FTS 附属行）。
-   * 不动entity_* / meta_* 资产表 —— 资产 ID 与绑定关系完整保留。
+   * Clear all L0 + L1 content under a (team, agent) (including vector / FTS auxiliary rows).
+   * Does not touch the entity_* / meta_* asset tables — asset IDs and binding relationships are fully preserved.
    *
-   * sqlite store 不落L2/L3 profile 行（profiles 表只存在于 TCVDB），
-   * 所以 profilesDeleted 恒为 0，L2/L3 文件由调用方走 StorageAdapter 清理。
+   * The sqlite store does not persist L2/L3 profile rows (the profiles table exists only in TCVDB),
+   * so profilesDeleted is always 0, and L2/L3 files are cleaned by the caller via StorageAdapter.
    */
   clearMemoryContent(filter: MemoryContentClearFilter): MemoryContentClearResult {
     const teamId = (filter?.teamId ?? "").trim();
@@ -2604,7 +2604,7 @@ export class VectorStore implements IMemoryStore {
     const empty: MemoryContentClearResult = { l0Deleted: 0, l1Deleted: 0, profilesDeleted: 0 };
     if (this.degraded) return empty;
 
-    // 参数绑定，禁止拼接。userId 可选 → 动态追加一段条件 + 一个参数。
+    // Parameter binding, no concatenation allowed. userId is optional → dynamically append one condition + one parameter.
     const where = `team_id = ? AND agent_id = ?${userId ? " AND user_id = ?" : ""}`;
     const params: string[] = userId ? [teamId, agentId, userId] : [teamId, agentId];
 
@@ -2973,7 +2973,7 @@ export class VectorStore implements IMemoryStore {
   listKnowledge(input: { team_id: string; type?: KnowledgeType; knowledge_ids?: string[]; limit?: number; offset?: number }): KnowledgeListResult {
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 1000);
     const offset = Math.max(input.offset ?? 0, 0);
-    // knowledge_ids 过滤（Proxy 按 id 批量联查明细）；空数组 → 空结果
+    // knowledge_ids filter (the Proxy batch-joins details by id); empty array → empty result
     const ids = input.knowledge_ids;
     if (ids && ids.length === 0) return { items: [], total: 0 };
     const idClause = ids && ids.length > 0 ? ` AND knowledge_id IN (${ids.map(() => "?").join(",")})` : "";
@@ -3328,7 +3328,7 @@ export class VectorStore implements IMemoryStore {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Memory Audit (修改审计)
+  // Memory Audit (modification audit)
   // ─────────────────────────────────────────────────────────
 
   appendAudit(entry: AuditEntry): void {

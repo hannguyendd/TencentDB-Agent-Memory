@@ -1,22 +1,22 @@
 /**
- * 用户密钥与密码哈希工具。
+ * User key and password hash utilities.
  *
- * 对应设计文档 §5：
- *   - user_key：`sk-mem-` 前缀 + 24 字节(192bit) base64url 随机段，外部调用鉴权标识
- *   - password：scrypt + 每用户随机盐 + 全局 pepper（不可逆哈希）
+ * Corresponds to design doc §5:
+ *   - user_key: `sk-mem-` prefix + 24-byte (192-bit) base64url random segment, the identifier for external call auth
+ *   - password: scrypt + per-user random salt + global pepper (irreversible hash)
  *
- * pepper 由部署时通过环境变量注入（见 loadPasswordHashConfig）。
- * v3.1 起元数据 User 域不再使用 password 哈希；本模块仅保留 generateUserKey 与历史 hash 工具。
+ * The pepper is injected at deployment via an environment variable (see loadPasswordHashConfig).
+ * Since v3.1 the metadata User domain no longer uses password hashes; this module only keeps generateUserKey and the legacy hash utilities.
  */
 
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { USER_KEY_PREFIX } from "./user-key.js";
 
 /**
- * 生成用户密钥：`sk-mem-` 前缀 + 24 字节(192bit) base64url 随机段。
+ * Generate a user key: `sk-mem-` prefix + 24-byte (192-bit) base64url random segment.
  *
- * base64url 字符集为 `[A-Za-z0-9_-]`，URL / HTTP Header / JSON 均安全。
- * 192bit 熵远高于碰撞界所需，配合 `key_value` 唯一索引即可保证全局唯一。
+ * The base64url charset is `[A-Za-z0-9_-]`, safe for URLs / HTTP headers / JSON.
+ * 192 bits of entropy is far above what the collision bound requires; together with the unique index on `key_value` it guarantees global uniqueness.
  */
 export function generateUserKey(): string {
   return USER_KEY_PREFIX + randomBytes(24).toString("base64url");
@@ -24,7 +24,7 @@ export function generateUserKey(): string {
 
 const PASSWORD_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_";
 
-/** 生成随机密码（默认 12 位，字符集：大小写字母、数字、下划线）。 */
+/** Generate a random password (default 12 characters, charset: upper/lowercase letters, digits, underscore). */
 export function generatePassword(length = 12): string {
   const bytes = randomBytes(length);
   let out = "";
@@ -34,7 +34,7 @@ export function generatePassword(length = 12): string {
   return out;
 }
 
-/** scrypt 参数与存库格式前缀。 */
+/** scrypt parameters and the stored-format prefix. */
 export const PASSWORD_HASH_PREFIX = "$scrypt$";
 const SALT_LEN = 16;
 const DEFAULT_SCRYPT_N = 16384;
@@ -52,13 +52,13 @@ export interface PasswordHashConfig {
 }
 
 /**
- * 从环境变量加载密码哈希配置。
+ * Load the password hash config from environment variables.
  *
- * 环境变量：
- *   - TDAI_PASSWORD_PEPPER — base64 编码的 32 字节随机值（service 模式必填）
- *   - TDAI_PASSWORD_SCRYPT_N / _R / _P / _KEYLEN — 可选 scrypt 参数
+ * Environment variables:
+ *   - TDAI_PASSWORD_PEPPER — base64-encoded 32-byte random value (required in service mode)
+ *   - TDAI_PASSWORD_SCRYPT_N / _R / _P / _KEYLEN — optional scrypt parameters
  *
- * @throws 当 pepper 未配置或格式非法时抛异常。
+ * @throws when the pepper is not configured or has an invalid format.
  */
 export function loadPasswordHashConfig(env: NodeJS.ProcessEnv = process.env): PasswordHashConfig {
   const pepperB64 = env.TDAI_PASSWORD_PEPPER?.trim();
@@ -99,9 +99,9 @@ function scryptHash(plain: string, salt: Buffer, config: PasswordHashConfig): Bu
 }
 
 /**
- * 对明文密码做 scrypt+pepper 哈希，返回自描述存库串。
+ * Hash a plaintext password with scrypt+pepper, returning a self-describing stored string.
  *
- * 格式：`$scrypt$N,r,p$<salt_b64>$<hash_b64>`
+ * Format: `$scrypt$N,r,p$<salt_b64>$<hash_b64>`
  */
 export function hashPassword(plain: string, config: PasswordHashConfig): string {
   const salt = randomBytes(SALT_LEN);
@@ -112,13 +112,13 @@ export function hashPassword(plain: string, config: PasswordHashConfig): string 
   );
 }
 
-/** 判断存库串是否为 scrypt 哈希格式。 */
+/** Determine whether a stored string is in the scrypt hash format. */
 export function isPasswordHash(stored: string): boolean {
   return stored.startsWith(PASSWORD_HASH_PREFIX);
 }
 
 /**
- * 验证明文密码与存库哈希是否匹配。格式非法或参数不匹配返回 false（不抛异常）。
+ * Verify whether a plaintext password matches the stored hash. Returns false (no exception) for an invalid format or mismatched parameters.
  */
 export function verifyPasswordHash(
   plain: string,

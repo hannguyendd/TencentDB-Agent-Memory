@@ -1,19 +1,19 @@
 /**
- * skill-permission — 权限校验纯函数
+ * skill-permission — pure permission-check functions
  *
- * 三种 assertion：
- *   - assertOwner: agent 是否为 head 的 owner
- *   - assertTeamMatch: row 是否属于请求的 team（不一致 → 404 不暴露存在性）
- *   - assertVersionFresh: 乐观锁检查
+ * Three assertions:
+ *   - assertOwner: whether the agent is the owner of the head
+ *   - assertTeamMatch: whether the row belongs to the requested team (mismatch → 404, not exposing existence)
+ *   - assertVersionFresh: optimistic-lock check
  *
- * 错误码与设计文档 §3.6 对齐。
+ * Error codes are aligned with design doc §3.6.
  */
 
 import type { Skill } from "./types.js";
 
 export type SkillPermissionErrorCode =
   | "SKILL_NOT_OWNER"     // 40301
-  | "SKILL_TEAM_MISMATCH" // 40302（外部行为同 NOT_FOUND，避免存在性侧信道）
+  | "SKILL_TEAM_MISMATCH" // 40302 (externally behaves the same as NOT_FOUND, avoiding an existence side channel)
   | "SKILL_NOT_FOUND"     // 40401
   | "SKILL_VERSION_STALE"; // 40901
 
@@ -25,10 +25,10 @@ export class SkillPermissionError extends Error {
 }
 
 /**
- * (teamId, agentId) 二元组必须与 headRow 匹配；否则抛 40301。
+ * The (teamId, agentId) pair must match headRow; otherwise throws 40301.
  *
- * team_id + agent_id 才唯一确定一个 agent 的 ownership——
- * 不同 team 下可能出现相同的 agent_id 值，仅校验 agent_id 不够安全。
+ * Only team_id + agent_id uniquely determines an agent's ownership —
+ * the same agent_id value may appear under different teams, so checking agent_id alone is not safe enough.
  */
 export function assertOwner(headRow: Skill, agentId: string, teamId?: string): void {
   if (teamId && headRow.team_id !== teamId) {
@@ -46,7 +46,7 @@ export function assertOwner(headRow: Skill, agentId: string, teamId?: string): v
 }
 
 /**
- * row.team_id 必须等于请求 teamId；不一致按 NOT_FOUND 处理（不暴露存在性）。
+ * row.team_id must equal the requested teamId; a mismatch is handled as NOT_FOUND (not exposing existence).
  */
 export function assertTeamMatch(row: Skill | null, teamId: string): asserts row is Skill {
   if (!row || row.team_id !== teamId) {
@@ -55,8 +55,8 @@ export function assertTeamMatch(row: Skill | null, teamId: string): asserts row 
 }
 
 /**
- * 乐观锁：expected_version 必传，必须与 head.version 完全一致。
- * 不一致时抛出 SKILL_VERSION_STALE，拒绝写入，防止并发覆盖。
+ * Optimistic lock: expected_version is required and must exactly equal head.version.
+ * On mismatch throws SKILL_VERSION_STALE, rejecting the write to prevent concurrent overwrites.
  */
 export function assertVersionFresh(headRow: Skill, expected: number): void {
   if (expected !== headRow.version) {

@@ -1,24 +1,24 @@
 /**
- * TAPD MCP JSON-RPC 客户端。
+ * TAPD MCP JSON-RPC client.
  *
- * 实测要点（2026-09-15，均已在真实网关验证）：
- *   1. 必须带 `Accept: application/json, text/event-stream`，缺失 → HTTP 406。
- *   2. 业务工具需两步：lookup_tool_param_schema → proxy_execute_tool。
- *      （lookup_tapd_tool 是语义发现工具，仅开发期使用，运行时跳过以省一次往返。）
- *   3. proxy_execute_tool 的 tool_args 是**对象**，不是字符串。
- *   4. 响应需二次解析：result.content[0].text 可能仍是 JSON 字符串。
- *   5. `page` 必须传 number（传字符串服务端报 `str - int`）；`limit` 两者皆可。
- *   6. workspace_id / id 必须传 string（19 位 id 超出 JS 安全整数范围）。
+ * Key findings (2026-09-15, all verified against the real gateway):
+ *   1. `Accept: application/json, text/event-stream` is required; if missing -> HTTP 406.
+ *   2. Business tools take two steps: lookup_tool_param_schema -> proxy_execute_tool.
+ *      (lookup_tapd_tool is a semantic discovery tool used only during development; skipped at runtime to save a round trip.)
+ *   3. proxy_execute_tool's tool_args is an **object**, not a string.
+ *   4. The response needs a second parse: result.content[0].text may still be a JSON string.
+ *   5. `page` must be passed as a number (a string makes the server report `str - int`); `limit` accepts either.
+ *   6. workspace_id / id must be passed as strings (19-digit ids exceed the JS safe integer range).
  */
 
 import { TaskSourceError } from "../../types.js";
 
 export interface TapdCallOptions {
-  /** MCP 端点，由 registry 从部署配置注入。 */
+  /** MCP endpoint, injected by the registry from deployment config. */
   endpoint: string;
-  /** Bearer access_token 或 PAT。 */
+  /** Bearer access_token or PAT. */
   token: string;
-  /** 自定义 header 名；设置后令牌走该 header，否则走 Authorization。 */
+  /** Custom header name; when set, the token goes in that header, otherwise in Authorization. */
   tokenHeader?: string;
   timeoutMs?: number;
 }
@@ -32,14 +32,14 @@ export class TapdMcpClient {
   constructor(private readonly opts: TapdCallOptions) {}
 
   /**
-   * 调用业务工具并取出已解析的数据（自动剥掉 `{limit,offset,count,page,data}` 包络）。
+   * Call a business tool and return the parsed data (the `{limit,offset,count,page,data}` envelope is stripped automatically).
    */
   async call(toolName: string, toolArgs: Record<string, unknown>): Promise<unknown> {
     const raw = await this.callRaw(toolName, toolArgs);
     return unwrap(raw);
   }
 
-  /** 调用业务工具，返回原始解析结果（保留分页包络）。 */
+  /** Call a business tool and return the raw parsed result (pagination envelope kept). */
   async callRaw(toolName: string, toolArgs: Record<string, unknown>): Promise<unknown> {
     const body = JSON.stringify({
       jsonrpc: "2.0",
@@ -50,7 +50,7 @@ export class TapdMcpClient {
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      // 实测：缺失该头网关返回 406。
+      // Empirically: the gateway returns 406 when this header is missing.
       Accept: "application/json, text/event-stream",
     };
     if (this.opts.tokenHeader) headers[this.opts.tokenHeader] = this.opts.token;
@@ -78,13 +78,13 @@ export class TapdMcpClient {
       );
     }
     /**
-     * **业务层失败**：JSON-RPC 成功（无 error）、HTTP 也是 200，但
-     * `result.isError === true` —— 此时 content[0].text 装的是**错误文本**，
-     * 不是业务数据。
+     * **Business-layer failure**: the JSON-RPC succeeded (no error) and HTTP is also 200, but
+     * `result.isError === true` -- in which case content[0].text holds the **error text**,
+     * not business data.
      *
-     * 必须优先于 looksLikeUpstreamError 判断：后者靠文本特征匹配，
-     * 遇到没预料到的错误措辞会漏；isError 是协议标志，可靠得多。
-     * 若不拦截，错误文本会被当成 task 描述导入看板。
+     * This must be checked before looksLikeUpstreamError: the latter relies on text-pattern matching,
+     * and misses error wordings it did not anticipate; isError is a protocol flag and far more reliable.
+     * If not intercepted, the error text would be imported onto the board as the task description.
      */
     if (json.result?.isError === true) {
       const detail =
@@ -96,17 +96,17 @@ export class TapdMcpClient {
     }
 
     const text = json.result?.content?.[0]?.text ?? "";
-    // 服务端参数校验失败时返回中文错误文本（如「参数X不存在于工具Y的参数定义中」），
-    // 而非 JSON 包络。若静默当成「0 条结果」，会把配置错误伪装成空列表，极难排查。
+    // On server-side parameter validation failure, a Chinese error text is returned (e.g. "参数X不存在于工具Y的参数定义中", i.e. "parameter X does not exist in tool Y's parameter definition"),
+    // rather than a JSON envelope. If silently treated as "0 results", a config error would be disguised as an empty list, which is very hard to troubleshoot.
     if (looksLikeUpstreamError(text)) {
       throw new TaskSourceError("task_source_upstream_error", text.trim().slice(0, 200));
     }
-    // 二次解析：text 可能仍是 JSON 字符串；解析失败则按纯文本返回。
+    // Second parse: text may still be a JSON string; if parsing fails, return it as plain text.
     return parseMaybeJson(text);
   }
 }
 
-/** 剥掉 TAPD 的统一分页包络，返回 data 数组。 */
+/** Strip TAPD's unified pagination envelope and return the data array. */
 export function unwrap(raw: unknown): unknown {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const env = raw as { data?: unknown };
@@ -115,7 +115,7 @@ export function unwrap(raw: unknown): unknown {
   return raw;
 }
 
-/** 取分页总数；无包络时回落到数组长度。 */
+/** Get the pagination total; falls back to the array length when there is no envelope. */
 export function totalOf(raw: unknown, fallback: number): number {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const count = (raw as { count?: unknown }).count;
@@ -126,21 +126,21 @@ export function totalOf(raw: unknown, fallback: number): number {
 }
 
 /**
- * 识别服务端返回的错误文本（非 JSON、非数据）。
+ * Recognize error text returned by the server (neither JSON nor data).
  *
- * 实测：参数不合法时网关返回形如
- *   「参数with_v_status不存在于工具bugs_get的参数定义中,请检查后重试」
- * 这类文本 HTTP 状态仍是 200，必须靠内容特征识别。
+ * Empirically: when parameters are invalid, the gateway returns text like
+ *   "参数with_v_status不存在于工具bugs_get的参数定义中,请检查后重试" (parameter with_v_status does not exist in tool bugs_get's parameter definition, please check and retry)
+ * The HTTP status of such text is still 200, so it must be recognized by content patterns.
  */
 function looksLikeUpstreamError(text: string): boolean {
   const t = text.trim();
   if (!t || t.startsWith("{") || t.startsWith("[")) return false;
-  // 中文：参数校验失败
+  // Chinese: parameter validation failure (server error text is Chinese; patterns below must stay Chinese)
   if (/参数.*不存在|不存在于工具|请检查后重试|Traceback/.test(t)) return true;
-  // 认证失败：MCP 网关端点返回「缺少 TAPD 认证信息 / AUTH_MISSING」，
-  // 太湖身份解析失败则返回「decode taihu identity fail」。
-  // 这类错误若不当场抛出，会被 asRows 当成「非数组」而静默返回空列表，
-  // 让用户误以为「账号没有项目权限」。
+  // Auth failure: the MCP gateway endpoint returns "缺少 TAPD 认证信息 / AUTH_MISSING" (missing TAPD auth info),
+  // and a failed Taihu identity resolution returns "decode taihu identity fail".
+  // If such errors are not thrown on the spot, asRows treats them as "not an array" and silently returns an empty list,
+  // making the user wrongly believe "the account has no project permissions".
   if (/缺少\s*TAPD\s*认证信息|AUTH_MISSING|缺少认证|unauthorized|decode .*identity fail/i.test(t)) {
     return true;
   }

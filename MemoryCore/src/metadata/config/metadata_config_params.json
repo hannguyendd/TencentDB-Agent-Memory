@@ -3,48 +3,48 @@
   "modules": [
     {
       "module": "quota",
-      "description": "实例级配额参数",
+      "description": "Instance-level quota parameters",
       "params": [
         {
           "param_name": "max_users_per_instance",
           "param_value": "500",
-          "description": "实例用户数量上限",
+          "description": "Maximum number of users per instance",
           "allowed_scopes": ["global"]
         },
         {
           "param_name": "max_teams_per_instance",
           "param_value": "100",
-          "description": "实例团队数量上限",
+          "description": "Maximum number of teams per instance",
           "allowed_scopes": ["global"]
         }
       ]
     },
     {
       "module": "asset_type",
-      "description": "AssetType 资源使用开关",
+      "description": "AssetType resource usage switches",
       "params": [
         {
           "param_name": "skill.enabled",
           "param_value": "1",
-          "description": "是否允许使用 Skill 类资产",
+          "description": "Whether Skill assets may be used",
           "allowed_scopes": ["global", "user"]
         },
         {
           "param_name": "llm_wiki.enabled",
           "param_value": "1",
-          "description": "是否允许使用 LLM Wiki 类资产",
+          "description": "Whether LLM Wiki assets may be used",
           "allowed_scopes": ["global", "user"]
         },
         {
           "param_name": "code_graph.enabled",
           "param_value": "1",
-          "description": "是否允许使用 Code Graph 类资产",
+          "description": "Whether Code Graph assets may be used",
           "allowed_scopes": ["global", "user"]
         },
         {
           "param_name": "chat_memory.enabled",
           "param_value": "1",
-          "description": "是否允许使用 Chat Memory 类资产",
+          "description": "Whether Chat Memory assets may be used",
           "allowed_scopes": ["global", "user"]
         }
       ]

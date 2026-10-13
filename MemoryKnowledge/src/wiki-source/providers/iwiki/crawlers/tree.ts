@@ -1,20 +1,20 @@
 /**
- * 遍历策略之一：走平台**层级接口**展开目录树（父 → 子）。
+ * One of the traversal strategies: expand the directory tree via the platform's **hierarchy API** (parent → child).
  *
- * 适用：平台提供"取某节点直接子级"的接口（iWiki 的 getSpacePageTree）。
- * 特点：结构完整；但接口是逐层的，大空间递归次数多、耗时长。
+ * Applicable: the platform provides an API to "get the direct children of a node" (iWiki's getSpacePageTree).
+ * Characteristics: complete structure; but the API is level by level, so large spaces need many recursions and take long.
  */
 
 import type { RemotePageRef, SourceContext } from "../../../types.js";
 import { getSpacePageTree, type IWikiTreeNode } from "../mcp-client.js";
 
-/** 递归深度上限，防异常数据无限展开。 */
+/** Recursion depth limit, to prevent unlimited expansion on abnormal data. */
 const MAX_DEPTH = 20;
 
 /**
- * 递归展开整棵树（BFS），返回扁平列表。
+ * Recursively expand the whole tree (BFS), returning a flat list.
  *
- * 保留目录标记：has_children=true 的节点为目录（不可单独导入）。
+ * Keeps the directory marker: nodes with has_children=true are directories (cannot be imported individually).
  */
 export async function crawlTree(
   ctx: SourceContext,
@@ -53,12 +53,12 @@ export async function crawlTree(
       });
 
       if (isDir) {
-        // 逐层拉取子级（API 只返回直接子级）
+        // Fetch children level by level (the API returns only direct children)
         let children: IWikiTreeNode[];
         try {
           children = await getSpacePageTree(ctx, docid);
         } catch {
-          // 单个子树失败不应中断整体导入
+          // A single subtree failure should not interrupt the whole import
           continue;
         }
         if (children.length > 0) {

@@ -1,19 +1,19 @@
 /**
- * prepareArchivePayload — direct-trigger (`/v3/skill/extract`) 与
- * conversation-add handler 共用的"压缩 + 兜底"归档 payload 组装。
+ * prepareArchivePayload — the "compress + fallback" archive payload assembly shared by direct-trigger (`/v3/skill/extract`) and
+ * the conversation-add handler.
  *
- * 抽出来是为了两条链路**只有一份实现**，不然容易漂移出细微差异。
+ * It is extracted so the two paths have **only one implementation**, otherwise subtle differences easily drift in.
  *
- * 步骤（来自 `add-handler.ts` handle() 内 §③ 分路径段的等价逻辑）：
- *   ① forceCompress=true → compressMessages(incoming); 否则 passthrough
+ * Steps (equivalent logic of the §③ path-routing segment inside handle() in `add-handler.ts`):
+ *   ① forceCompress=true → compressMessages(incoming); otherwise passthrough
  *   ② combined = existing + compressed
- *   ③ 仅当 forceCompress=true 且 totalBytes(combined) > chunkMax
- *      → applyOversizeStrategy（兜底截断只发生在压缩路径，与原 add-handler 行为等价）
- *   ④ 返回 { messages, usedCompress, usedOversize }
+ *   ③ only when forceCompress=true and totalBytes(combined) > chunkMax
+ *      → applyOversizeStrategy (the fallback truncation happens only on the compression path, equivalent to the original add-handler behavior)
+ *   ④ return { messages, usedCompress, usedOversize }
  *
- * 调用约定：
+ * Calling convention:
  *   - conversation/add: existing = data-current, forceCompress = (rawBytes >= threshold)
- *   - skill_extract  : existing = [], forceCompress = true (direct-trigger 恒压缩)
+ *   - skill_extract  : existing = [], forceCompress = true (direct-trigger always compresses)
  */
 
 import {
@@ -30,15 +30,15 @@ import {
 export interface PrepareArchiveOptions {
   compress: CompressOptions;
   oversize: OversizeOptions;
-  /** direct-trigger 恒 true；conversation/add 仅压缩路径传 true。 */
+  /** Always true for direct-trigger; conversation/add passes true only on the compression path. */
   forceCompress: boolean;
 }
 
 export interface PrepareArchiveResult {
   messages: OversizeMessage[];
-  /** 是否走了 compressMessages（有 tool 消息 > threshold 时才为 true）。 */
+  /** Whether compressMessages was taken (true only when some tool message > threshold). */
   usedCompress: boolean;
-  /** 是否触发了 oversize 兜底截断。 */
+  /** Whether the oversize fallback truncation was triggered. */
   usedOversize: boolean;
 }
 
@@ -47,27 +47,27 @@ export function prepareArchivePayload(
   incoming: CompressibleMessage[],
   opts: PrepareArchiveOptions,
 ): PrepareArchiveResult {
-  // ① forceCompress 决定是否走压缩
+  // ① forceCompress decides whether to take compression
   const compressed: CompressibleMessage[] = opts.forceCompress
     ? compressMessages(incoming, opts.compress)
     : incoming;
 
-  // usedCompress 反映"是否真的有内容被压掉"——不是"是否 forceCompress"。
-  // compressMessages 只在 tool 消息 content > threshold 时才实际改内容，
-  // 短消息即便 forceCompress 也 identity-return，不算真压缩。
+  // usedCompress reflects "whether anything was actually compressed away" — not "whether forceCompress is set".
+  // compressMessages only actually changes content when a tool message's content > threshold;
+  // short messages are identity-returned even under forceCompress and do not count as real compression.
   const usedCompress = opts.forceCompress && compressed.some(
     (m, i) => m !== incoming[i],
   );
 
-  // ② 拼接
+  // ② concatenate
   const combined: OversizeMessage[] = [
     ...existing,
     ...(compressed as unknown as OversizeMessage[]),
   ];
 
-  // ③ 判断是否需要 oversize 兜底 —— 仅在 forceCompress 路径下触发，跟原
-  //    add-handler 行为对齐 (常规路径下不会 combined > chunkMax; 强压缩后仍超
-  //    才走兜底)。skill_extract 侧 forceCompress=true, 该判定自然生效。
+  // ③ decide whether the oversize fallback is needed — triggered only on the forceCompress path, aligned with the original
+  //    add-handler behavior (the normal path never has combined > chunkMax; only if still over
+  //    after forced compression does the fallback apply). On the skill_extract side forceCompress=true, so this check naturally takes effect.
   if (!opts.forceCompress) {
     return { messages: combined, usedCompress, usedOversize: false };
   }

@@ -1,5 +1,5 @@
 /**
- * 记忆内核 v3 元数据 HTTP fetch（Panel 专用）。
+ * Memory kernel v3 metadata HTTP fetch (Panel-specific).
  */
 import { randomUUID } from 'node:crypto';
 import type { Logger } from '../infra/logger.js';
@@ -65,7 +65,7 @@ function serializeForLog(value: unknown): string {
   }
 }
 
-/** 内核 HTTP 调用失败（网络/超时/无效信封）。 */
+/** Kernel HTTP call failure (network / timeout / invalid envelope). */
 export class KernelFetchError extends Error {
   constructor(
     readonly code: number,
@@ -87,13 +87,13 @@ export interface MetaFetchConfig {
   userKey?: string;
   timeoutMs?: number;
   logger?: Logger;
-  /** 透传为 x-request-id；缺省则生成 UUID。 */
+  /** Passed through as x-request-id; a UUID is generated if omitted. */
   requestId?: string;
   /**
-   * 额外请求头（如 task-source 的令牌注入）。
+   * Extra request headers (e.g. token injection for task-source).
    *
-   * 注意：这些头**不参与日志**（logRemoteMeta 只序列化 body），
-   * 因此绝不把敏感值放这里后又手工拼进日志字段。
+   * Note: these headers are **not part of the logs** (logRemoteMeta serializes only the body),
+   * so never put sensitive values here and then manually splice them into log fields.
    */
   extraHeaders?: Record<string, string>;
 }
@@ -121,10 +121,10 @@ function logRemoteMeta(
 }
 
 /**
- * 请求记忆内核路径，返回完整信封。
- * - mode=envelope：业务 code≠0 不抛错（透明代理用）
- * - mode=data：code≠0 抛 KernelFetchError
- * - method：默认 POST；GET 用于 /v3/analytics/config、spaces 等只读端点（不携带 body）
+ * Request a memory kernel path and return the full envelope.
+ * - mode=envelope: business code != 0 does not throw (used by the transparent proxy)
+ * - mode=data: code != 0 throws KernelFetchError
+ * - method: defaults to POST; GET is used for read-only endpoints such as /v3/analytics/config, spaces (carries no body)
  */
 export async function executeMetaFetch<T>(
   cfg: MetaFetchConfig,

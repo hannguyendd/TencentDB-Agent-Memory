@@ -99,7 +99,7 @@ import {
  * land on the correct kernel tenant. Falls back to config when the request
  * carries no spaceId (older single-tenant deployments).
  */
-// TDAI client factory 已合并到 tdai/client.ts::buildTdaiClientForRequest
+// TDAI client factory has been merged into tdai/client.ts::buildTdaiClientForRequest
 const createTdaiClient = buildTdaiClientForRequest;
 
 /**
@@ -224,9 +224,9 @@ export function flattenMessagesForOpik(messages: unknown[]): unknown[] {
   return result;
 }
 
-// SKIP header sets 已合并到 common/constants.ts
-// handler.ts 老行为: HOP_BY_HOP 4 项 (不含 x-tdai-user-key 泄漏保护) —
-// 保留兼容, 未来可升级到 WITH_INTERNAL 版本。
+// SKIP header sets have been merged into common/constants.ts
+// Legacy handler.ts behavior: 4 HOP_BY_HOP items (without the x-tdai-user-key leak protection) —
+// kept for compatibility; can be upgraded to the WITH_INTERNAL version in the future.
 import { SKIP_REQUEST_HEADERS_HOP_BY_HOP as SKIP_REQUEST_HEADERS, filterResponseHeaders } from "../../common/constants.js";
 
 /** Extract usage object from a block of OpenAI SSE text. */
@@ -309,9 +309,9 @@ function buildUpstreamHeaders(
 
 /**
  * Forward request to upstream and handle retry if retryTarget is set.
- * openai 版本: retryBody 覆写 model, timeout gated on > 0。
- * 委托到 stageForwardWithRetry 共享实现; 独有 debug dump (body + md5) 保留在
- * caller 内联 (openai 独有的 md5 格式)。
+ * openai version: retryBody overrides model, timeout gated on > 0.
+ * Delegates to the shared stageForwardWithRetry implementation; the unique debug dump (body + md5) stays
+ * inline in the caller (openai-specific md5 format).
  */
 async function forwardWithRetry(
   target: ForwardTarget,
@@ -339,7 +339,7 @@ async function forwardWithRetry(
     }
   }
 
-  // ── openai 独有 md5 debug (sys + 全 msgs 两个 md5) ──
+  // ── openai-specific md5 debug (two md5s: sys + all msgs) ──
   if (process.env.PROXY_DEBUG_DUMP_OUTBOUND_MD5) {
     try {
       const msgs = (upstreamBody as { messages?: Array<{ role?: string; content?: unknown }> }).messages ?? [];
@@ -379,7 +379,7 @@ export async function runOpenaiChatPipeline(
   // Verify BEFORE parsing the body so a rejected caller never triggers body
   // parsing or the alias-gate. `earlyVerify.userId` is reused later for
   // both the systemUser short-circuit and the normal pipeline.
-  // handler.ts 历史行为: 只接受 Bearer, 忽略 x-api-key → 用 bearer-only 模式保等价。
+  // Historical handler.ts behavior: only accepts Bearer, ignores x-api-key → use bearer-only mode to stay equivalent.
   const earlyAuth = await stageAuth(c, "bearer-only");
   const earlyApiKey = earlyAuth.apiKey;
   const earlySpaceId = earlyAuth.spaceId;
@@ -401,13 +401,13 @@ export async function runOpenaiChatPipeline(
   // eslint-disable-next-line prefer-const
   let body = parseResult.body;
 
-  // ── DEBUG: dump tools/instructions/metadata（Phase 1 workbuddy 调研）──
-  // 仅在 sessionInit.debugVerboseLogging=true 时启用，生产环境默认关闭。
+  // ── DEBUG: dump tools/instructions/metadata (Phase 1 workbuddy investigation) ──
+  // Enabled only when sessionInit.debugVerboseLogging=true; off by default in production.
   if (config.sessionInit?.debugVerboseLogging) {
   try {
     const dbgPath = c.req.path;
     if (dbgPath.includes("/workbuddy/")) {
-      // 只保留精简字段（不 dump 原始 tools 数组，避免超长被截断）
+      // Keep only the condensed fields (do not dump the raw tools array, to avoid being truncated for excessive length)
       const dumpKeys = [
         "tool_choice",
         "toolset",
@@ -441,7 +441,7 @@ export async function runOpenaiChatPipeline(
           };
         });
       }
-      // messages[0] 若是 system，一起 dump（可能声明 tool 用法）
+      // If messages[0] is system, dump it too (it may declare tool usage)
       const msgs = body?.messages;
       if (Array.isArray(msgs) && msgs.length > 0) {
         const first = msgs[0] as Record<string, unknown>;
@@ -459,7 +459,7 @@ export async function runOpenaiChatPipeline(
       );
       console.log(`[wb-tools-dump-json] ${JSON.stringify(dump).slice(0, 60000)}`);
 
-      // 额外：单独 dump AskUserQuestion 的完整 schema（Phase 1 关键调研）
+      // Extra: separately dump the full schema of AskUserQuestion (key investigation of Phase 1)
       if (Array.isArray(toolsField)) {
         const askTool = toolsField.find((t: unknown) => {
           const tt = t as any;
@@ -478,8 +478,8 @@ export async function runOpenaiChatPipeline(
   }
   } // debugVerboseLogging gate
 
-  // ── AgentStrategy 早期 resolve: stageGates 驱动 systemUser/modelGate/identity 门控 ──
-  // 早于 model gate + systemUser + identity, 因为它们都要靠 stageGates。
+  // ── Early AgentStrategy resolve: stageGates drive the systemUser/modelGate/identity gates ──
+  // Earlier than model gate + systemUser + identity, because they all depend on stageGates.
   const _pathPartsEarly = c.req.path.split("/").filter(Boolean);
   const _agentFromPathEarly = _pathPartsEarly[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(_pathPartsEarly[0])
     ? _pathPartsEarly[0] : undefined;
@@ -488,11 +488,11 @@ export async function runOpenaiChatPipeline(
   const _gates = _agentStrategy.stageGates;
 
   // ── Model gate: reject requests whose `model` is not a registered display name ──
-  // 价目表已配置时，客户端 `model` 必须匹配某条 entry 的 `modelName`（展示名，
-  // 大小写不敏感）。真实 model_id 是内部细节，不作为客户端入口。未匹配则直接
-  // 400，避免请求转发成功却因无定价而漏计费。价目表为空时跳过（向后兼容）。
+  // When the price list is configured, the client `model` must match the `modelName` of some entry (the display name,
+  // case-insensitive). The real model_id is an internal detail and is not an entry point for clients. If unmatched, return
+  // 400 directly, to avoid a request being forwarded successfully but going unbilled for lack of pricing. Skipped when the price list is empty (backward compatible).
   //
-  // 内部/外部用户一视同仁 —— internal callers must also request by
+  // Internal/external users are treated alike — internal callers must also request by
   // `modelName`, ensuring upstream ids and billing/observability keys align
   // across all traffic.
   const requestedModel = typeof body.model === "string" ? body.model : "unknown";
@@ -511,7 +511,7 @@ export async function runOpenaiChatPipeline(
   // instance carried any Option-2/3 conversation config (fix: 64e989a0 →
   // this file's next revision).
   // ── Early instance upstream config (via shared stage) ─────────────────
-  // 详见 docs/design/2026-08-25-instance-upstream-config.md §7.3 / §7.5。
+  // See docs/design/2026-08-25-instance-upstream-config.md §7.3 / §7.5 for details.
   const earlyResult = await stageInstanceUpstreamEarly({
     c, config, spaceId: earlySpaceId, earlyUserId: earlyVerify.userId,
     errorEnvelope: "openai",
@@ -525,7 +525,7 @@ export async function runOpenaiChatPipeline(
   const _isCustomUpstream = earlyResult.isCustomUpstream;
 
   // ── Model gate + alias (gated by stageGates.modelGate) ────────────────
-  // 未开门控 → 完全跳过 pricing 检查, alias 也不做 (行为等价 codex/wb minimal preset)。
+  // Gate not enabled → skip the pricing check entirely, no alias either (behavior equivalent to codex/wb minimal preset).
   let modelId: string;
   if (_gates.modelGate) {
     const gateResult = stageModelGate(requestedModel, config, _isCustomUpstream);
@@ -536,7 +536,7 @@ export async function runOpenaiChatPipeline(
     const modelAliasApplied = gateResult.aliasApplied && typeof body.model === "string";
     if (modelAliasApplied) body.model = modelId;
   } else {
-    // gate 关闭时: modelId 仍需 resolve 保证下游 langfuse/logging 有值
+    // When the gate is off: modelId still needs to be resolved so downstream langfuse/logging have a value
     modelId = _isCustomUpstream ? requestedModel : resolveModelId(config.creditPricing, requestedModel);
   }
 
@@ -579,8 +579,8 @@ export async function runOpenaiChatPipeline(
   const agentFromPath = pathParts[0] && !["v1", "proxy", "skill-bridge", "memory-bridge"].includes(pathParts[0])
     ? pathParts[0] : undefined;
   const agentSource = agentFromPath ?? "claude-code";
-  // _agentStrategy / _gates 已在前面 resolve (agentSource 也许 differs from _agentSourceEarly
-  // 因为下面 pathParts 用 filter(Boolean)[0] 提取; 早期资源用同样规则应等价)
+  // _agentStrategy / _gates were already resolved earlier (agentSource may differ from _agentSourceEarly
+  // because pathParts below uses filter(Boolean)[0] to extract; the early resource uses the same rule so should be equivalent)
 
   // ── Identity inspection (gated by stageGates.identityRecord) ────────────
   const reqHeaders: Record<string, string> = {};
@@ -622,16 +622,16 @@ export async function runOpenaiChatPipeline(
   }
 
   // ── Request kind classification (auxiliary detection for OpenAI-chat clients) ──
-  // dsh (deepseek-harness) 会在 compaction 请求带 `x-deepseek-harness-compact: 1`
-  // header,title-gen 靠 body 特征三合一。这类请求**不能**走 session-init form,
-  // 也不能触发 mem 拦截 / L0 写入 / skill 提取 —— 应该直接透传上游。
-  // codebuddy / claude-code 客户端 adapter classifyRequest 恒返 "main",行为无变。
+  // dsh (deepseek-harness) sends compaction requests with the `x-deepseek-harness-compact: 1`
+  // header, and title-gen relies on body characteristics, three-in-one. Such requests **must not** go through the session-init form,
+  // nor trigger mem interception / L0 writes / skill extraction — they should pass straight through to upstream.
+  // The codebuddy / claude-code client adapter classifyRequest always returns "main", behavior unchanged.
   const { resolveAgentAdapter } = await import("../../agent-adapters/index.js");
   const _adapter = resolveAgentAdapter(agentSource);
   const _requestKind = _adapter.classifyRequest(body as Record<string, unknown>, c.req.path, lcHeaders);
-  // 遗留 `/proxy/<spaceId>` 前缀与 auxiliary 共用这条门控：两者都不该碰记忆。
-  // 前者是因为拿不到 agent 身份（agentSource 兜底成 claude-code），按错误画像
-  // 注入比不注入更糟；压缩与计费不在这条门控下，照常生效。
+  // The legacy `/proxy/<spaceId>` prefix shares this gate with auxiliary: neither should touch memory.
+  // The former is because the agent identity cannot be obtained (agentSource falls back to claude-code), and injecting by the wrong
+  // profile is worse than not injecting; compression and billing are not under this gate and take effect as usual.
   const isAuxiliary = _requestKind === "auxiliary" || _legacyProxy;
   if (isAuxiliary) {
     const _reason = _legacyProxy ? "legacy /proxy prefix" : "auxiliary";
@@ -639,19 +639,19 @@ export async function runOpenaiChatPipeline(
   }
 
   // ── dsh (deepseek-harness) CLI headless / no-preset bypass ──────────────
-  // dsh 客户端在 headless bundle 或未挂 ask-user preset 时,body.tools 里
-  // 不含 `ask_user_question` 工具。proxy 塞 fake `ask_user_question` tool_call
-  // 会被 dsh agent-loop 校验为 unknown tool 直接抛错。此时直接 bypass
-  // session-init 而非弹 form —— 没 UI 场景强弹表单没意义。
+  // When a dsh client is in a headless bundle or has no ask-user preset attached, body.tools
+  // does not contain the `ask_user_question` tool. If the proxy stuffs in a fake `ask_user_question` tool_call,
+  // the dsh agent-loop validates it as an unknown tool and throws directly. In that case bypass
+  // session-init directly instead of showing a form — forcing a form in a no-UI scenario is meaningless.
   //
-  // 判定:agentSource=dsh 且 body.tools 非空且不含 ask_user_question。
-  // (tools 空数组表示纯对话/aux,不用兜底;tools 里就有 ask_user_question 说明
-  // 有 preset 挂 UI 工具,正常走 form。)
+  // Decision: agentSource=dsh and body.tools non-empty and not containing ask_user_question.
+  // (An empty tools array means pure conversation/aux, no fallback needed; ask_user_question being in tools means
+  // a preset has attached a UI tool, so the form goes as normal.)
   //
-  // NOTE(opencode): opencode CLI 同样不支持虚拟 ask_followup_question tool,
-  // 但走独立的 header-driven session-init 分支(见下方 opencode 特化块),
-  // 因此不需要走这里的 headless bypass —— opencode 能吃 mem 命令纯文本响应,
-  // 也需要 injection / L0 / skill 提取,只是不能弹 form。
+  // NOTE(opencode): the opencode CLI likewise does not support the virtual ask_followup_question tool,
+  // but goes through an independent header-driven session-init branch (see the opencode specialization block below),
+  // so it does not need the headless bypass here — opencode can consume plain-text mem command responses,
+  // and also needs injection / L0 / skill extraction, it just cannot show a form.
   const _dshHeadless = agentSource === "dsh" && (() => {
     const tools = (body as { tools?: unknown }).tools;
     if (!Array.isArray(tools) || tools.length === 0) return false;
@@ -666,16 +666,16 @@ export async function runOpenaiChatPipeline(
   }
 
   // ── Client capabilities detection ─────────────────────────────────────────
-  // 探测客户端"能否响应 proxy 发起的 fake ask tool_call"。
+  // Probe whether the client "can respond to a fake ask tool_call initiated by the proxy".
   //
-  // 当前仅对 workbuddy 做实质判定：新版 workbuddy 官方 tools 集合里拿掉了
-  // AskUserQuestion（现只剩 20 个工具），proxy 侧继续发 tool_calls 会被客户端
-  // 收下但不知道怎么渲染 → 卡死在 pending。此时需要降级走文字模式
-  // （content chunk + markdown + 纯文字解析）。
+  // Currently only workbuddy gets a substantive decision: the new workbuddy official tool set dropped
+  // AskUserQuestion (only 20 tools remain now); if the proxy side keeps sending tool_calls, the client
+  // accepts them but does not know how to render them → stuck at pending. In that case it must degrade to text mode
+  // (content chunk + markdown + plain-text parsing).
   //
-  // 其他客户端（codebuddy / claude-code / dsh / codex / opencode / hermes /
-  // openclaw）一律 askUserQuestion=true，保持既有行为不变。dsh headless 场景走
-  // 上面独立的 _dshHeadless bypass 分支，不受本探测影响。
+  // Other clients (codebuddy / claude-code / dsh / codex / opencode / hermes /
+  // openclaw) always get askUserQuestion=true, keeping existing behavior unchanged. The dsh headless scenario goes through
+  // the independent _dshHeadless bypass branch above and is unaffected by this probe.
   const { detectClientCapabilities } = await import("../../session/client-capabilities.js");
   const _capabilities = detectClientCapabilities(agentSource, body);
   if (agentSource === "workbuddy" && !_capabilities.askUserQuestion) {
@@ -699,16 +699,16 @@ export async function runOpenaiChatPipeline(
   console.log(`[injection-debug] conversationId=${conversationId} sessionKey=${sessionKey} userId=${userId} agentSource=${agentSource} kind=${_requestKind} dshHeadless=${_dshHeadless} sessionInitEnabled=${config.sessionInit?.enabled} injectionEnabled=${config.injection?.enabled} injectors=${JSON.stringify(config.injection?.injectors)} injectedSkipped=${injectedSkipped} spaceId=${spaceId}`);
   if (config.sessionInit?.enabled && conversationId && !isAuxiliary && !_dshHeadless) {
     try {
-      // Round 18: session-init 主编排走 shared stageSessionInitOrchestrate;
-      // openai-chat 4 个 callback:
-      //   - synthesizeMessages: body.messages 原样
+      // Round 18: the session-init main orchestration goes through the shared stageSessionInitOrchestrate;
+      // the 4 callbacks of openai-chat:
+      //   - synthesizeMessages: body.messages as is
       //   - buildRecoverInitResult: injectSessionContextWithToggles → messages (openai)
-      //   - buildInterceptResponse: 直接 initResult.response (状态机内建)
-      //   - buildReqCtx: protocol="openai" + questionsAsArray 检测 + capabilities 透传
+      //   - buildInterceptResponse: initResult.response directly (built into the state machine)
+      //   - buildReqCtx: protocol="openai" + questionsAsArray detection + capabilities passthrough
       //
-      // kernel /v3/meta/* 走 x-tdai-user-key 鉴权;
-      // 优先级: 客户端 Authorization bearer > config.tdai.apiKey (openai-chat 独有).
-      // 与 workbuddyHandler.ts 里的 kernelUserKey 逻辑对齐 (那里也是客户端优先)。
+      // kernel /v3/meta/* uses x-tdai-user-key auth;
+      // priority: client Authorization bearer > config.tdai.apiKey (openai-chat only).
+      // Aligned with the kernelUserKey logic in workbuddyHandler.ts (client first there too).
       const kernelUserKey = apiKey || config.tdai?.apiKey || "";
       const _orch = await stageSessionInitOrchestrate({
         agentSourceForState: agentSource,
@@ -733,8 +733,8 @@ export async function runOpenaiChatPipeline(
           return { messages: outMsgs as Record<string, unknown>[] };
         },
         buildReqCtx: () => {
-          // 检测客户端 ask_followup_question schema 里 questions 字段是否声明为 array;
-          // CB v1.106+ 声明为 array 且做 type check; 老版本无 schema 或 questions 无 type
+          // Detect whether the questions field in the client's ask_followup_question schema is declared as array;
+          // CB v1.106+ declares it as array and does type checks; old versions have no schema or questions has no type
           let questionsAsArray = true;
           const clientTools = Array.isArray(body.tools) ? body.tools as unknown[] : [];
           const afqTool = clientTools.find((t: any) =>
@@ -756,7 +756,7 @@ export async function runOpenaiChatPipeline(
       const wentThroughSessionInitStateMachine = _orch.wentThroughStateMachine;
 
       console.log(`[injection-debug] initResult session=${sessionKey} intercepted=${initResult.intercepted} bypassed=${initResult.bypassed} justRegistered=${initResult.justRegistered} resetFlow=${(initResult as any).resetFlow} hasSessionInfo=${!!initResult.sessionInfo} hasAgentDetail=${!!initResult.agentDetail}`);
-      // 见 anthropicHandler 对称位置：只在真正走 sessionInit state machine 时继承。
+      // See the symmetric position in anthropicHandler: only inherit when actually going through the sessionInit state machine.
       if (wentThroughSessionInitStateMachine && initResult.justRegistered) sessionJustRegistered = true;
 
       // Case 1.5: Bypass path → skip ALL injection hooks (via shared stageSessionBypass)
@@ -789,14 +789,14 @@ export async function runOpenaiChatPipeline(
         spaceId,
       );
 
-      // Prewarm 前置短路：mem-command 命中的 turn 不 forward 上游、也不消费
-      // hook-cache，若照常 prewarm 会白白多花 2-3s + 3 次网络请求（knowledge
-      // 33% timeout 会被放大）。这里先做纯字符串解析（<1ms、无副作用），
-      // 命中就置 memCommandPending 让 prewarm 分支短路；实际 mem-command 执行
-      // 仍在下方原位置进行，L0 write / skill extract / langfuse 全部保留。
+      // Prewarm pre-short-circuit: a turn hit by a mem-command does not forward upstream and does not consume the
+      // hook-cache; prewarming as usual would waste 2-3s + 3 network requests (knowledge's
+      // 33% timeout would be amplified). Do a pure string parse first (<1ms, no side effects);
+      // on a hit set memCommandPending so the prewarm branch short-circuits; the actual mem-command execution
+      // still happens at the original position below, with L0 write / skill extract / langfuse all kept.
       //
-      // fallback 语义：sessionJustRegistered 在此已定型（见上文 L786），
-      // checkFirst 场景可安全复用。
+      // fallback semantics: sessionJustRegistered is finalized here (see L786 above),
+      // the checkFirst scenario can safely reuse it.
       let memCommandPending = false;
       if (!isAuxiliary && !_dshHeadless) {
         try {
@@ -814,7 +814,7 @@ export async function runOpenaiChatPipeline(
             "[mem-command] pre-prewarm peek failed:",
             err instanceof Error ? err.message : String(err),
           );
-          // peek 失败不阻塞主链路，退化为原有行为（正常 prewarm）。
+          // A peek failure does not block the main path; degrade to the original behavior (normal prewarm).
         }
       }
 
@@ -848,18 +848,18 @@ export async function runOpenaiChatPipeline(
       // the object between these two lines.
       restoreSessionSpaceId(sessionInfo, spaceId);
 
-      // 记录 resetFlow 信息到外层，session-init 块结束后用于返回确认响应
+      // Record the resetFlow info to the outer scope, used after the session-init block ends to return the confirmation response
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
-          agentName: initResult.agentDetail?.name ?? "未知",
-          // agentIdShort 字段名沿用历史，但此处**存完整 agent_id**（如 agt-1celthr7yn）。
-          // 之前 slice(-8) 只留后 8 位会显示成 "elthr7yn" 这种截断串，用户完全看不懂，
-          // 与 team 截断问题同源。agent id 本身就短，全量展示无害且更可读。
+          agentName: initResult.agentDetail?.name ?? "Unknown",
+          // The agentIdShort field name keeps its historical name, but here **the full agent_id is stored** (e.g. agt-1celthr7yn).
+          // Previously slice(-8) kept only the last 8 characters, displaying a truncated string like "elthr7yn" that users could not understand at all,
+          // the same root cause as the team truncation issue. The agent id itself is short, so showing it in full is harmless and more readable.
           agentIdShort: initResult.sessionInfo?.agent_id
             ? String(initResult.sessionInfo?.agent_id) : "",
-          // teamName 来自 session-init（cachedTeams[selected].team_name）；
-          // teamId 存**完整** team_id（如 team-wyuyb7sion）—— 之前 slice(-8)
-          // 会显示成 "uyb7sion" 用户看不懂，且 teamName 为空时兜底更差。
+          // teamName comes from session-init (cachedTeams[selected].team_name);
+          // teamId stores the **full** team_id (e.g. team-wyuyb7sion) — previously slice(-8)
+          // would display "uyb7sion" which users could not understand, and the fallback was even worse when teamName was empty.
           teamName: initResult.teamName ?? undefined,
           teamId: initResult.sessionInfo?.team_id
             ? String(initResult.sessionInfo?.team_id) : "",
@@ -873,7 +873,7 @@ export async function runOpenaiChatPipeline(
     }
   }
 
-  // ── mem:session-reset 完成确认 (via shared stage) ────────────────────────
+  // ── mem:session-reset completion confirmation (via shared stage) ────────────────────────
   if (_resetFlowResult) {
     return stageSessionResetConfirmation({
       resetFlowResult: _resetFlowResult,
@@ -883,18 +883,18 @@ export async function runOpenaiChatPipeline(
   }
 
   // ── mem: command intercept ────────────────────────────────────────────────
-  // 位置对齐 anthropicHandler.ts:847 —— session init 完成后、injection 之前。
-  // 命中时：执行命令 → 写 L0 → 触发 skill extract → 伪造 OpenAI 响应返回，跳过
-  // injection（不破坏 KV cache）和上游转发（零 token 消耗）。命令拦截恒定启用，
-  // 未知命令由 executeMemCommand 内的 KNOWN_COMMANDS 兜底提示。
+  // Position aligned with anthropicHandler.ts:847 — after session init completes, before injection.
+  // On a hit: execute the command → write L0 → trigger skill extract → forge an OpenAI response and return, skipping
+  // injection (does not break the KV cache) and the upstream forward (zero token consumption). Command interception is always enabled;
+  // unknown commands get a hint from the KNOWN_COMMANDS fallback inside executeMemCommand.
   //
-  // 解决的坑：CodeBuddy 走 OpenAI 协议命中本 handler，之前 mem-command intercept
-  // 只挂在 anthropicHandler，CB 用户发 `mem:help` 会直接透传到上游 LLM，返回
-  // LLM 幻觉出来的"帮助文本"（含 mem:atoms/mem:profile/mem:conversations 等
-  // 根本不存在的命令）。本次抓包 (langfuse trace d814929a...) 实证后补齐。
+  // The pitfall solved: CodeBuddy goes through the OpenAI protocol and hits this handler; previously the mem-command intercept
+  // was only attached to anthropicHandler, so when a CB user sent `mem:help` it passed straight through to the upstream LLM, returning
+  // a "help text" hallucinated by the LLM (containing commands that do not exist at all, such as mem:atoms/mem:profile/mem:conversations).
+  // Confirmed by this capture (langfuse trace d814929a...) and then filled in.
   //
-  // 请求分类：OpenAI 协议不做 CC 的 fork/sidequery 分流（handler.ts 没接 CC
-  // routing），所有请求都视为 main —— 与 codebuddy adapter classifyRequest 一致。
+  // Request classification: the OpenAI protocol does not do CC's fork/sidequery splitting (handler.ts is not wired into CC
+  // routing), and all requests are treated as main — consistent with the codebuddy adapter classifyRequest.
   // ── mem: command intercept (via shared stage) ────────────────────────
   {
     const { extractSimpleMessages } = await import("../../mem-command/index.js");
@@ -920,7 +920,7 @@ export async function runOpenaiChatPipeline(
     if (memResp) return memResp;
   }
 
-  // aux 请求(compaction/title)/ dsh headless(无 UI 无 preset)不写 L0 —— 直接透传
+  // aux requests (compaction/title) / dsh headless (no UI, no preset) do not write L0 — passed straight through
   const tdaiClient = isAuxiliary || _dshHeadless || assetCapabilities?.chat_memory === false ? null : createTdaiClient(config, spaceId);
   const tdaiIdentity = injectedSkipped
     ? null
@@ -976,9 +976,9 @@ export async function runOpenaiChatPipeline(
   const costGuardMode = resolvedTarget.costGuardMode;
 
   // ── Instance upstream config override (via shared stage) ──────────────
-  // b11bf612 GLM /v1 auto-insert 修复走 joinUrl, stageInstanceUpstreamOverride 内部
-  // 已用 joinUrl(row.base_url, c.req.path) 替换手动拼接; openai 协议 joinUrl 不补 /v1
-  // (anthropic-only 判据), 行为与旧手拼一致。
+  // The b11bf612 GLM /v1 auto-insert fix goes through joinUrl; stageInstanceUpstreamOverride internally
+  // already replaced manual concatenation with joinUrl(row.base_url, c.req.path); the openai protocol's joinUrl does not add /v1
+  // (anthropic-only criterion), behavior consistent with the old manual concatenation.
   const overrideResult = stageInstanceUpstreamOverride({
     earlyConvResolution: _earlyConvResolution,
     target, forwardEndpoint, apiKey, body, modelId,
@@ -1001,9 +1001,9 @@ export async function runOpenaiChatPipeline(
   if (target.logLineExtra) pipe.info("COST_GUARD_DETAIL", target.logLineExtra);
 
   // ── Trace-level tags ──
-  // agent_source 标明客户端族群（codebuddy / claude-code / codex / …），供
-  // Langfuse 上按客户端筛选 trace；protocol 只区分 wire 协议，同一 wire
-  // 可对应多个客户端。
+  // agent_source identifies the client family (codebuddy / claude-code / codex / …), for
+  // filtering traces by client in Langfuse; protocol only distinguishes the wire protocol, and the same wire
+  // can correspond to multiple clients.
   const traceTags: string[] = [
     `agent_source:${agentSource}`,
     "protocol:openai",
@@ -1019,9 +1019,9 @@ export async function runOpenaiChatPipeline(
   // expired counter), colliding with the usage rows this session already wrote
   // — Redis, when enabled, turns them into a per-session sequence that only
   // ever moves forward. See resolveMonotonicTurnSeq.
-  // ── Turn context 装配 via shared stageBuildLangfuseTurnContext ──
-  // 58e4c55b opencode fix: opencode 的 userQuery 由 caller 算好后覆写, 不走
-  // stage 内默认 resolveLatestUserQuery (见上方 opencodeUserQuery 计算与注释)。
+  // ── Turn context assembly via shared stageBuildLangfuseTurnContext ──
+  // 58e4c55b opencode fix: opencode's userQuery is computed by the caller and overwritten, not going through
+  // the stage's default resolveLatestUserQuery (see the opencodeUserQuery computation and comments above).
   const { turnSeq, lf } = await stageBuildLangfuseTurnContext({
     config, sessionKey, keyId, target, messages, protocol: "openai",
     traceTags, path: c.req.path, headers: lcHeaders, body,
@@ -1030,16 +1030,16 @@ export async function runOpenaiChatPipeline(
   stageReportAnalyzerTrace({ config, target, traceId, lf, keyId, sessionKey, turnSeq, startTime, spaceId });
 
   // ── Langfuse debug metadata (only when config.langfuse.debug=true) ────────
-  // CB / cursor / windsurf 走 OpenAI 协议命中本 handler；开 debug 时把请求
-  // 结构 + 客户端指纹塞进 Langfuse observationMetadata，供抓包分析用。
-  // 默认关（{}），不污染线上 trace。详见 common/langfuse-debug.ts。
+  // CB / cursor / windsurf go through the OpenAI protocol and hit this handler; when debug is on, the request
+  // structure + client fingerprint are stuffed into Langfuse observationMetadata, for capture analysis.
+  // Off by default ({}), to avoid polluting online traces. See common/langfuse-debug.ts for details.
   const langfuseDebug = config.langfuse.debug === true;
   const debugMetadata = buildRequestDebugMetadata({
     debug: langfuseDebug,
     body: body as Record<string, unknown>,
     headers: reqHeaders,
     agentSource,
-    // 本 handler 不做 CC 客户端的 fork/sidequery 分流（只 anthropicHandler 走那套）
+    // This handler does not do CC client's fork/sidequery splitting (only anthropicHandler goes through that)
     spaceId,
     turnSeq,
     requestPath: c.req.path,
@@ -1125,7 +1125,7 @@ export async function runOpenaiChatPipeline(
   }
 
   // ── Forward to upstream (with automatic retry if configured) ──────────────
-  // forwardTimeout gate 关闭 → 传 0 使 stageForwardWithRetry 的 timeoutBehavior='gated' 分支不设 AbortSignal
+  // forwardTimeout gate off → pass 0 so the timeoutBehavior='gated' branch of stageForwardWithRetry does not set an AbortSignal
   const forwardTimeoutMs = _gates.forwardTimeout ? (config.server.forwardTimeoutMs ?? 600_000) : 0;
   // Pass target.url so the FORWARD log reflects the actual per-agent upstream
   // (otherwise it prints the global default and misleads triage).
@@ -1134,10 +1134,10 @@ export async function runOpenaiChatPipeline(
   let retried = false;
 
   try {
-    // Rate limit 只对官方模型生效:custom upstream 用的是用户自己的 base_url + api_key,
-    // 上游 quota 由用户自己管;proxy 的 QPM/TPM 桶是运营方按自家上游算的,套到 custom
-    // 上等于错杀。传 undefined → forwardWithRetry 内 `if (rateLimitContext)` 自然跳过。
-    // rateLimit gate 关闭时同样跳过 (codex/wb bootstrap B1 修复用)。
+    // Rate limit only applies to official models: custom upstream uses the user's own base_url + api_key,
+    // and the upstream quota is managed by the user; the proxy's QPM/TPM buckets are computed by the operator for its own upstream, and applying them to custom
+    // would be a false positive. Pass undefined → the `if (rateLimitContext)` inside forwardWithRetry skips naturally.
+    // Likewise skipped when the rateLimit gate is off (for the codex/wb bootstrap B1 fix).
     const rateLimitContext = (_isCustomUpstream || !_gates.rateLimit) ? undefined : { config, instanceId: spaceId || undefined };
     const result = await forwardWithRetry(
       target, upstreamHeaders, upstreamBody,
@@ -1267,7 +1267,7 @@ export async function runOpenaiChatPipeline(
       gates: _gates,
     };
     const passthrough = createUsageTapTransform(tapCtx);
-    // 顺序要紧：tap 在前，读到的是模型原始输出；剥离在后，只影响客户端那一份。
+    // Order matters: tap first, reading the model's raw output; stripping after, only affecting the copy sent to the client.
     const tappedStream = upstreamResp.body
       .pipeThrough(passthrough)
       .pipeThrough(createCfqStripStream(
@@ -1331,7 +1331,7 @@ export async function runOpenaiChatPipeline(
     pipe,
   );
 
-  // 内部使用埋点：非流式响应里的 tool_calls 逐个记 model_intent。
+  // Internal-use telemetry: log model_intent for each tool_calls in a non-streaming response.
   try {
     const toolCalls = assistantMessage?.tool_calls;
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
@@ -1347,7 +1347,7 @@ export async function runOpenaiChatPipeline(
         .filter((i) => i.name);
       if (intents.length > 0 && _gates.modelIntentTelemetry) {
         emitModelIntentTelemetry({
-          // 与 session_init_logs 对齐 compositeKey 形态
+          // Align with the compositeKey shape of session_init_logs
           sessionKey: `${agentSource}:${sessionKey}`,
           turnSeq: lf.turnSeq,
           spaceId,
@@ -1358,12 +1358,12 @@ export async function runOpenaiChatPipeline(
       }
     }
   } catch {
-    // 埋点绝不阻塞业务
+    // Telemetry must never block the business
   }
 
   if (usage) {
-    // custom upstream 不记 token 桶(与 enforceRateLimit 对称:官方限流桶只算官方调用)
-    // rateLimit gate 关闭时同步跳过 token 记账,与限流本身对称
+    // custom upstream does not count token buckets (symmetric with enforceRateLimit: the official rate-limit bucket only counts official calls)
+    // When the rateLimit gate is off, token accounting is skipped too, symmetric with rate limiting itself
     if (!_isCustomUpstream && _gates.rateLimit) {
       await recordInputTokenUsage({
         config,
@@ -1414,9 +1414,9 @@ export async function runOpenaiChatPipeline(
       }
     }
 
-    // 58e4c55b: opik LLM span 保留在 usage 块内 (span 需要 usage 数据);
-    // recordTdaiTurn + langfuseReportGeneration 外移到下面的 upstreamResp.ok 块,
-    // 让"上游 200 但没 usage"的成功响应也照常写 L0 + langfuse generation。
+    // 58e4c55b: the opik LLM span stays inside the usage block (the span needs usage data);
+    // recordTdaiTurn + langfuseReportGeneration are moved out to the upstreamResp.ok block below,
+    // so that a "upstream 200 but no usage" successful response also writes L0 + langfuse generation as usual.
     if (_gates.opik) {
       opikCreateLlmSpan(config, {
         traceId,
@@ -1491,8 +1491,8 @@ export async function runOpenaiChatPipeline(
   pipe.responseDone(usage);
 
   // Skill extract trigger — count tool calls + buffer conversation.
-  // 同步 await：直到 store 落盘再继续，保证下一轮跨节点读到最新数据。
-  // aux 请求(compaction/title)/dsh headless 不触发 skill 提取 —— 保持归档 buffer 语义纯净
+  // Synchronous await: continue only after the store has persisted, ensuring the next turn reads the latest data across nodes.
+  // aux requests (compaction/title) / dsh headless do not trigger skill extraction — keeping the archive buffer semantics clean
   if (!isAuxiliary && !_dshHeadless && isExtractionAllowed(config, "skill")) {
     await triggerSkillExtractIfReady({
       config,
@@ -1509,8 +1509,8 @@ export async function runOpenaiChatPipeline(
   }
 
   // Credit usage reporting (non-streaming, gated by stageGates.creditReport).
-  // 失败通过 x-credit-report-error 响应头透出, 不覆盖 LLM 响应体; 计费失败会
-  // 同时写 CH raw 兜底记账。skipCreditReport: instance custom model → 用户自付, 跳过。
+  // Failures are exposed through the x-credit-report-error response header, without overwriting the LLM response body; a billing failure
+  // also writes a CH raw fallback record. skipCreditReport: instance custom model → paid by the user, skipped.
   if (_gates.creditReport) {
     const creditResult = await stageCredit({
       skipCreditReport,
@@ -1533,7 +1533,7 @@ export async function runOpenaiChatPipeline(
     }
   }
 
-  // 最后一公里：notify / 日志 / 计费都已经看过原始响应，这里才动给客户端的那份。
+  // Last mile: notify / logging / billing have all seen the original response; only now do we touch the copy for the client.
   const clientRespText = stripCfqFromResponseText(
     "openai",
     respText,
@@ -1591,7 +1591,7 @@ interface TapContext {
   pipe: ReturnType<typeof createPipeline>;
   /** For skill extract trigger; null when session_init is disabled. */
   sessionKeyForSkill: string;
-  /** Client type (URL path 第一段) — 透传给 extract trigger 作为三段隔离键之一。 */
+  /** Client type (first URL path segment) — passed to the extract trigger as one of the three-part isolation keys. */
   agentSource: string;
   /** True when this request was classified as auxiliary (compaction/title-gen) —
    * downstream L0/skill extract paths must skip to keep buffer semantics clean. */
@@ -1606,9 +1606,9 @@ interface TapContext {
   spaceId?: string;
   /** Upstream response header `x-request-id` (empty when not returned). */
   upstreamRequestId?: string;
-  /** `config.langfuse.debug === true` 的求值结果。 */
+  /** The evaluated result of `config.langfuse.debug === true`. */
   langfuseDebug: boolean;
-  /** buildRequestDebugMetadata 结果；debug=false 时为 {}。 */
+  /** buildRequestDebugMetadata result; {} when debug=false. */
   debugMetadata: Record<string, unknown>;
   /** Opaque counters from the request-preparation stage; null when it didn't run. */
   preparedStats: Record<string, unknown> | null;
@@ -1616,7 +1616,7 @@ interface TapContext {
   skipCreditReport?: boolean;
   /** true when the request is routed to a custom upstream (user's own base_url + api_key). */
   isCustomUpstream?: boolean;
-  /** stageGates — 决定 stream 尾部各 stage 是否触发 */
+  /** stageGates — decides whether each stage at the stream tail triggers */
   gates?: import("../strategies/agent/types.js").StageGates;
 }
 
@@ -1768,10 +1768,10 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
       pipe,
     );
 
-    // 内部使用埋点：每个 tool_use 意图一条 model_intent（fan-out）。
+    // Internal-use telemetry: one model_intent per tool_use intent (fan-out).
     stageEmitModelIntent({
       gates: ctx.gates,
-      // 与 session_init_logs 对齐 compositeKey 形态
+      // Align with the compositeKey shape of session_init_logs
       sessionKey: `${ctx.agentSource}:${sessionKey}`,
       turnSeq: lf.turnSeq,
       spaceId: spaceId,
@@ -1783,9 +1783,9 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     });
 
     if (lastUsage) {
-      // 58e4c55b: token 记账 + usage log + opik span 保留在 usage 块内
-      // (三者都需要 usage 数据); 下面的 langfuseReportGeneration 外移,
-      // 让"上游 200 但没 usage chunk"的流也照常上报 generation。
+      // 58e4c55b: token accounting + usage log + opik span stay inside the usage block
+      // (all three need usage data); the langfuseReportGeneration below is moved out,
+      // so that a stream "upstream 200 but no usage chunk" also reports the generation as usual.
       await stageRecordTokenUsage({
         config, gates: ctx.gates,
         isCustomUpstream: !!ctx.isCustomUpstream,
@@ -1810,8 +1810,8 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
 
     if (!lastUsage) pipe.info("USAGE_MISSING", "stream completed without usage chunk");
     // Langfuse: report the completed turn even if the upstream omitted usage.
-    // 流式路径 inputMessages 保持原样（其它下游流水线也用同一份引用）；
-    // debug=true 时把 tool_call 累积计数塞进 metadata 兜底。
+    // Streaming path inputMessages stay as they are (other downstream pipelines use the same reference);
+    // when debug=true, stuff the accumulated tool_call count into metadata as a fallback.
     try {
       const streamDebugExtra = ctx.langfuseDebug
         ? {
@@ -1848,10 +1848,10 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     }
 
     if (ctx.tdaiClient && isExtractionAllowed(ctx.config, "tdai-memory")) {
-      // Streaming 不 await（会拖慢 SSE 关流体感），改成 trackWrite + 重试：
-      //   - trackWrite 注册 in-flight promise 到全局 set；SIGTERM 时 index.ts 会
-      //     flushPendingWrites 等待或超时兜底，避免 pod rolling 时丢 L0。
-      //   - withL0Retry 应对 tdai kernel 瞬断 / 5xx（3 次退避 ~3.5s 总时长）。
+      // Streaming does not await (it would slow the SSE stream-close feel), changed to trackWrite + retry:
+      //   - trackWrite registers the in-flight promise into a global set; on SIGTERM index.ts will
+      //     flushPendingWrites to wait or time out as a fallback, avoiding lost L0 during pod rolling.
+      //   - withL0Retry handles tdai kernel transient drops / 5xx (3 backoffs, ~3.5s total).
       trackWrite(
         withL0Retry(() => recordTdaiTurn(
           ctx.tdaiClient!, ctx.tdaiIdentity, ctx.tdaiUserMessage,
@@ -1865,8 +1865,8 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
     pipe.streamDone(lastUsage);
 
     // Skill extract trigger — after stream finalization.
-    // 同步 await：直到 store 落盘再继续，保证下一轮跨节点读到最新数据。
-    // aux 请求(compaction/title)/dsh headless 跳过 skill 触发,保持归档 buffer 语义纯净。
+    // Synchronous await: continue only after the store has persisted, ensuring the next turn reads the latest data across nodes.
+    // aux requests (compaction/title) / dsh headless skip skill triggering, keeping the archive buffer semantics clean.
     if (!ctx.isAuxiliary && !ctx.isDshHeadless && isExtractionAllowed(ctx.config, "skill")) {
       await triggerSkillExtractIfReady({
         config: ctx.config,
@@ -1883,8 +1883,8 @@ function createUsageTapTransform(ctx: TapContext): TransformStream<Uint8Array, U
       logExtractionSkipped(ctx.config, "skill", ctx.sessionKeyForSkill);
     }
 
-    // Credit usage reporting (streaming) via shared stageCredit — 客户端已收流,
-    // 失败只能落日志和 CH raw (无法追加响应头)。
+    // Credit usage reporting (streaming) via shared stageCredit — the client has received the stream,
+    // a failure can only be logged and written to CH raw (response headers cannot be appended).
     if (ctx.gates?.creditReport !== false) {
       stageCredit({
         skipCreditReport: ctx.skipCreditReport,

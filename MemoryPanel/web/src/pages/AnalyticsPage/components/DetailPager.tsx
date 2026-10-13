@@ -1,8 +1,8 @@
 /**
- * DetailPager — 明细表通用「上一页 / 下一页 + 区间」分页器。
+ * DetailPager -- generic "Previous / Next + range" pager for detail tables.
  *
- * trace / usage / usage_raw 四张明细表共用，避免各自重复 offset 边界判断。
- * 内核各 list 接口统一返回 { total, offset, limit, items }，故这里只需 offset 语义。
+ * Shared by the trace / usage / usage_raw detail tables to avoid repeating offset boundary checks.
+ * All kernel list endpoints return { total, offset, limit, items }, so only offset semantics are needed here.
  */
 import { useTranslation } from 'react-i18next';
 import { Button, Text } from 'tea-component';
@@ -19,7 +19,7 @@ export function DetailPager({
   total: number;
   offset: number;
   limit: number;
-  /** 当前页实际行数（末页可能少于 limit）。 */
+  /** Actual row count of the current page (the last page may have fewer than limit). */
   count: number;
   loading: boolean;
   onOffsetChange: (offset: number) => void;

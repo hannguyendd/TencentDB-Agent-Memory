@@ -1,32 +1,32 @@
 /**
- * OTLP Observability Backend — 基于标准 OpenTelemetry OTLP 协议的内置后端实现。
+ * OTLP Observability Backend — built-in backend implementation based on the standard OpenTelemetry OTLP protocol.
  *
- * 这是开源用户开箱即用的可观测性后端。用户只需配置一个 OTLP endpoint，
- * 即可将 Trace、Log、Metric 全部上报到任何支持 OTLP 协议的后端：
- *   - ClickHouse（原生支持 OTLP 接收）
- *   - Jaeger（支持 OTLP）
- *   - Grafana Tempo + Loki + Mimir（全家桶支持 OTLP）
- *   - SigNoz（开源一体化，原生 OTLP）
- *   - 本地 OTel Collector（万能中转）
+ * This is the out-of-the-box observability backend for open-source users. Users only need to configure one OTLP endpoint
+ * to report Trace, Log, and Metric all to any backend that supports the OTLP protocol:
+ *   - ClickHouse (native OTLP ingestion)
+ *   - Jaeger (supports OTLP)
+ *   - Grafana Tempo + Loki + Mimir (the whole stack supports OTLP)
+ *   - SigNoz (open-source all-in-one, native OTLP)
+ *   - Local OTel Collector (universal relay)
  *
- * 使用方式：
+ * Usage:
  *   await initObservabilityBackend({
  *     type: "otlp",
  *     otel: {
  *       enabled: true,
- *       endpoint: "http://localhost:4318",   // 任何支持 OTLP 的后端地址
- *       protocol: "http",                    // "http" (OTLP/HTTP) 或 "grpc" (OTLP/gRPC)
- *       serviceName: "my-memory-service",    // 服务名（可选，默认 "tdai-memory"）
+ *       endpoint: "http://localhost:4318",   // address of any OTLP-capable backend
+ *       protocol: "http",                    // "http" (OTLP/HTTP) or "grpc" (OTLP/gRPC)
+ *       serviceName: "my-memory-service",    // service name (optional, default "tdai-memory")
  *     },
  *   });
  *
- * 如果不配置（type 为 "noop"），则所有可观测性调用为空操作，零开销。
+ * If not configured (type is "noop"), all observability calls are no-ops with zero overhead.
  *
- * 设计原则：
- * - 使用标准 @opentelemetry/sdk-node 初始化，兼容所有 OTel 生态
- * - Trace + Log + Metric 三合一，一个 endpoint 全搞定
- * - 所有方法不抛异常，不影响业务
- * - 初始化失败时优雅降级到 console 输出
+ * Design principles:
+ * - Initialized with the standard @opentelemetry/sdk-node, compatible with the entire OTel ecosystem
+ * - Trace + Log + Metric in one, a single endpoint does it all
+ * - No method throws; the business is unaffected
+ * - Gracefully degrades to console output when initialization fails
  */
 
 import type http from "node:http";
@@ -51,12 +51,12 @@ import type {
 const TAG = "[observability][otlp]";
 
 // ============================
-// OTel SDK 动态加载
+// OTel SDK dynamic loading
 // ============================
 
 /**
- * OTel SDK 运行时引用。
- * 通过动态 import 加载，加载失败时所有后端降级为 console 输出。
+ * OTel SDK runtime references.
+ * Loaded via dynamic import; when loading fails, all backends degrade to console output.
  */
 interface OTelRuntime {
   // @opentelemetry/api
@@ -76,8 +76,8 @@ let _runtime: OTelRuntime | null = null;
 let _runtimeLoaded = false;
 
 /**
- * 尝试加载 OTel SDK 运行时。
- * 加载失败返回 null（依赖未安装）。
+ * Try to load the OTel SDK runtime.
+ * Returns null on load failure (dependency not installed).
  */
 async function loadOTelRuntime(): Promise<OTelRuntime | null> {
   if (_runtimeLoaded) return _runtime;
@@ -89,7 +89,7 @@ async function loadOTelRuntime(): Promise<OTelRuntime | null> {
     try {
       logsApi = await import("@opentelemetry/api-logs");
     } catch {
-      // api-logs 可选
+      // api-logs is optional
     }
 
     _runtime = {
@@ -111,8 +111,8 @@ async function loadOTelRuntime(): Promise<OTelRuntime | null> {
 }
 
 /**
- * 初始化 OTel SDK（NodeSDK）。
- * 配置 OTLP exporter 将 trace/log/metric 发送到用户指定的 endpoint。
+ * Initialize the OTel SDK (NodeSDK).
+ * Configures the OTLP exporter to send trace/log/metric to the user-specified endpoint.
  */
 async function initOTelSDK(config: OTelConfig): Promise<boolean> {
   try {
@@ -120,12 +120,12 @@ async function initOTelSDK(config: OTelConfig): Promise<boolean> {
     const endpoint = config.endpoint ?? "http://localhost:4318";
     const serviceName = config.serviceName ?? "tdai-memory";
 
-    // 动态加载 SDK 组件
+    // dynamically load SDK components
     const { NodeSDK } = await import("@opentelemetry/sdk-node");
     const { Resource } = await import("@opentelemetry/resources");
     const { ATTR_SERVICE_NAME } = await import("@opentelemetry/semantic-conventions");
 
-    // 根据协议选择 exporter
+    // choose the exporter by protocol
     let traceExporter: any;
     let logExporter: any;
 
@@ -137,10 +137,10 @@ async function initOTelSDK(config: OTelConfig): Promise<boolean> {
         const { OTLPLogExporter } = await import("@opentelemetry/exporter-logs-otlp-grpc");
         logExporter = new OTLPLogExporter({ url: endpoint });
       } catch {
-        // log exporter 可选
+        // log exporter is optional
       }
     } else {
-      // 默认 HTTP
+      // default HTTP
       const { OTLPTraceExporter } = await import("@opentelemetry/exporter-trace-otlp-http");
       traceExporter = new OTLPTraceExporter({
         url: `${endpoint}/v1/traces`,
@@ -152,11 +152,11 @@ async function initOTelSDK(config: OTelConfig): Promise<boolean> {
           url: `${endpoint}/v1/logs`,
         });
       } catch {
-        // log exporter 可选
+        // log exporter is optional
       }
     }
 
-    // 构建 SDK 配置
+    // build the SDK config
     const sdkConfig: any = {
       resource: new Resource({
         [ATTR_SERVICE_NAME]: serviceName,
@@ -164,13 +164,13 @@ async function initOTelSDK(config: OTelConfig): Promise<boolean> {
       traceExporter,
     };
 
-    // 如果有 log exporter，添加 log record processor
+    // if there is a log exporter, add a log record processor
     if (logExporter) {
       try {
         const { SimpleLogRecordProcessor } = await import("@opentelemetry/sdk-logs");
         sdkConfig.logRecordProcessors = [new SimpleLogRecordProcessor(logExporter)];
       } catch {
-        // sdk-logs 可选
+        // sdk-logs is optional
       }
     }
 
@@ -189,7 +189,7 @@ async function initOTelSDK(config: OTelConfig): Promise<boolean> {
 }
 
 // ============================
-// ISpan 适配器
+// ISpan adapter
 // ============================
 
 function wrapOTelSpan(otelSpan: any): ISpan {
@@ -242,7 +242,7 @@ const noopSpan: ISpan = {
 const TRACER_NAME = "tdai-memory";
 
 /**
- * OTLP Trace 后端 — 通过标准 OTel API 创建 Span，经 OTLP 协议上报。
+ * OTLP Trace backend — creates Spans via the standard OTel API and reports them via the OTLP protocol.
  */
 export class OtlpTraceBackend implements ITraceBackend {
   readonly type = "otlp";
@@ -270,7 +270,7 @@ export class OtlpTraceBackend implements ITraceBackend {
 
       span.end();
     } catch {
-      // 静默
+      // silent
     }
   }
 
@@ -300,7 +300,7 @@ export class OtlpTraceBackend implements ITraceBackend {
 // ============================
 
 /**
- * OTLP Log 后端 — 通过 OTel Logs API 发送结构化日志，经 OTLP 协议上报。
+ * OTLP Log backend — sends structured logs via the OTel Logs API and reports them via the OTLP protocol.
  */
 export class OtlpLogBackend implements ILogBackend {
   readonly type = "otlp";
@@ -333,7 +333,7 @@ export class OtlpLogBackend implements ILogBackend {
         context: _runtime.context?.active?.(),
       });
     } catch {
-      // 静默
+      // silent
     }
   }
 }
@@ -343,10 +343,10 @@ export class OtlpLogBackend implements ILogBackend {
 // ============================
 
 /**
- * OTLP Metric 后端 — 通过 OTel Metrics API 上报指标。
+ * OTLP Metric backend — reports metrics via the OTel Metrics API.
  *
- * 注意：OTel Metrics 需要 @opentelemetry/sdk-metrics，
- * 如果未安装则降级为 console 输出。
+ * Note: OTel Metrics requires @opentelemetry/sdk-metrics;
+ * if not installed it degrades to console output.
  */
 export class OtlpMetricBackend implements IMetricBackend {
   readonly type = "otlp";
@@ -356,12 +356,12 @@ export class OtlpMetricBackend implements IMetricBackend {
 
   send(msg: MetricMessage): void {
     if (!this._initialized || !this._meter) {
-      // 降级：如果 OTel Metrics 不可用，静默忽略
+      // degrade: if OTel Metrics is unavailable, silently ignore
       return;
     }
 
     try {
-      // 获取或创建 counter
+      // get or create the counter
       let counter = this._counters.get(msg.metric);
       if (!counter) {
         counter = this._meter.createCounter(msg.metric, {
@@ -375,18 +375,18 @@ export class OtlpMetricBackend implements IMetricBackend {
         source: msg.source ?? "core",
       });
     } catch {
-      // 静默
+      // silent
     }
   }
 
   async initialize(_config: MetricBackendConfig): Promise<void> {
-    // 尝试加载 OTel Metrics SDK
+    // try to load the OTel Metrics SDK
     try {
       const { metrics } = await import("@opentelemetry/api");
       this._meter = metrics.getMeter(TRACER_NAME);
       this._initialized = true;
     } catch {
-      // @opentelemetry/api 的 metrics 不可用，静默降级
+      // metrics in @opentelemetry/api is unavailable; silently degrade
       this._initialized = false;
     }
   }
@@ -403,24 +403,24 @@ export class OtlpMetricBackend implements IMetricBackend {
 // ============================
 
 /**
- * OTLP LLM Trace 后端 — 在 OTLP 模式下，LLM span 直接通过标准 trace 上报。
- * 不需要额外的 Langfuse，所有 span（包括 ai.* / gen_ai.*）都走 OTLP。
+ * OTLP LLM Trace backend — in OTLP mode, LLM spans are reported directly via the standard trace.
+ * No extra Langfuse is needed; all spans (including ai.* / gen_ai.*) go through OTLP.
  */
 export class OtlpLLMTraceBackend implements ILLMTraceBackend {
   readonly type = "otlp";
 
   createSpanProcessor(): ISpanProcessor | null {
-    // OTLP 模式下不需要额外的 SpanProcessor，
-    // 所有 span 已经通过 NodeSDK 的 traceExporter 统一上报
+    // No extra SpanProcessor is needed in OTLP mode;
+    // all spans are already reported uniformly via NodeSDK's traceExporter
     return null;
   }
 
   async flush(): Promise<void> {
-    // 由 NodeSDK 统一管理 flush
+    // flush is managed uniformly by NodeSDK
   }
 
   async shutdown(): Promise<void> {
-    // 由 NodeSDK 统一管理 shutdown
+    // shutdown is managed uniformly by NodeSDK
   }
 }
 
@@ -428,10 +428,10 @@ export class OtlpLLMTraceBackend implements ILLMTraceBackend {
 // OtlpTraceMiddleware
 // ============================
 
-/** 不需要 Trace 的路径 */
+/** Paths that do not need a Trace */
 const SKIP_PATHS = new Set(["/health"]);
 
-/** 路由 → Span Name 映射 */
+/** Route → Span Name mapping */
 const ROUTE_SPAN_NAMES: Record<string, string> = {
   "POST /capture": "core.capture",
   "POST /recall": "core.recall",
@@ -442,7 +442,7 @@ const ROUTE_SPAN_NAMES: Record<string, string> = {
 };
 
 /**
- * OTLP HTTP Trace 中间件 — 为每个 HTTP 请求创建 SERVER Span。
+ * OTLP HTTP Trace middleware — creates a SERVER Span for each HTTP request.
  */
 export class OtlpTraceMiddleware implements ITraceMiddleware {
   readonly type = "otlp";
@@ -464,7 +464,7 @@ export class OtlpTraceMiddleware implements ITraceMiddleware {
       return handler();
     }
 
-    // 从 W3C traceparent 头提取上游 Trace Context
+    // extract the upstream Trace Context from the W3C traceparent header
     const parentContext = _runtime.propagation.extract(_runtime.ROOT_CONTEXT, req.headers, {
       get(carrier: any, key: string) {
         const val = carrier[key.toLowerCase()];
@@ -490,7 +490,7 @@ export class OtlpTraceMiddleware implements ITraceMiddleware {
       parentContext,
     );
 
-    // 提取业务属性
+    // extract business attributes
     const instanceId = (req.headers["x-tdai-service-id"] ?? req.headers["x-instance-id"] ?? "") as string;
     if (instanceId) span.setAttribute("instance_id", instanceId);
     const reqId = (req.headers["x-qcloud-transaction-id"] ?? req.headers["x-request-id"] ?? "") as string;
@@ -575,13 +575,13 @@ export class OtlpTraceMiddleware implements ITraceMiddleware {
 // OtlpTracePropagation
 // ============================
 
-/** 序列化到 TaskPayload.data 中的字段名 */
+/** Field name serialized into TaskPayload.data */
 const TRACE_ID_KEY = "_traceId";
 const SPAN_ID_KEY = "_spanId";
 const TRACE_FLAGS_KEY = "_traceFlags";
 
 /**
- * OTLP Trace Context 传播 — 通过 OTel API 序列化/反序列化 Trace Context。
+ * OTLP Trace Context propagation — serializes/deserializes the Trace Context via the OTel API.
  */
 export class OtlpTracePropagation implements ITracePropagation {
   serializeTraceContext(): Record<string, string | number> {
@@ -633,16 +633,16 @@ export class OtlpTracePropagation implements ITracePropagation {
 }
 
 // ============================
-// OtlpObservabilityBackend — 聚合
+// OtlpObservabilityBackend — aggregation
 // ============================
 
 /**
- * OTLP 可观测性后端 — 基于标准 OpenTelemetry OTLP 协议。
+ * OTLP observability backend — based on the standard OpenTelemetry OTLP protocol.
  *
- * 开源用户开箱即用：配置一个 OTLP endpoint 即可将 Trace/Log/Metric 全部上报。
- * 支持任何兼容 OTLP 协议的后端（ClickHouse、Jaeger、Grafana、SigNoz 等）。
+ * Out of the box for open-source users: configure one OTLP endpoint to report Trace/Log/Metric all together.
+ * Supports any backend compatible with the OTLP protocol (ClickHouse, Jaeger, Grafana, SigNoz, etc.).
  *
- * 使用方式：
+ * Usage:
  *   await initObservabilityBackend({
  *     type: "otlp",
  *     otel: {
@@ -669,17 +669,17 @@ export class OtlpObservabilityBackend implements IObservabilityBackend {
       return;
     }
 
-    // 1. 加载 OTel 运行时
+    // 1. load the OTel runtime
     const runtime = await loadOTelRuntime();
     if (!runtime) {
       console.warn(`${TAG} @opentelemetry/api not installed. Run: npm install @opentelemetry/api @opentelemetry/sdk-node @opentelemetry/exporter-trace-otlp-http`);
       return;
     }
 
-    // 2. 初始化 OTel SDK（配置 OTLP exporter）
+    // 2. initialize the OTel SDK (configure the OTLP exporter)
     await initOTelSDK(otelConfig);
 
-    // 3. 初始化 Metric 后端
+    // 3. initialize the Metric backend
     await this.metric.initialize({
       brokers: [],
       enabled: true,

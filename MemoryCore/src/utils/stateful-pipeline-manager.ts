@@ -1,20 +1,20 @@
 /**
- * StatefulPipelineManager — 基于 IStateBackend 的 Pipeline 调度器
+ * StatefulPipelineManager — a Pipeline scheduler based on IStateBackend
  *
- * 需求 #8: Core 完全无状态化
+ * Requirement #8: Core fully stateless
  *
- * 与原 MemoryPipelineManager 保持相同的外部接口（L1/L2/L3 Runner、
- * notifyConversation、flushSession、destroy），但内部状态全部通过
- * IStateBackend 管理，不在进程内维护任何 Map/Timer/Queue。
+ * Keeps the same external interface as the original MemoryPipelineManager (L1/L2/L3 Runner,
+ * notifyConversation, flushSession, destroy), but all internal state is managed through
+ * IStateBackend, with no Map/Timer/Queue maintained in-process.
  *
- * 当 IStateBackend 为 LocalStateBackend 时，行为与原版完全一致（单进程）。
- * 当 IStateBackend 为远程实现时，Core 完全无状态，支持多副本部署。
+ * When IStateBackend is LocalStateBackend, behavior is exactly identical to the original (single process).
+ * When IStateBackend is a remote implementation, Core is fully stateless and supports multi-replica deployment.
  *
- * 关键设计差异：
- * - notifyConversation → captureAtomic（原子递增 + 阈值判断 + 入队/设 Timer）
- * - L1/L2/L3 执行由外部 Worker 从 TaskQueue 消费（本模块只负责入队）
- * - Timer 过期检测由外部 Timer Scanner 负责（或 LocalStateBackend 内置 setTimeout）
- * - flushSession → enqueueTask(flush) 入队而非进程内直接执行
+ * Key design differences:
+ * - notifyConversation → captureAtomic (atomic increment + threshold check + enqueue/set Timer)
+ * - L1/L2/L3 execution is consumed from the TaskQueue by external Workers (this module only enqueues)
+ * - Timer expiry detection is handled by the external Timer Scanner (or the built-in setTimeout of LocalStateBackend)
+ * - flushSession → enqueueTask(flush) enqueues rather than executing directly in-process
  */
 
 import type { IStateBackend, TaskPayload } from "../core/state/types.js";
@@ -26,7 +26,7 @@ import { report } from "../core/report/reporter.js";
 import { serializeTraceContext } from "../core/report/trace-propagation.js";
 
 // ============================
-// Types (兼容原 pipeline-manager.ts 导出)
+// Types (compatible with the exports of the original pipeline-manager.ts)
 // ============================
 
 interface Logger {
@@ -89,7 +89,7 @@ export class StatefulPipelineManager {
   private readonly sessionActiveWindowMs: number;
 
   private readonly stateBackend: IStateBackend;
-  /** 默认 instanceId（standalone 模式/checkpoint 恢复用）。service 模式下每次调用显式传入。 */
+  /** Default instanceId (for standalone mode / checkpoint recovery). In service mode it is passed explicitly on each call. */
   private readonly defaultInstanceId: string;
   private readonly sessionFilter: SessionFilter;
   private logger: Logger | undefined;
@@ -131,7 +131,7 @@ export class StatefulPipelineManager {
   }
 
   // ============================
-  // Setup (兼容原接口)
+  // Setup (compatible with the original interface)
   // ============================
 
   setL1Runner(runner: L1Runner): void { this.l1Runner = runner; }
@@ -140,8 +140,8 @@ export class StatefulPipelineManager {
   setPersister(persister: PipelineStatePersister): void { this.persister = persister; }
 
   /**
-   * Start: 恢复 checkpoint 状态到 IStateBackend
-   * LocalStateBackend 场景下等价于原 MemoryPipelineManager.start()
+   * Start: restore the checkpoint state into IStateBackend
+   * In the LocalStateBackend scenario, equivalent to the original MemoryPipelineManager.start()
    */
   async start(restoredStates?: Record<string, CheckpointPipelineSessionState>): Promise<void> {
     if (this.destroyed) return;
@@ -210,7 +210,7 @@ export class StatefulPipelineManager {
       sessionId: sessionKey,
       teamId,
       agentId,
-      // 实际消息已持久化到 Store；这里只原子计数，不再写无用 Buffer 占位符。
+      // The actual messages are already persisted to the Store; here we only count atomically, no longer writing a useless Buffer placeholder.
       threshold: warmupThreshold,
       fireAtMs: now + this.l1IdleTimeoutMs,
       timerMember: buildPipelineTimerMember(sessionKey, "L1_idle", { teamId, agentId }),
@@ -230,7 +230,7 @@ export class StatefulPipelineManager {
         bufferedMessageCount: 0,
       });
 
-      // 推进 warmup 阈值
+      // Advance the warmup threshold
       await this.advanceWarmupInBackend(sessionKey, state?.warmup_threshold ?? 1, teamId, agentId);
     } else {
       this.logger?.debug?.(
@@ -258,10 +258,10 @@ export class StatefulPipelineManager {
       return;
     }
 
-    // 取消 idle timer
+    // Cancel the idle timer
     await this.stateBackend.removeTimer(effectiveInstanceId, buildPipelineTimerMember(sessionKey, "L1_idle", { teamId, agentId }));
 
-    // 入队 flush task
+    // Enqueue the flush task
     await this.stateBackend.enqueueTask({
       id: `flush-${sessionKey}-${Date.now()}`,
       type: "flush",
@@ -285,18 +285,18 @@ export class StatefulPipelineManager {
     if (this.destroyed) return;
     this.destroyed = true;
 
-    // 持久化当前状态（用于 LocalStateBackend 场景的 checkpoint 兼容）
+    // Persist the current state (for checkpoint compatibility in the LocalStateBackend scenario)
     await this.persistCurrentStates();
 
     this.logger?.info(`${TAG} Pipeline destroyed`);
   }
 
   // ============================
-  // L2 Timer 推进 (供 Worker 在 L1 完成后调用)
+  // L2 Timer advance (called by the Worker after L1 completes)
   // ============================
 
   /**
-   * L1 完成后推进 L2 timer（由 Worker 调用）
+   * Advance the L2 timer after L1 completes (called by the Worker)
    */
   async advanceL2TimerAfterL1(sessionKey: string, instanceId?: string, teamId?: string, agentId?: string): Promise<void> {
     if (this.destroyed) return;
@@ -328,10 +328,10 @@ export class StatefulPipelineManager {
   }
 
   /**
-   * L2 完成后设置 maxInterval timer（由 Worker 调用）
+   * Set the maxInterval timer after L2 completes (called by the Worker)
    */
   async armL2MaxInterval(sessionKey: string, instanceId?: string, teamId?: string, agentId?: string): Promise<void> {
-    // teamId/agentId 只进入 timer member 值，不进入 Redis timer ZSET key；Lua 仍是单 key，避免 CROSSSLOT。
+    // teamId/agentId only go into the timer member value, not into the Redis timer ZSET key; the Lua stays single-key, avoiding CROSSSLOT.
     if (this.destroyed) return;
     const effectiveId = instanceId ?? this.defaultInstanceId;
     if (effectiveId === "__unset__") {
@@ -416,7 +416,7 @@ export class StatefulPipelineManager {
   }
 
   // ============================
-  // Accessors (兼容原接口)
+  // Accessors (compatible with the original interface)
   // ============================
 
   /** Returns all instanceIds that have had pipeline activity. */

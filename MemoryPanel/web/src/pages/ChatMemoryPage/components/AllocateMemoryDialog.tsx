@@ -50,9 +50,9 @@ export function AllocateMemoryDialog({
         <Form>
           <Form.Item label={t('allocMemory.descLabel')}><Form.Text>{description}</Form.Text></Form.Item>
           {agents.length === 0 ? (
-            // 必须包在 Form.Item 里：tea 的 Form 是 display:table，
-            // 直接作为 Form 子级的节点会变成第 1 列（label 列）的匿名 table-cell，
-            // 宽度被压到一列 label 宽，Alert 里的中文就逐字竖排了。
+            // Must be wrapped in Form.Item: tea's Form is display:table,
+            // and a node placed directly as a Form child becomes an anonymous table-cell in column 1 (the label column),
+            // whose width is squeezed to one label column width, so the text inside the Alert is laid out vertically character by character.
             <Form.Item>
               <Alert type="warning">
                 {t('allocMemory.noAgents')}

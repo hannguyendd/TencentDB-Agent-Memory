@@ -1,9 +1,9 @@
 /**
- * KpiRow — 5 张核心指标卡（渗透率 / 场均调用 / bypass 率 / 独立 Session / 总调用）。
+ * KpiRow -- 5 core metric cards (penetration rate / avg calls per session / bypass rate / unique sessions / total calls).
  *
- * 复用 Tea 的 MetricsBoard（与 WikiSourcesPanel、wiki-detail-view 同一惯例）：
- * 标题 / 数值 / 单位 / infos 补充行均由组件语义属性承载，不自绘字号与排版。
- * 环比通过 infos 承载 DeltaBadge。
+ * Reuses Tea's MetricsBoard (same convention as WikiSourcesPanel and wiki-detail-view):
+ * title / value / unit / infos supplementary rows are all carried by component semantic props, with no custom font sizes or layout.
+ * Period-over-period change is carried by DeltaBadge via infos.
  */
 import { useTranslation } from 'react-i18next';
 import { MetricsBoard } from 'tea-component';

@@ -1,16 +1,16 @@
 /**
- * TracedTaskExecutor — 非侵入式 Trace 装饰器（门面层）
+ * TracedTaskExecutor — non-intrusive Trace decorator (facade layer)
  *
- * 包装原始 TaskExecutor，为每个 L1/L2/L3 任务执行创建 OTel Span，
- * 并从 TaskPayload.data 中恢复跨异步边界的 Trace Context。
+ * Wraps the original TaskExecutor, creating an OTel Span for each L1/L2/L3 task execution
+ * and restoring the Trace Context across async boundaries from TaskPayload.data.
  *
- * 使用方式（在 server.ts 中）：
+ * Usage (in server.ts):
  *   const rawExecutor = this.buildTaskExecutor();
  *   const tracedExecutor = new TracedTaskExecutor(rawExecutor);
  *   this.pipelineWorker = new PipelineWorker(backend, tracedExecutor, ...);
  *
- * 不修改任何业务代码，纯可观测性组件。
- * 公开 API 签名保持不变，调用方无需修改。
+ * Does not modify any business code; a pure observability component.
+ * The public API signature is unchanged; callers need no modification.
  */
 
 import type { TaskPayload } from "../state/types.js";
@@ -18,7 +18,7 @@ import type { TaskExecutor } from "../../services/pipeline-worker.js";
 import { getObservabilityBackend } from "./factory.js";
 import { obsLogger } from "./obs-logger.js";
 
-/** 任务类型 → Span Name 映射 */
+/** Task type → Span Name mapping */
 const TASK_SPAN_NAMES: Record<string, string> = {
   L1: "core.l1.extraction",
   L2: "core.l2.extraction",
@@ -27,14 +27,14 @@ const TASK_SPAN_NAMES: Record<string, string> = {
 };
 
 /**
- * TracedTaskExecutor — 装饰器模式包装 TaskExecutor。
+ * TracedTaskExecutor — wraps TaskExecutor using the decorator pattern.
  *
- * 对每个 executeL1/L2/L3 调用：
- * 1. 从 task.data 反序列化恢复上游 Trace Context
- * 2. 创建 CONSUMER 类型 Span（follow-from link）
- * 3. 在 Span context 中执行原始 executor
- * 4. 记录 instance_id、session_id、task_type 等业务属性
- * 5. 错误时设置 Span Error 状态
+ * For each executeL1/L2/L3 call:
+ * 1. Deserialize and restore the upstream Trace Context from task.data
+ * 2. Create a CONSUMER-type Span (follow-from link)
+ * 3. Execute the original executor within the Span context
+ * 4. Record business attributes such as instance_id, session_id, task_type
+ * 5. Set the Span Error status on error
  */
 export class TracedTaskExecutor implements TaskExecutor {
   private readonly inner: TaskExecutor;
@@ -81,13 +81,13 @@ export class TracedTaskExecutor implements TaskExecutor {
   }
 
   /**
-   * 核心方法：在 Trace Context 中执行任务。
+   * Core method: execute a task within a Trace Context.
    *
-   * 优先使用 traceMiddleware.withSpan() 让 fn 在 active span context 中执行，
-   * 使得 fn 内部调用 metricProducer.send() 时能通过 serializeTraceContext()
-   * 自动获取当前 span 的 traceId。
+   * Prefer traceMiddleware.withSpan() so that fn executes in the active span context,
+   * so that when fn internally calls metricProducer.send(), the traceId of the current span
+   * can be obtained automatically via serializeTraceContext().
    *
-   * 降级策略：若 withSpan 不可用，回退到 trace.start()/end() 模式。
+   * Degradation strategy: if withSpan is unavailable, fall back to the trace.start()/end() mode.
    */
   private async executeWithTrace(
     taskType: string,
@@ -97,7 +97,7 @@ export class TracedTaskExecutor implements TaskExecutor {
     const backend = getObservabilityBackend();
     const spanName = TASK_SPAN_NAMES[taskType] ?? `core.task.${taskType.toLowerCase()}`;
 
-    // 提取业务属性
+    // extract business attributes
     const instanceId = task.instanceId
       ?? (typeof task.data?.instanceId === "string" ? task.data.instanceId : "unknown");
     const sessionId = task.sessionId ?? "unknown";
@@ -112,7 +112,7 @@ export class TracedTaskExecutor implements TaskExecutor {
       "messaging.operation": "process",
     };
 
-    // 优先路径：使用 withSpan 让 fn 在 active span context 中执行
+    // preferred path: use withSpan so that fn executes in the active span context
     if (typeof backend.traceMiddleware?.withSpan === "function") {
       return backend.traceMiddleware.withSpan(spanName, attrs, async (span) => {
         try {
@@ -136,7 +136,7 @@ export class TracedTaskExecutor implements TaskExecutor {
       });
     }
 
-    // 降级路径：withSpan 不可用时，回退到 start/end（不激活 context）
+    // degraded path: when withSpan is unavailable, fall back to start/end (does not activate the context)
     const span = backend.trace.start(spanName, 4 /* SpanKind.CONSUMER */);
     span.setAttributes(attrs);
 

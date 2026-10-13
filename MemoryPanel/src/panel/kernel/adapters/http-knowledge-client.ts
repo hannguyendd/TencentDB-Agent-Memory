@@ -1,11 +1,11 @@
 /**
- * Knowledge HTTP 客户端 — 调 core 的 /v3/wiki/* 和 /v3/code-graph/*.
+ * Knowledge HTTP client -- calls core's /v3/wiki/* and /v3/code-graph/*.
  *
- * 路径与请求体严格对齐 docs/knowledge/knowledge-api.yaml（07/08/11 定稿）。
- * 注：core router 实际监听 `/v3/wiki/*`、`/v3/code-graph/*`，
- * 故此处 baseUrl 不含 /v3，路径带 /v3 前缀。
+ * Paths and request bodies are strictly aligned with docs/knowledge/knowledge-api.yaml (finalized in 07/08/11).
+ * Note: the core router actually listens on `/v3/wiki/*` and `/v3/code-graph/*`,
+ * so baseUrl here does not include /v3, and paths carry the /v3 prefix.
  *
- * 与 HttpSkillClient 同模式：Bearer + service-id + envelope 解析。
+ * Same pattern as HttpSkillClient: Bearer + service-id + envelope parsing.
  */
 import { CoreUpstreamError } from '../../domain/errors.js';
 import type {
@@ -55,8 +55,8 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
   constructor(private readonly cfg: KnowledgeClientConfig) {}
 
   /**
-   * 统一请求入口。KS 的外部来源接口（source-provider / source-credential）
-   * 用 GET/DELETE + query，故不能只支持 POST。
+   * Unified request entry. KS's external-source endpoints (source-provider / source-credential)
+   * use GET/DELETE + query, so it cannot support POST only.
    */
   private async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -69,7 +69,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (this.cfg.authToken) headers.Authorization = `Bearer ${this.cfg.authToken}`;
       if (this.cfg.serviceId) headers['x-tdai-service-id'] = this.cfg.serviceId;
-      // 资源级凭据接口需要 team_id（KS 用于越权门控）+ user_id（审计）
+      // Resource-level credential endpoints need team_id (used by KS for authorization gating) + user_id (audit)
       if (opts?.teamId) headers['x-tdai-team-id'] = opts.teamId;
       if (opts?.userId) headers['x-tdai-user-id'] = opts.userId;
 
@@ -102,30 +102,30 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     }
   }
 
-  /** POST 便捷封装（绝大多数 KS 接口是 POST + JSON body）。 */
+  /** POST convenience wrapper (the vast majority of KS endpoints are POST + JSON body). */
   private async post<T>(path: string, body: unknown): Promise<T> {
     return this.request<T>('POST', path, { body });
   }
 
-  // ═══════════════ 外部来源（工蜂 / GitHub / GitLab）═══════════════
+  // ═══════════════ External sources (Gongfeng / GitHub / GitLab) ═══════════════
   //
-  // 均为 KS 的薄转发：来源清单与凭据存储的唯一真相源都在 KS，Panel 只带上
-  // 实例凭证与调用者身份。凭据挂在**资源**上（resource_type + resource_id），
-  // 与用户/access-key 解耦；team 门控由 KS 用 x-tdai-team-id 校验。
+  // All are thin forwards to KS: the single source of truth for the source list and credential storage is KS, and Panel only attaches
+  // instance credentials and caller identity. Credentials attach to the **resource** (resource_type + resource_id),
+  // decoupled from user/access-key; the team gate is verified by KS using x-tdai-team-id.
 
-  /** 已启用的 codegraph 来源列表（前端下拉数据源）。 */
+  /** List of enabled codegraph sources (data source for the frontend dropdown). */
   async sourceProviderListCode(): Promise<SourceProviderList> {
     return this.request<SourceProviderList>('GET', '/v3/source-provider/code');
   }
 
-  /** 已启用的 wiki 来源列表（前端下拉数据源）。 */
+  /** List of enabled wiki sources (data source for the frontend dropdown). */
   async sourceProviderListWiki(): Promise<SourceProviderList> {
     return this.request<SourceProviderList>('GET', '/v3/source-provider/wiki');
   }
 
   /**
-   * 列远端文档树（resolveRoot + listPages）。
-   * 凭据由 KS 按 wiki_id 从凭据表注入，Panel 不接触明文。
+   * List the remote document tree (resolveRoot + listPages).
+   * Credentials are injected by KS from the credential table by wiki_id; Panel never touches plaintext.
    */
   async wikiSourceList(params: {
     wikiId: string;
@@ -145,7 +145,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     });
   }
 
-  /** 导入远端文档（拉取 + 写盘，不触发 ingest）。pageIds 省略 → 全部非目录节点。 */
+  /** Import remote documents (fetch + write to disk, without triggering ingest). pageIds omitted -> all non-directory nodes. */
   async wikiSourceImport(params: {
     wikiId: string;
     sourceUrl: string;
@@ -164,7 +164,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     });
   }
 
-  /** 某资源当前的凭据状态（仅元数据）。未配置 → data.credential 为 null，Panel 层直接透传。 */
+  /** Current credential status of a resource (metadata only). Not configured -> data.credential is null, passed through directly by the Panel layer. */
   async sourceCredentialStatus(
     resourceType: ResourceType,
     resourceId: string,
@@ -178,7 +178,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return res.credential;
   }
 
-  /** 写入 / 更新某资源的令牌。明文只在本次 body 内经 Panel 转发给 KS，不写日志。 */
+  /** Write / update a resource's token. The plaintext is forwarded to KS by Panel only within this body and is not logged. */
   async sourceCredentialPut(
     resourceType: ResourceType,
     resourceId: string,
@@ -200,7 +200,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return res.credential;
   }
 
-  /** 删除某资源的令牌。 */
+  /** Delete a resource's token. */
   async sourceCredentialDelete(
     resourceType: ResourceType,
     resourceId: string,
@@ -212,7 +212,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     });
   }
 
-  // ═══════════════ Wiki · 资产层 ═══════════════
+  // ═══════════════ Wiki · asset layer ═══════════════
 
   async wikiCreate(
     teamId: string,
@@ -221,7 +221,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     sourceUrl?: string,
     sourceType?: string,
   ): Promise<WikiDetail> {
-    // source_type / source_url 必须成对下发：KS 侧拒绝只给其一的请求。
+    // source_type / source_url must be sent as a pair: the KS side rejects requests giving only one of them.
     return this.post('/v3/wiki/create', {
       team_id: teamId,
       name,
@@ -246,7 +246,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/list', { team_id: teamId, ...opts });
   }
 
-  // ═══════════════ Wiki · raw 文件层 ═══════════════
+  // ═══════════════ Wiki · raw file layer ═══════════════
 
   async wikiRawLs(wikiId: string): Promise<{ items: RawFileEntry[] }> {
     return this.post('/v3/wiki/raw/ls', { wiki_id: wikiId });
@@ -264,7 +264,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/raw/rm', { team_id: teamId, user_id: userId, wiki_id: wikiId, filenames });
   }
 
-  // ═══════════════ Wiki · page 文件层 ═══════════════
+  // ═══════════════ Wiki · page file layer ═══════════════
 
   async wikiPageLs(wikiId: string): Promise<{ items: PageEntry[] }> {
     return this.post('/v3/wiki/page/ls', { wiki_id: wikiId });
@@ -282,7 +282,7 @@ export class HttpKnowledgeClient implements KnowledgeClientPort {
     return this.post('/v3/wiki/page/rm', { team_id: teamId, user_id: userId, wiki_id: wikiId, refs });
   }
 
-  // ═══════════════ Wiki · 派生视图 ═══════════════
+  // ═══════════════ Wiki · derived views ═══════════════
 
   async wikiGraph(wikiId: string): Promise<WikiGraphData> {
     return this.post('/v3/wiki/graph', { wiki_id: wikiId });

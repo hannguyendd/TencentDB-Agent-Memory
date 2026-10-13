@@ -91,7 +91,7 @@ const L1_COLLECTION_SUFFIX = "l1_memories";
 const L0_COLLECTION_SUFFIX = "l0_conversations";
 const PROFILES_COLLECTION_SUFFIX = "profiles";
 const AUDIT_COLLECTION_SUFFIX = "memory_audit";
-/** entity_knowledge 明细注册表（见 docs/design/vdb-knowledge-collection.md）。 */
+/** entity_knowledge detail registry (see docs/design/vdb-knowledge-collection.md). */
 const KNOWLEDGE_COLLECTION_SUFFIX = "knowledge";
 const MEMORY_PROMPTS_COLLECTION_SUFFIX = "memory_prompts";
 const MEMORY_PROMPT_SETTINGS_COLLECTION_SUFFIX = "memory_prompt_settings";
@@ -122,8 +122,8 @@ const KNOWLEDGE_OUTPUT_FIELDS = [
 ];
 
 /**
- * Memory type 预埋字段默认值。预留给后续区分同 agent 不同记忆类型（如对话、技能、偏好等），
- * 当前所有 L1/profile 写入都填这个默认值，读路径暂不消费 memory_type 字段。
+ * Default value of the pre-reserved Memory type field. Reserved for later distinguishing different memory types under the same agent (e.g. conversation, skill, preference, etc.);
+ * currently all L1/profile writes fill in this default value, and the read path does not yet consume the memory_type field.
  */
 const DEFAULT_MEMORY_TYPE = "default";
 
@@ -153,7 +153,7 @@ const PROFILE_METADATA_OUTPUT_FIELDS = [
   "version", "created_at_ms", "updated_at_ms",
 ];
 
-/** memory_audit 字段：每行一条修改事件（L1/L2/L3 的 update/delete）。 */
+/** memory_audit fields: one modification event per row (update/delete of L1/L2/L3). */
 const AUDIT_OUTPUT_FIELDS = [
   "id", "record_id", "layer", "action",
   "team_id", "agent_id", "user_id", "task_id",
@@ -186,8 +186,8 @@ function eqFilter(field: string, value: string): string {
 function buildIsolationConditions(filter?: IsolationFilter): string[] {
   const conditions: string[] = [];
   if (!filter) return conditions;
-  // teamId 与 isolation.ts buildIsolationWhere 对齐：team 级隔离过滤必须最先出现，
-  // 否则跨 team 的 L0/L1 记录会在 search/query 时漏过滤（团队记忆隔离失效）。
+  // teamId is aligned with isolation.ts buildIsolationWhere: the team-level isolation filter must appear first,
+  // otherwise cross-team L0/L1 records would slip through the filter in search/query (team memory isolation would fail).
   if (filter.teamId !== undefined) conditions.push(eqFilter("team_id", filter.teamId));
   if (filter.userId !== undefined) conditions.push(eqFilter("user_id", filter.userId));
   if (filter.agentId !== undefined) conditions.push(eqFilter("agent_id", filter.agentId));
@@ -202,15 +202,15 @@ function joinFilter(conditions: string[]): string | undefined {
 }
 
 /**
- * 破坏性删除前的护栏：确认 filter 表达式非空且含所有必需的隔离字段。
+ * Guard before destructive deletes: confirm the filter expression is non-empty and contains all required isolation fields.
  *
- * 背景：TCVDB `/document/delete` 在 filter 为空时会删掉**整个 collection**。
- * 任何按条件批量删除的调用都必须先过这一关—— 与其在生产上静默清库，
- * 不如在发请求前抛错。
+ * Background: TCVDB `/document/delete` deletes the **entire collection** when the filter is empty.
+ * Any call that deletes in bulk by condition must pass this gate first — rather than silently wiping the database in production,
+ * it is better to throw before sending the request.
  *
- * @param filter        joinFilter 的结果（可能是 undefined）
- * @param op            操作名，用于错误信息定位
- * @param requiredFields 必须出现在 filter 里的字段名（如 team_id / agent_id）
+ * @param filter        the result of joinFilter (may be undefined)
+ * @param op            operation name, used to locate the error message
+ * @param requiredFields field names that must appear in the filter (such as team_id / agent_id)
  */
 function assertDeleteFilterSafe(
   filter: string | undefined,
@@ -393,7 +393,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
           collection: this.l1Collection,
           shardNum: 1,
           replicaNum: 2,
-          description: "L1 结构化记忆",
+          description: "L1 structured memory",
           embedding: {
             status: "enabled",
             field: "text",
@@ -416,7 +416,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
           { fieldName: "timestamp_end",   fieldType: "string", indexType: "filter" },
           { fieldName: "created_time_ms", fieldType: "uint64", indexType: "filter" },
           { fieldName: "updated_time_ms", fieldType: "uint64", indexType: "filter" },
-          // memory_type: 预埋字段，区分同 agent 不同记忆类型。当前一律 "default"，读路径暂不消费
+          // memory_type: a pre-reserved field to distinguish different memory types under the same agent. Currently always "default"; the read path does not yet consume it
           { fieldName: "memory_type",     fieldType: "string", indexType: "filter" },
         ],
       );
@@ -427,7 +427,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
           collection: this.l0Collection,
           shardNum: 1,
           replicaNum: 2,
-          description: "L0 原始对话消息",
+          description: "L0 raw conversation messages",
           embedding: {
             status: "enabled",
             field: "message_text",
@@ -452,7 +452,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
         collection: this.profilesCollection,
         shardNum: 1,
         replicaNum: 2,
-        description: "L2 场景块 + L3 用户画像",
+        description: "L2 scene blocks + L3 user profile",
         embedding: { status: "disabled" },
         indexes: [
           { fieldName: "id",            fieldType: "string", indexType: "primaryKey" },
@@ -467,18 +467,18 @@ export class TcvdbMemoryStore implements IMemoryStore {
           { fieldName: "created_at_ms", fieldType: "uint64", indexType: "filter" },
           { fieldName: "updated_at_ms", fieldType: "uint64", indexType: "filter" },
           { fieldName: "version",       fieldType: "uint64", indexType: "filter" },
-          // memory_type: 预埋字段，区分同 agent 不同记忆类型。当前一律 "default"，读路径暂不消费
+          // memory_type: a pre-reserved field to distinguish different memory types under the same agent. Currently always "default"; the read path does not yet consume it
           { fieldName: "memory_type",   fieldType: "string", indexType: "filter" },
         ],
       });
 
-      // memory_audit collection — 修改审计事件流（L1/L2/L3 update/delete）
-      // 不需向量检索，固定 dim=1 占位；所有过滤字段建 filter 索引便于查询
+      // memory_audit collection — modification audit event stream (update/delete of L1/L2/L3)
+      // no vector search needed, dim=1 fixed as a placeholder; all filter fields get a filter index to ease querying
       await this.client.createCollection({
         collection: this.auditCollection,
         shardNum: 1,
         replicaNum: 2,
-        description: "Memory 修改审计：L1/L2/L3 update/delete 事件流",
+        description: "Memory modification audit: update/delete event stream of L1/L2/L3",
         embedding: { status: "disabled" },
         indexes: [
           { fieldName: "id",            fieldType: "string", indexType: "primaryKey" },
@@ -496,8 +496,8 @@ export class TcvdbMemoryStore implements IMemoryStore {
         ],
       });
 
-      // knowledge_entities registry — 明细表（dim=1 占位；metadata 用 JSON 类型收类型专属字段）
-      // 见 docs/design/vdb-knowledge-collection.md
+      // knowledge_entities registry — detail table (dim=1 placeholder; metadata uses a JSON type to hold type-specific fields)
+      // see docs/design/vdb-knowledge-collection.md
       await this.client.createCollection({
         collection: this.knowledgeCollection,
         shardNum: 1,
@@ -1322,8 +1322,8 @@ export class TcvdbMemoryStore implements IMemoryStore {
       const rows = await this.queryL0ForL1(sessionKey, afterRecordedAtMs, limit);
 
       // Group by full isolation tuple + session_id to avoid cross-tenant merging.
-      // 注意：必须把 teamId / taskId 带进 group。L2 scope (team:T|agent:A) 依赖
-      // L1 record 的 teamId 正确透传；缺失会退化到 team:${userId}|... 写错位。
+      // Note: teamId / taskId must be carried into the group. The L2 scope (team:T|agent:A) depends on
+      // the L1 record's teamId being passed through correctly; if missing it degrades to team:${userId}|... and writes to the wrong place.
       const groupMap = new Map<string, L0SessionGroup>();
       for (const row of rows) {
         const sid = row.session_id || DEFAULT_ISOLATION_ID;
@@ -1689,8 +1689,8 @@ export class TcvdbMemoryStore implements IMemoryStore {
 
   // ── Knowledge entity (wiki / code-graph metadata) ─────────
   //
-  // 明细注册表：Proxy 按 knowledge_id 联查渲染。类型专属字段（repo_url/branch…）
-  // 收进 JSON 类型字段 metadata（见 docs/design/vdb-knowledge-collection.md）。
+  // Detail registry: the Proxy joins by knowledge_id to render. Type-specific fields (repo_url/branch…)
+  // are collected into the JSON-type field metadata (see docs/design/vdb-knowledge-collection.md).
 
   private _knowledgeToDoc(e: Omit<KnowledgeEntity, "created_at" | "updated_at">, createdAtMs: number, updatedAtMs: number): Record<string, unknown> {
     const metadata: Record<string, unknown> = {};
@@ -1735,7 +1735,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
   async createKnowledge(input: Omit<KnowledgeEntity, "created_at" | "updated_at">): Promise<KnowledgeEntity> {
     await this._ensureInit();
     if (this.degraded) throw new Error("tcvdb store degraded");
-    // upsert：保留已有 created_at_ms
+    // upsert: keep the existing created_at_ms
     let createdAtMs = Date.now();
     try {
       const existing = await this.client.query(this.knowledgeCollection, {
@@ -1744,7 +1744,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
       });
       const prev = existing.documents?.[0];
       if (prev?.created_at_ms) createdAtMs = Number(prev.created_at_ms);
-    } catch { /* 视为新建 */ }
+    } catch { /* treated as newly created */ }
     const now = Date.now();
     const doc = this._knowledgeToDoc(input, createdAtMs, now);
     await this.client.upsert(this.knowledgeCollection, [doc]);
@@ -1835,7 +1835,7 @@ export class TcvdbMemoryStore implements IMemoryStore {
       [{ fieldName: "updated_at_ms", direction: "desc" }],
     );
     let items = docs.map((d) => this._docToKnowledge(d));
-    // 分页（_queryAllDocs 不含 offset 语义时在此裁剪）
+    // pagination (trim here when _queryAllDocs has no offset semantics)
     const offset = Math.max(input.offset ?? 0, 0);
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 1000);
     const total = items.length;
@@ -1989,9 +1989,9 @@ export class TcvdbMemoryStore implements IMemoryStore {
   }
 
   async deleteL0BySession(sessionId: string, filter?: IsolationFilter): Promise<number> {
-    // 空 sessionId 会生成 `(session_key = "" or session_id = "")` —— 这是个
-    // **合法非空** filter，会把所有 session 字段为空的历史/legacy 记录删掉。
-    // 空 session 不是有效的删除目标，直接拒绝，不能靠下游护栏兜。
+    // An empty sessionId would generate `(session_key = "" or session_id = "")` — this is a
+    // **legal non-empty** filter that would delete all historical/legacy records whose session fields are empty.
+    // An empty session is not a valid deletion target; reject it directly, and do not rely on the downstream guard.
     const sessionIdTrimmed = (sessionId ?? "").trim();
     if (!sessionIdTrimmed) {
       throw new Error("[tcvdb] deleteL0BySession requires a non-empty sessionId");
@@ -2003,8 +2003,8 @@ export class TcvdbMemoryStore implements IMemoryStore {
       const sid = escapeFilterString(sessionIdTrimmed);
       const conditions = [`(session_key = "${sid}" or session_id = "${sid}")`, ...buildIsolationConditions(filter)];
       const filterExpr = joinFilter(conditions);
-      // 护栏：filter 为空会删掉整个 collection。这里 session 条件恒存在，
-      // 但仍显式断言，防止将来重构改坏条件拼装。
+      // Guard: an empty filter would delete the entire collection. The session condition is always present here,
+      // but still assert explicitly, to prevent a future refactor from breaking the condition assembly.
       assertDeleteFilterSafe(filterExpr, "deleteL0BySession", []);
       const affected = await this.client.deleteDoc(this.l0Collection, {
         query: { filter: filterExpr },
@@ -2017,14 +2017,14 @@ export class TcvdbMemoryStore implements IMemoryStore {
   }
 
   /**
-   * 清空某个 (team, agent) 下的全部记忆内容：L0 + L1 + L2/L3 profile 行。
-   * 向量与 sparse_vector 随文档一起删除，无需单独清理。
+   * Clear all memory content under a (team, agent): L0 + L1 + L2/L3 profile rows.
+   * Vectors and sparse_vector are deleted together with the documents, with no separate cleanup needed.
    *
-   * 不触碰 meta_* 资产表：asset_id、Owner、绑定、ACL、可见性、名称全部保留。
-   * 幂等：已清空的 memory 再次调用返回全 0。
+   * Does not touch the meta_* asset tables: asset_id, Owner, bindings, ACLs, visibility, and names are all preserved.
+   * Idempotent: calling it again on an already-cleared memory returns all 0s.
    *
-   * 失败语义：任一层删除失败直接抛出，由调用方标记该 memory 清空失败，
-   * 避免"部分删除但报告成功"。
+   * Failure semantics: if deletion fails at any layer it throws directly, and the caller marks that memory's clearing as failed,
+   * avoiding "partially deleted but reported successful".
    */
   async clearMemoryContent(filter: MemoryContentClearFilter): Promise<MemoryContentClearResult> {
     const teamId = (filter?.teamId ?? "").trim();
@@ -2037,21 +2037,21 @@ export class TcvdbMemoryStore implements IMemoryStore {
     await this._ensureInit();
     if (this.degraded) return { l0Deleted: 0, l1Deleted: 0, profilesDeleted: 0 };
 
-    // L0/L1 按 (team, agent[, user]) 过滤；不带 session 维度，覆盖该 agent 全部会话。
+    // L0/L1 filtered by (team, agent[, user]); without the session dimension, covering all of that agent's sessions.
     const contentFilter = joinFilter(buildIsolationConditions({
       teamId,
       agentId,
       ...(userId ? { userId } : {}),
     }));
-    // profiles(L2/L3) 是 team+agent 粒度（见 buildProfileIsolationScope），
-    // 不按 user 收窄，否则会漏删 user_id 为空的历史 profile 行。
+    // profiles (L2/L3) are team+agent granularity (see buildProfileIsolationScope),
+    // not narrowed by user, otherwise historical profile rows with an empty user_id would be missed.
     const profileFilter = joinFilter([eqFilter("team_id", teamId), eqFilter("agent_id", agentId)]);
 
-    // ⚠️ 最后一道护栏：filter 为空时VDB /document/delete 会删掉**整个
-    // collection**。上面的 teamId/agentId 非空校验已能保证 filter 非空，
-    // 但那是"间接"保证（依赖 buildIsolationConditions 的实现细节）。
-    // 破坏性操作不能依赖间接推导，这里直接断言，任何将来的重构把
-    // filter 弄空都会在发请求前炸掉，而不是静默清库。
+    // ⚠️ Last guard: when the filter is empty, VDB /document/delete deletes the **entire
+    // collection**. The teamId/agentId non-empty checks above already ensure the filter is non-empty,
+    // but that is an "indirect" guarantee (relying on implementation details of buildIsolationConditions).
+    // Destructive operations must not rely on indirect inference; assert directly here, so any future refactor that
+    // empties the filter blows up before the request is sent, instead of silently wiping the database.
     assertDeleteFilterSafe(contentFilter, "clearMemoryContent/content", ["team_id", "agent_id"]);
     assertDeleteFilterSafe(profileFilter, "clearMemoryContent/profiles", ["team_id", "agent_id"]);
 
@@ -2472,14 +2472,14 @@ export class TcvdbMemoryStore implements IMemoryStore {
   }
 
   // ─────────────────────────────────────────────────────────
-  // Memory Audit (修改审计)
+  // Memory Audit (modification audit)
   // ─────────────────────────────────────────────────────────
 
   async appendAudit(entry: AuditEntry): Promise<void> {
     await this._ensureInit();
     if (this.degraded) return;
 
-    // dim=1 占位向量（audit 不需向量检索，仅用 filter 查询）
+    // dim=1 placeholder vector (audit needs no vector search, only filter queries)
     const doc: Record<string, unknown> = {
       id:            entry.audit_id,
       vector:        [0],

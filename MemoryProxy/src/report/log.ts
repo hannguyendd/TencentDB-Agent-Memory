@@ -147,9 +147,9 @@ function emit(
         if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
           attrs[key] = value;
         } else {
-          // 复杂类型（对象/数组）→ 优先 JSON 序列化保留结构，失败时（如循环引用、
-          // BigInt、Symbol）再退回 String() 兜底，避免出现 "[object Object]" 丢失字段。
-          // 上限 2000 字符防止单条日志膨胀。
+          // Complex types (objects/arrays) -> prefer JSON serialization to preserve structure; on failure (e.g. circular references,
+          // BigInt, Symbol) fall back to String(), avoiding "[object Object]" losing fields.
+          // Capped at 2000 characters to prevent a single log entry from bloating.
           try {
             attrs[key] = JSON.stringify(value).slice(0, 2000);
           } catch {

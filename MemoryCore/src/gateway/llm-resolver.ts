@@ -1,17 +1,17 @@
 /**
- * LLM provider 解析器 —— 将 yaml 中的 llm 段和 memory systemUser 组合成
- * 内核 runner 直接可用的 {baseUrl, apiKey, model, ...} 配置。
+ * LLM provider resolver -- combines the llm section in the yaml and the memory systemUser into
+ * a {baseUrl, apiKey, model, ...} config that the kernel runner can use directly.
  *
- * 两种模式：
- *   1. provider="openai"（默认）：原样返回 llm 配置，向后兼容
- *   2. provider="proxy"：把 baseUrl 拼成 `${baseUrl}/proxy/<instanceId>/v1`，
- *      apiKey 使用 metadata.systemUser.memory.userKey（memory 系统角色 sk-mem-xxx）。
- *      这样内核所有 LLM 调用都会带上 memory 身份，走 context_proxy 的统一鉴权、
- *      成本守卫、可观测链路。
+ * Two modes:
+ *   1. provider="openai" (default): returns the llm config as-is, backward compatible
+ *   2. provider="proxy": assembles baseUrl into `${baseUrl}/proxy/<instanceId>/v1`,
+ *      and apiKey uses metadata.systemUser.memory.userKey (the memory system role sk-mem-xxx).
+ *      This way all kernel LLM calls carry the memory identity and go through context_proxy's unified authentication,
+ *      cost guard, and observability chain.
  *
- * 单一职责：本文件只做"计算最终 baseUrl / apiKey"，不新建 runner；四个接入点
- * （tdai-core.ts:636/987/1037/1082、server.ts buildOffloadLlmClient）在构造
- * runner 前统一调用本函数。
+ * Single responsibility: this file only "computes the final baseUrl / apiKey" and does not create runners; the four integration points
+ * (tdai-core.ts:636/987/1037/1082, server.ts buildOffloadLlmClient) call this function uniformly before constructing
+ * the runner.
  */
 
 import type { StandaloneLLMConfig } from "../adapters/standalone/llm-runner.js";
@@ -30,14 +30,14 @@ export class LlmResolveError extends Error {
 }
 
 /**
- * 计算给定 instanceId 下内核 LLM 调用的最终 (baseUrl, apiKey, model, ...)。
+ * Compute the final (baseUrl, apiKey, model, ...) for kernel LLM calls under the given instanceId.
  *
- * @param llm            gateway yaml 中的 llm 段（含 provider）
- * @param instanceId     当前处理的实例 id（用于 provider=proxy 时拼路径）
- * @param memorySystemUser 已解析的 memory 系统用户配置（可选，仅 provider=proxy 且
- *                         useMemorySystemUserKey=true 时使用）
+ * @param llm            the llm section in the gateway yaml (including provider)
+ * @param instanceId     the instance id currently being handled (used to assemble the path when provider=proxy)
+ * @param memorySystemUser the resolved memory system user config (optional, used only when provider=proxy and
+ *                         useMemorySystemUserKey=true)
  *
- * @throws {LlmResolveError} provider=proxy 但缺失必要配置时
+ * @throws {LlmResolveError} when provider=proxy but required config is missing
  */
 export function resolveEffectiveLlmConfig(
   llm: StandaloneLLMConfig,
@@ -46,20 +46,20 @@ export function resolveEffectiveLlmConfig(
 ): StandaloneLLMConfig {
   const provider = llm.provider ?? "openai";
   if (provider !== "proxy") {
-    // 默认路径：原样返回，行为完全等价改造前
+    // Default path: return as-is, behavior fully equivalent to before the change
     return llm;
   }
 
-  // provider=proxy 的校验
+  // Validation for provider=proxy
   if (!llm.baseUrl) {
     throw new LlmResolveError(
-      "llm.provider=proxy 需要 llm.baseUrl 指向 context_proxy 根 URL (如 http://127.0.0.1:8096)",
+      "llm.provider=proxy requires llm.baseUrl to point to the context_proxy root URL (e.g. http://127.0.0.1:8096)",
     );
   }
   if (!instanceId || !instanceId.trim()) {
     throw new LlmResolveError(
-      "llm.provider=proxy 需要 instanceId，但 core 当前 instanceId 为空 —— " +
-      "service 模式下确保请求带 x-tdai-service-id，standalone 模式下确保 yaml 有 instanceId",
+      "llm.provider=proxy requires an instanceId, but the core's current instanceId is empty -- " +
+      "in service mode make sure requests carry x-tdai-service-id; in standalone mode make sure the yaml has an instanceId",
     );
   }
 
@@ -68,13 +68,13 @@ export function resolveEffectiveLlmConfig(
   if (useSystemUserKey) {
     if (!memorySystemUser) {
       throw new LlmResolveError(
-        "llm.provider=proxy 且 llm.proxy.useMemorySystemUserKey=true 需要 " +
-        "metadata.systemUser.memory 完整配置（userId + userKey），当前缺失",
+        "llm.provider=proxy with llm.proxy.useMemorySystemUserKey=true requires " +
+        "a complete metadata.systemUser.memory config (userId + userKey), which is currently missing",
       );
     }
     if (!isValidMemorySystemUserKey(memorySystemUser.userKey)) {
       throw new LlmResolveError(
-        "metadata.systemUser.memory.userKey 必须匹配 sk-mem-[A-Za-z0-9_-]{32}",
+        "metadata.systemUser.memory.userKey must match sk-mem-[A-Za-z0-9_-]{32}",
       );
     }
     effectiveApiKey = memorySystemUser.userKey;
@@ -82,11 +82,11 @@ export function resolveEffectiveLlmConfig(
 
   if (!effectiveApiKey) {
     throw new LlmResolveError(
-      "llm.provider=proxy 且 useMemorySystemUserKey=false 时必须显式配置 llm.apiKey",
+      "llm.provider=proxy with useMemorySystemUserKey=false requires llm.apiKey to be configured explicitly",
     );
   }
 
-  // baseUrl 拼接规则：去掉尾部斜杠，追加 /proxy/<iid>/v1
+  // baseUrl assembly rule: strip trailing slashes, append /proxy/<iid>/v1
   const cleanBase = llm.baseUrl.replace(/\/+$/, "");
   const proxyBaseUrl = `${cleanBase}/proxy/${encodeURIComponent(instanceId)}/v1`;
 
@@ -98,9 +98,9 @@ export function resolveEffectiveLlmConfig(
 }
 
 /**
- * 只做校验、不返回配置 —— 用于启动期"fail-fast"检查。
- * standalone 模式下 instanceId 一般是 "default"，可以直接校验；
- * service 模式下 instanceId 每次请求才知道，启动期只校验 systemUser 是否合法。
+ * Only validates and returns no config -- used for startup-time "fail-fast" checks.
+ * In standalone mode the instanceId is generally "default" and can be validated directly;
+ * in service mode the instanceId is only known per request, so at startup only whether the systemUser is valid is checked.
  */
 export function validateLlmProviderConfig(
   llm: StandaloneLLMConfig,
@@ -110,7 +110,7 @@ export function validateLlmProviderConfig(
 
   if (!llm.baseUrl) {
     throw new LlmResolveError(
-      "llm.provider=proxy 需要 llm.baseUrl 指向 context_proxy 根 URL",
+      "llm.provider=proxy requires llm.baseUrl to point to the context_proxy root URL",
     );
   }
 
@@ -119,18 +119,18 @@ export function validateLlmProviderConfig(
     const memoryUser = resolveMemorySystemUserConfig(metadata);
     if (!memoryUser) {
       throw new LlmResolveError(
-        "llm.provider=proxy 且 useMemorySystemUserKey=true 需要 " +
-        "metadata.systemUser.memory 完整配置（userId + userKey）",
+        "llm.provider=proxy with useMemorySystemUserKey=true requires " +
+        "a complete metadata.systemUser.memory config (userId + userKey)",
       );
     }
     if (!isValidMemorySystemUserKey(memoryUser.userKey)) {
       throw new LlmResolveError(
-        "metadata.systemUser.memory.userKey 必须匹配 sk-mem-[A-Za-z0-9_-]{32}",
+        "metadata.systemUser.memory.userKey must match sk-mem-[A-Za-z0-9_-]{32}",
       );
     }
   } else if (!llm.apiKey) {
     throw new LlmResolveError(
-      "llm.provider=proxy 且 useMemorySystemUserKey=false 时必须显式配置 llm.apiKey",
+      "llm.provider=proxy with useMemorySystemUserKey=false requires llm.apiKey to be configured explicitly",
     );
   }
 }

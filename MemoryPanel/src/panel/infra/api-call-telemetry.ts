@@ -1,32 +1,32 @@
 /**
- * Panel API 调用审计 — 可选 ClickHouse 上报。
+ * Panel API call audit -- optional ClickHouse reporting.
  *
- * - enabled=false 或 url 为空 → 返回 NoOp 实例，零开销零副作用
- * - enabled=true + 有效 url → 连接 CH，自动建表 + schema 自愈，缓冲批量写入
- * - 写失败不阻塞请求，重入队 + 溢出保护
+ * - enabled=false or url empty -> return a NoOp instance, zero overhead and zero side effects
+ * - enabled=true + valid url -> connect to CH, auto-create the table + schema self-healing, buffered batch writes
+ * - write failure does not block requests; re-enqueue + overflow protection
  *
- * ## Schema 自愈（动态字段）
- * 每次启动 initialize() 里 ensureSchema() 会：
- *   1. `DESCRIBE {table}` 拿现有列
- *   2. 对比 EXPECTED_COLUMNS 补齐缺失列（ALTER ADD COLUMN IF NOT EXISTS）
- *   3. ALTER 在 CH 是轻量元数据变更，秒级完成，不重写数据
- * 以后新增字段只需 append 一行到 EXPECTED_COLUMNS，重启自动生效。
+ * ## Schema self-healing (dynamic fields)
+ * On each startup, ensureSchema() in initialize() will:
+ *   1. `DESCRIBE {table}` to get existing columns
+ *   2. compare against EXPECTED_COLUMNS and add missing columns (ALTER ADD COLUMN IF NOT EXISTS)
+ *   3. ALTER in CH is a lightweight metadata change, finishing in seconds without rewriting data
+ * To add a field later, just append one line to EXPECTED_COLUMNS; it takes effect automatically on restart.
  *
- * ## 历史 user_id 回填
- * initialize() 后异步跑 maybeBackfillUserId()：
- *   - telemetry_meta 表记录 backfill_version_user_id
- *   - 版本落后于 CURRENT_BACKFILL_VERSION 才跑
- *   - 扫 DISTINCT user_key WHERE user_id='' → 逐个查缓存 → ALTER TABLE UPDATE
- *   - 完成后写版本号，下次启动 skip
+ * ## Historical user_id backfill
+ * After initialize(), maybeBackfillUserId() runs asynchronously:
+ *   - the telemetry_meta table records backfill_version_user_id
+ *   - runs only when the version is behind CURRENT_BACKFILL_VERSION
+ *   - scan DISTINCT user_key WHERE user_id='' -> look up the cache one by one -> ALTER TABLE UPDATE
+ *   - after completion write the version number; skip on the next startup
  *
- * 参照 MemoryKnowledge/src/clickhouse-telemetry.ts 的 raw fetch 模式，无外部依赖。
+ * Follows the raw fetch pattern of MemoryKnowledge/src/clickhouse-telemetry.ts, with no external dependencies.
  */
 
 import type { PanelClickHouseConfig } from '../config/panel-config.js';
 import type { Logger } from './logger.js';
 import type { PanelUserIdResolver, UserIdResolveCtx } from './user-id-resolver.js';
 
-// ── 数据行 ──────────────────────────────────────────────────────────────────
+// ── Data row ──────────────────────────────────────────────────────────────────
 
 export interface ApiCallLogRow {
   timestamp: string;
@@ -41,39 +41,39 @@ export interface ApiCallLogRow {
   host: string;
 }
 
-// ── Schema 自愈 ─────────────────────────────────────────────────────────────
+// ── Schema self-healing ─────────────────────────────────────────────────────────────
 
 /**
- * 表期望列清单。ensureSchema 会跟 DESCRIBE 结果对比，缺啥补啥。
- * **新增字段只需 append 一行**：写清 name + ddl 片段（不含逗号），
- * ensureSchema 会拼成 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS <name> <ddl>`。
+ * List of columns the table expects. ensureSchema compares it with the DESCRIBE result and adds whatever is missing.
+ * **To add a field just append one line**: state name + a ddl fragment (without a comma),
+ * and ensureSchema assembles it into `ALTER TABLE ... ADD COLUMN IF NOT EXISTS <name> <ddl>`.
  */
 export const EXPECTED_COLUMNS: Array<{ name: string; ddl: string }> = [
-  // user_id 从表初版就在，列出来是为了防漏；ensureSchema 已存在时跳过
+  // user_id has been in the table since the first version; it is listed to guard against omission; skipped by ensureSchema when it already exists
   { name: 'user_id', ddl: "String DEFAULT ''" },
 ];
 
-/** telemetry_meta(key, value) 里存的 user_id 回填当前版本号。bump 后重跑一次。 */
+/** Current version number of the user_id backfill stored in telemetry_meta(key, value). Bump it to run once more. */
 const CURRENT_BACKFILL_VERSION = '1';
 const BACKFILL_VERSION_KEY = 'backfill_version_user_id';
 
-// ── 接口 ────────────────────────────────────────────────────────────────────
+// ── Interface ────────────────────────────────────────────────────────────────────
 
 export interface PanelApiCallTelemetry {
-  /** 建表（幂等）+ schema 自愈 + 启动定时 flush。非阻塞，失败只 warn。 */
+  /** Create the table (idempotent) + schema self-healing + start the periodic flush. Non-blocking; on failure only warns. */
   initialize(): Promise<void>;
   /**
-   * 建表 + schema 自愈完成后，可选后台跑历史 user_id 回填。
-   * 独立方法便于测试；main() 在 initialize 后 fire-and-forget 调一次。
+   * After table creation + schema self-healing completes, optionally run the historical user_id backfill in the background.
+   * A separate method for ease of testing; main() calls it once, fire-and-forget, after initialize.
    */
   runBackfillIfNeeded(resolver: PanelUserIdResolver): Promise<void>;
-  /** 记录一行。同步、不阻塞、不抛异常。 */
+  /** Record one row. Synchronous, non-blocking, never throws. */
   record(row: ApiCallLogRow): void;
-  /** 优雅关闭：flush 剩余 + 清 timer。 */
+  /** Graceful shutdown: flush the remainder + clear timers. */
   shutdown(): Promise<void>;
 }
 
-// ── NoOp 实现 ───────────────────────────────────────────────────────────────
+// ── NoOp implementation ───────────────────────────────────────────────────────────────
 
 class DisabledPanelApiCallTelemetry implements PanelApiCallTelemetry {
   async initialize(): Promise<void> { /* noop */ }
@@ -82,7 +82,7 @@ class DisabledPanelApiCallTelemetry implements PanelApiCallTelemetry {
   async shutdown(): Promise<void> { /* noop */ }
 }
 
-// ── ClickHouse 实现 ─────────────────────────────────────────────────────────
+// ── ClickHouse implementation ─────────────────────────────────────────────────────────
 
 const MAX_BUFFER_ROWS = 10_000;
 const RETAINED_BUFFER_ROWS = 5_000;
@@ -157,7 +157,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
         void this.flush();
       }
     } catch {
-      // 永不抛——审计不能影响业务
+      // Never throws -- auditing must not affect the business
     }
   }
 
@@ -167,13 +167,13 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
       this.timer = null;
     }
     await this.flush();
-    // flush 期间可能有新行入队
+    // New rows may have been enqueued during the flush
     if (this.buffer.length > 0) {
       await this.flush();
     }
   }
 
-  // ── 内部 ──
+  // ── Internals ──
 
   private async flush(): Promise<void> {
     if (this.flushing) return this.flushing;
@@ -196,7 +196,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
         error: (err as Error).message,
         dropped: rows.length,
       });
-      // 重入队到头部
+      // Re-enqueue at the head
       this.buffer.unshift(...rows);
       if (this.buffer.length > MAX_BUFFER_ROWS) {
         this.buffer = this.buffer.slice(-RETAINED_BUFFER_ROWS);
@@ -239,8 +239,8 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
   }
 
   /**
-   * Schema 自愈：对齐 EXPECTED_COLUMNS 与线上表实际列，缺啥补啥。
-   * 用于处理老实例可能缺新字段的情况——未来加字段只 append EXPECTED_COLUMNS 即可。
+   * Schema self-healing: align EXPECTED_COLUMNS with the actual columns of the online table, adding whatever is missing.
+   * Used to handle old instances that may lack new fields -- to add a field in the future just append to EXPECTED_COLUMNS.
    */
   private async ensureSchema(): Promise<void> {
     const existing = await this.queryExistingColumns();
@@ -255,7 +255,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
           ddl: col.ddl,
         });
       } catch (err) {
-        // ALTER 失败只 warn 不停：可能是权限/版本差异，不影响 INSERT
+        // ALTER failure only warns and does not stop: could be a permission/version difference, and does not affect INSERT
         this.logger.warn('[api-call-telemetry] add column failed', {
           column: col.name,
           error: (err as Error).message,
@@ -323,10 +323,10 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
   }
 
   /**
-   * 扫 DISTINCT user_key WHERE user_id='' → 每个 key 尝试解析出 user_id →
-   * ALTER TABLE UPDATE 回填。CH mutation 是异步执行、串行 merge，不阻塞查询。
+   * Scan DISTINCT user_key WHERE user_id='' -> try to resolve a user_id for each key ->
+   * ALTER TABLE UPDATE to backfill. CH mutations execute asynchronously with serial merges and do not block queries.
    *
-   * 返回：成功回填的 user_key 数（不算 verify 失败跳过的）。
+   * Returns: the number of user_keys successfully backfilled (not counting those skipped due to verify failure).
    */
   private async backfillUserIds(resolver: PanelUserIdResolver): Promise<number> {
     const rows = await this.listUnresolvedUserKeys();
@@ -339,7 +339,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
     let migrated = 0;
     for (const { instance_id, user_key } of rows) {
       if (!user_key || !instance_id) continue;
-      // 尝试从 registry 拿 gateway 参数；缺失就跳过（老实例可能已下线）
+      // Try to get gateway params from the registry; skip if missing (the old instance may be decommissioned)
       const ctx = this.pickResolverCtxForInstance(instance_id);
       if (!ctx) {
         this.logger.debug('[api-call-telemetry] backfill skip (no instance ctx)', {
@@ -348,7 +348,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
         });
         continue;
       }
-      // trigger cache refresh + wait 一小会儿让 auth/verify 回来
+      // trigger cache refresh + wait a moment for auth/verify to return
       resolver.get(user_key, ctx);
       const uid = await waitForUserId(resolver, user_key, ctx, 2000);
       if (!uid) continue;
@@ -372,8 +372,8 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
   }
 
   /**
-   * 回填要 per-instance 调 auth/verify（同一个 user_key 在不同 instance 下语义不同）。
-   * ctor 注入的 provider 兜底：registry 里找不到的老 instance_id 返回 null 跳过。
+   * The backfill needs a per-instance auth/verify call (the same user_key has different semantics under different instances).
+   * Provider fallback injected by the ctor: an old instance_id not found in the registry returns null and is skipped.
    */
   private pickResolverCtxForInstance(instanceId: string): UserIdResolveCtx | null {
     return this.instanceCtxProvider(instanceId);
@@ -426,7 +426,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
     }
   }
 
-  /** SELECT 类查询：走 GET body 返回文本。 */
+  /** SELECT-type query: goes through GET and returns text from the body. */
   private async queryText(query: string): Promise<string> {
     const url = new URL(this.config.url);
     const headers: Record<string, string> = {
@@ -448,7 +448,7 @@ class ClickHousePanelApiCallTelemetry implements PanelApiCallTelemetry {
   }
 }
 
-// ── 工厂 ────────────────────────────────────────────────────────────────────
+// ── Factory ────────────────────────────────────────────────────────────────────
 
 export function createPanelApiCallTelemetry(
   config: PanelClickHouseConfig,
@@ -462,16 +462,16 @@ export function createPanelApiCallTelemetry(
   return new ClickHousePanelApiCallTelemetry(config, logger, instanceCtxProvider, fetchImpl);
 }
 
-// ── 辅助 ────────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-/** CH SQL 字符串转义：单引号、反斜杠。避免 user_key 里出现特殊字符注入。 */
+/** CH SQL string escaping: single quotes, backslashes. Prevents injection of special characters in user_key. */
 function escapeString(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 /**
- * 等 resolver 后台 refresh 拿到 user_id。轮询 50ms 一次，超时返回 undefined。
- * 只在 backfill 场景用（真实请求路径永远走 fire-and-forget 不 wait）。
+ * Wait for the resolver's background refresh to get the user_id. Polls every 50ms and returns undefined on timeout.
+ * Only used in backfill scenarios (real request paths always go fire-and-forget without waiting).
  */
 async function waitForUserId(
   resolver: PanelUserIdResolver,
@@ -488,8 +488,8 @@ async function waitForUserId(
   return undefined;
 }
 
-/** 生成 ClickHouse DateTime64(3) 兼容的时间戳字符串 (Asia/Shanghai)。 */
+/** Generate a timestamp string compatible with ClickHouse DateTime64(3) (Asia/Shanghai). */
 export function formatClickHouseTimestamp(d: Date): string {
-  // ClickHouse DateTime64 接受 ISO 格式，timezone 由表定义决定
+  // ClickHouse DateTime64 accepts ISO format; the timezone is determined by the table definition
   return d.toISOString().replace('T', ' ').replace('Z', '');
 }

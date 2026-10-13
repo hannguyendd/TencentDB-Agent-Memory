@@ -1,14 +1,14 @@
 /**
- * ShareBar — 占比横向条（零图表依赖）。
+ * ShareBar -- horizontal share bar (zero chart dependencies).
  *
- * 泛型 + 取值函数：调用方显式提供 label / value 的读取方式，写错字段名在编译期
- * 即报错（此前用 `valueKey: string` 字符串魔法值，字段名写错只会静默显示 0）。
+ * Generic + accessor functions: the caller explicitly provides how to read label / value, so a wrong field name is a
+ * compile-time error (previously a `valueKey: string` magic string was used, where a wrong field name silently showed 0).
  */
 import { StatusTip } from 'tea-component';
 import { fmtInt, fmtPct } from '../utils/formatters';
 
 export interface ShareBarRow {
-  /** 占比（0–100），由内核 SQL round(…,2) 给出。 */
+  /** Share (0-100), given by the kernel SQL round(...,2). */
   pct: number;
 }
 
@@ -27,7 +27,7 @@ export function ShareBar<T extends ShareBarRow>({
     return <StatusTip status="empty" emptyText={emptyText} />;
   }
 
-  // 以最大占比为满格基准：单项占比偏低时也能看出相对差异。
+  // Use the largest share as the full-bar baseline: relative differences stay visible even when a single share is low.
   const max = Math.max(...rows.map((r) => r.pct || 0), 1);
 
   return (
@@ -36,7 +36,7 @@ export function ShareBar<T extends ShareBarRow>({
         const label = labelOf(row);
         const pct = row.pct || 0;
         return (
-          // label 可能为空串（CH 中该维度为空值），故与 index 组合成稳定 key
+          // label may be an empty string (the dimension is empty in CH), so combine it with index to form a stable key
           <div className="_an-sharebar-row" key={`${label}#${index}`}>
             <span className="_an-sharebar-label" title={label}>
               {label}

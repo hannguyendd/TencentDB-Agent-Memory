@@ -2,41 +2,41 @@
 # =============================================================================
 # install-openclaw-plugin.sh
 #
-# 用途：安装「OpenClaw 适配层」记忆插件（本分支 = Memory Gateway v3 客户端）。
-#       不是 Gateway 内核安装；也不是 OpenClaw 内置流程。OpenClaw 本身不会调用本脚本。
+# Purpose: install the "OpenClaw adapter layer" memory plugin (this branch = Memory Gateway v3 client).
+#          This is not a Gateway kernel installation; nor is it OpenClaw's built-in flow. OpenClaw itself does not call this script.
 #
-# 对齐说明：
-#   - 插件目录：MemoryCore/openclaw-plugin/（扁平，仅 v3；无 v2 客户端并存）
-#   - 插件 ID ：memory-tencentdb-client（与历史 ID 一致；语义已是 /v3 + isolation）
-#   - SDK     ：npm @tencentdb-agent-memory/memory-sdk-ts-v2@1.0.0-beta.2
+# Alignment notes:
+#   - Plugin directory: MemoryCore/openclaw-plugin/ (flat, v3 only; no v2 client coexisting)
+#   - Plugin ID: memory-tencentdb-client (consistent with the historical ID; the semantics are now /v3 + isolation)
+#   - SDK     : npm @tencentdb-agent-memory/memory-sdk-ts-v2@1.0.0-beta.2
 #               https://www.npmjs.com/package/@tencentdb-agent-memory/memory-sdk-ts-v2/v/1.0.0-beta.2
-#               （插件 npm install 拉取；不以仓库 file: 本地 SDK 为交付路径）
-#   - 数据面  ：v3 MemoryClient → /v3/*；COS 读文件旁路 tdai_read_file（MemoryFileReader）
-#   - 不含    ：Offload；E2E harness（scripts/e2e-openclaw-plugin*）由其它同事负责，本脚本不覆盖
+#               (pulled by the plugin's npm install; the repo's file: local SDK is not the delivery path)
+#   - Data plane: v3 MemoryClient → /v3/*; COS file-read bypass tdai_read_file (MemoryFileReader)
+#   - Excludes: Offload; the E2E harness (scripts/e2e-openclaw-plugin*) is owned by other colleagues and is not covered by this script
 #
-# 本脚本做的事（封装一层）：
-#   1. 解析 MEMORY_INSTALL_MODE=local|server，校验/补齐 endpoint、API Key、instance、isolation
-#   2. openclaw-plugin：npm install（拉 SDK）+ npm run build
-#   3. 调用：openclaw plugins install -l <PLUGIN_DIR>
-#   4. 写入 ~/.openclaw/openclaw.json（slots.memory + entries + server/isolation + hooks 门控）
+# What this script does (a wrapper layer):
+#   1. Parse MEMORY_INSTALL_MODE=local|server, validate/fill in endpoint, API Key, instance, isolation
+#   2. openclaw-plugin: npm install (pull the SDK) + npm run build
+#   3. Call: openclaw plugins install -l <PLUGIN_DIR>
+#   4. Write ~/.openclaw/openclaw.json (slots.memory + entries + server/isolation + hooks gating)
 #
-# 若只用 CLI、不用本脚本：仍可手动 openclaw plugins install -l，但需自行 npm install/build 与写配置。
+# If you use only the CLI and not this script: you can still run openclaw plugins install -l manually, but you must npm install/build and write the config yourself.
 #
-# 示例：
-#   # 本地 Gateway（默认）
+# Examples:
+#   # Local Gateway (default)
 #   bash scripts/install-openclaw-plugin.sh
 #
-#   # 远端 Gateway
+#   # Remote Gateway
 #   MEMORY_INSTALL_MODE=server \
 #     TDAI_MEMORY_ENDPOINT="https://..." TDAI_MEMORY_API_KEY="<instance-api-key>" \
 #     TDAI_MEMORY_INSTANCE_ID="<instance-id>" \
 #     TDAI_MEMORY_TEAM_ID="..." TDAI_MEMORY_AGENT_ID="..." TDAI_MEMORY_USER_ID="..." \
 #     bash scripts/install-openclaw-plugin.sh
 #
-# 设计文档：docs/design/2026-07-20-v3-plugin-install-dual-mode-design.md
+# Design doc: docs/design/2026-07-20-v3-plugin-install-dual-mode-design.md
 #
-# 说明：local/server 环境解析函数内联于此（不再使用 scripts/_lib/）。
-#       单测可 source 本脚本（仅加载函数，不执行安装主流程）。
+# Note: the local/server environment resolution functions are inlined here (scripts/_lib/ is no longer used).
+#       Unit tests can source this script (only loading the functions, without running the main install flow).
 # =============================================================================
 set -euo pipefail
 
@@ -214,13 +214,13 @@ need_cmd() { command -v "$1" >/dev/null 2>&1 || fail "missing command: $1"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# OpenClaw 适配记忆插件（v3）源码根；可用 OPENCLAW_PLUGIN_DIR 覆盖
+# Source root of the OpenClaw adapter memory plugin (v3); can be overridden with OPENCLAW_PLUGIN_DIR
 PLUGIN_DIR="${OPENCLAW_PLUGIN_DIR:-$REPO_ROOT/openclaw-plugin}"
 INSTALL_OPENCLAW="${INSTALL_OPENCLAW:-1}"
 OPENCLAW_INSTALL_FLAGS="${OPENCLAW_INSTALL_FLAGS:-}"
 WRITE_OPENCLAW_CONFIG="${WRITE_OPENCLAW_CONFIG:-1}"
 OPENCLAW_CONFIG_FILE="${OPENCLAW_CONFIG_FILE:-$HOME/.openclaw/openclaw.json}"
-# 与 openclaw.plugin.json id 一致（历史名；本分支实现为 v3）
+# Consistent with the id in openclaw.plugin.json (historical name; this branch implements v3)
 MEMORY_PLUGIN_ID="memory-tencentdb-client"
 TDAI_MEMORY_RECALL_MAX_RESULTS="${TDAI_MEMORY_RECALL_MAX_RESULTS:-5}"
 TDAI_MEMORY_INCLUDE_PERSONA="${TDAI_MEMORY_INCLUDE_PERSONA:-true}"
@@ -283,7 +283,7 @@ log "Building plugin"
 
 log "Installing linked OpenClaw v3 memory adapter plugin: $PLUGIN_DIR"
 # shellcheck disable=SC2086
-# OpenClaw 原生挂载步骤；本脚本其余部分负责 build + 写 v3 所需配置
+# OpenClaw native mounting step; the rest of this script handles build + writing the config v3 needs
 openclaw plugins install -l "$PLUGIN_DIR" $OPENCLAW_INSTALL_FLAGS
 
 if [[ "$WRITE_OPENCLAW_CONFIG" == "1" ]]; then

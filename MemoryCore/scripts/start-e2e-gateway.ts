@@ -1,10 +1,10 @@
 /**
- * 为 SDK 真机 e2e 启动一个临时 gateway。
+ * Start a temporary gateway for SDK real-machine e2e.
  *
- * 用独立端口 + 临时数据目录，不碰开发机上已在运行的服务。
- * 启动后打印 admin user_key，供 e2e 脚本使用；Ctrl-C / SIGTERM 退出时清理数据目录。
+ * Uses a separate port + a temporary data directory, without touching services already running on the dev machine.
+ * After startup it prints the admin user_key for use by e2e scripts; on exit via Ctrl-C / SIGTERM the data directory is cleaned up.
  *
- * 用法：
+ * Usage:
  *   node --import tsx scripts/start-e2e-gateway.ts [port]
  */
 import fs from "node:fs";
@@ -53,7 +53,7 @@ function post(pathname: string, body: unknown): Promise<{ status: number; body: 
 const gateway = new TdaiGateway({
   server: { port: PORT, host: "127.0.0.1", apiKey: API_KEY },
   data: { baseDir: tmpDir },
-  // 占位 LLM：本次只验证删除链路，不需要真实蒸馏
+  // Placeholder LLM: this run only verifies the deletion path, no real distillation is needed
   llm: { baseUrl: "http://localhost:1", apiKey: "test-key", model: "test-model" },
 });
 
@@ -67,7 +67,7 @@ process.on("SIGTERM", shutdown);
 
 await gateway.start();
 
-// 初始化 admin，输出 user_key 给 e2e 脚本
+// Initialize admin, output the user_key for the e2e script
 const admin = await post("/v3/internal/meta/user/init-admin", {
   username: `sdk-e2e-admin-${Date.now().toString(36)}`,
 });
@@ -78,6 +78,6 @@ console.log(`PORT=${PORT}`);
 console.log(`ADMIN_KEY=${adminKey}`);
 console.log(`DATA_DIR=${tmpDir}`);
 
-// 保持进程存活：gateway 的 HTTP server 未必能单独撑住事件循环
-// （尤其在 setsid/nohup 脱离终端后），显式挂一个 timer 直到收到信号。
+// Keep the process alive: the gateway's HTTP server alone may not keep the event loop running
+// (especially after detaching from the terminal via setsid/nohup), so explicitly hold a timer until a signal is received.
 setInterval(() => { /* keep-alive */ }, 1 << 30);

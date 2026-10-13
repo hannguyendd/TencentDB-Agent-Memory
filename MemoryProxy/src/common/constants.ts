@@ -1,35 +1,35 @@
 /**
- * 跨 handler/pipeline stage 复用的常量集合。
+ * Collection of constants reused across handler/pipeline stages.
  *
- * 提取自 handler.ts / anthropicHandler.ts / codexHandler.ts / workbuddyHandler.ts /
- * directHandler.ts / auxiliaryHandler.ts 各自一份的 `SKIP_REQUEST_HEADERS` /
- * `SKIP_RESPONSE_HEADERS` (Phase 0.4, 2026-09-28)。
+ * Extracted from the per-handler copies of `SKIP_REQUEST_HEADERS` in handler.ts / anthropicHandler.ts / codexHandler.ts / workbuddyHandler.ts /
+ * directHandler.ts / auxiliaryHandler.ts /
+ * `SKIP_RESPONSE_HEADERS` (Phase 0.4, 2026-09-28).
  *
- * ## 语义差异 (故意保留)
+ * ## Semantic differences (intentionally preserved)
  *
- * 6 个 handler 里 SKIP_REQUEST_HEADERS 有两种版本:
- *   - `SKIP_REQUEST_HEADERS_HOP_BY_HOP` (4 项): handler/direct/aux 用, 只过
- *      RFC 7230 hop-by-hop 头
- *   - `SKIP_REQUEST_HEADERS_WITH_INTERNAL` (5 项): anthropic/codex/wb 用,
- *      在 hop-by-hop 基础上多加 `x-tdai-user-key` (proxy 内部身份头)
+ * Among the 6 handlers, SKIP_REQUEST_HEADERS has two versions:
+ *   - `SKIP_REQUEST_HEADERS_HOP_BY_HOP` (4 items): used by handler/direct/aux, filters only
+ *      the RFC 7230 hop-by-hop headers
+ *   - `SKIP_REQUEST_HEADERS_WITH_INTERNAL` (5 items): used by anthropic/codex/wb,
+ *      adds `x-tdai-user-key` (the proxy's internal identity header) on top of hop-by-hop
  *
- * ⚠️ **潜在 bug (待 Phase 4 迁移时统一修复)**:
- *    direct/aux 用 HOP_BY_HOP 版本, 意味着如果客户端 (unlikely 场景) 主动
- *    带 `x-tdai-user-key` header, direct/aux 会把它透传给上游, 泄漏 proxy
- *    内部身份到外部 API。Phase 4.1 direct/aux 切换进 pipeline 时统一改用
- *    WITH_INTERNAL 版本, 顺手修掉这个 latent leak。当前 Phase 0 保持 backward
- *    compat, 不改行为。
+ * WARNING: **latent bug (to be fixed uniformly during the Phase 4 migration)**:
+ *    direct/aux use the HOP_BY_HOP version, which means that if a client (unlikely scenario) deliberately
+ *    sends the `x-tdai-user-key` header, direct/aux would pass it through to the upstream, leaking the proxy's
+ *    internal identity to the external API. When Phase 4.1 switches direct/aux into the pipeline, they will uniformly use the
+ *    WITH_INTERNAL version, fixing this latent leak along the way. The current Phase 0 keeps backward
+ *    compat and does not change behavior.
  *
- * ## 响应头 (完全一致)
+ * ## Response headers (completely identical)
  *
- * SKIP_RESPONSE_HEADERS 4 个 (content-length, content-encoding, transfer-encoding,
- * connection) 在 6 个 handler 里字段一致, 只有顺序略不同 —— 语义等价, 统一成
- * 一份即可。
+ * The 4 SKIP_RESPONSE_HEADERS (content-length, content-encoding, transfer-encoding,
+ * connection) are identical across the 6 handlers, differing only slightly in order -- semantically equivalent, so they are unified into
+ * a single copy.
  */
 
 /**
- * 请求头黑名单 — hop-by-hop 版本 (4 项)。
- * 原用户: handler.ts / directHandler.ts / auxiliaryHandler.ts。
+ * Request header blacklist -- hop-by-hop version (4 items).
+ * Original users: handler.ts / directHandler.ts / auxiliaryHandler.ts.
  */
 export const SKIP_REQUEST_HEADERS_HOP_BY_HOP: ReadonlySet<string> = new Set([
   "host",
@@ -39,9 +39,9 @@ export const SKIP_REQUEST_HEADERS_HOP_BY_HOP: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 请求头黑名单 — hop-by-hop + proxy 内部身份头 (5 项)。
- * 原用户: anthropicHandler.ts / codexHandler.ts / workbuddyHandler.ts。
- * `x-tdai-user-key` 是 proxy 内部 session-init 才用的头, 绝不允许透传上游。
+ * Request header blacklist -- hop-by-hop + proxy internal identity header (5 items).
+ * Original users: anthropicHandler.ts / codexHandler.ts / workbuddyHandler.ts.
+ * `x-tdai-user-key` is a header used only by the proxy's internal session-init and must never be passed through upstream.
  */
 export const SKIP_REQUEST_HEADERS_WITH_INTERNAL: ReadonlySet<string> = new Set([
   "host",
@@ -52,9 +52,9 @@ export const SKIP_REQUEST_HEADERS_WITH_INTERNAL: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 响应头黑名单 (4 项, 6 个 handler 完全一致)。
- * 剥掉这些是因为 SSE + chunked encoding 场景下 content-length 会跟实际 body
- * 长度对不上, 客户端解析会报错。
+ * Response header blacklist (4 items, completely identical across the 6 handlers).
+ * They are stripped because in SSE + chunked encoding scenarios content-length would not match the actual body
+ * length, and the client would report a parse error.
  */
 export const SKIP_RESPONSE_HEADERS: ReadonlySet<string> = new Set([
   "content-length",
@@ -64,8 +64,8 @@ export const SKIP_RESPONSE_HEADERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * 复制响应头, 剥掉 SKIP_RESPONSE_HEADERS 里的字段。
- * 提取自 direct/utility/codex/wb runner 各一份完全相同的实现 (Phase 4 stage 化)。
+ * Copy response headers, stripping the fields in SKIP_RESPONSE_HEADERS.
+ * Extracted from the identical implementations in each of the direct/utility/codex/wb runners (Phase 4 stage-ification).
  */
 export function filterResponseHeaders(source: Headers): Headers {
   const out = new Headers();

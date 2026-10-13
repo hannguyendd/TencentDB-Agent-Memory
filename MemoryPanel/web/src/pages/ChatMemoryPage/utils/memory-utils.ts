@@ -1,6 +1,6 @@
 /**
- * memory-utils —— Chat Memory 页的常量、纯工具函数与类型。
- * 从 ChatMemoryPanel.tsx 拆出。
+ * memory-utils -- constants, pure utility functions and types of the Chat Memory page.
+ * Split out of ChatMemoryPanel.tsx.
  */
 import { ApiError, type ChatMemoryLayerItem } from '@/lib/teamApi';
 import type { MemoryBlock, MemoryLayer } from '../constants/types';
@@ -10,20 +10,20 @@ export function layerPageSize(layer: MemoryLayer): number {
   return LAYER_PAGE_SIZE[layer];
 }
 
-/** 详情页时间筛选器范围，start / end 为 ISO8601 字符串 */
+/** Detail page time filter range; start / end are ISO8601 strings */
 export interface TimeRange {
   start: string;
   end: string;
 }
 
-/** 详情页时间筛选器默认范围：当前时间 ~ 前一天 */
+/** Default detail page time filter range: now ~ previous day */
 export function defaultTimeRange(): TimeRange {
   const end = new Date();
   const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
-/** 后端探测到「筛选范围过大，VDB 无法支撑」时返回的业务错误 */
+/** Business error returned when the backend detects "filter range too large, VDB cannot support it" */
 export function isRangeTooLargeError(e: unknown): boolean {
   return e instanceof ApiError && e.message === 'RANGE_TOO_LARGE';
 }
@@ -40,9 +40,9 @@ export function mapLayerItem(i: ChatMemoryLayerItem) {
 }
 
 /**
- * 剥掉 scenario（L2）markdown 的 META 头。
- * scenario/read 返回的正文带 `-----META-START-----...-----META-END-----`
- * 系统字段头；编辑框只展示纯正文，写回时后端会用现有 META 自动重建。
+ * Strip the META header from scenario (L2) markdown.
+ * The body returned by scenario/read carries a `-----META-START-----...-----META-END-----`
+ * system field header; the edit box shows only the plain body, and on write-back the backend rebuilds it automatically with the existing META.
  */
 export function stripScenarioMeta(content: string): string {
   return content
@@ -50,9 +50,9 @@ export function stripScenarioMeta(content: string): string {
     .replace(/^\n+/, '');
 }
 
-// 由列表接口的 layer_counts 构造初始 layerCounts：只保留 >0 的真实计数，
-// 其余留 undefined＝「未知」。徽章据此显示占位，避免把「未加载」误显示成「0」，
-// 也不再为拿计数而预请求。后端 layer_counts 落地真实值后此处会自动直接采用。
+// Build the initial layerCounts from the list endpoint's layer_counts: keep only real counts >0,
+// leaving the rest undefined = "unknown". Badges show a placeholder accordingly, avoiding showing "not loaded" as "0",
+// and no longer prefetching just to get counts. Once the backend layer_counts carries real values, they are adopted here automatically.
 export function buildInitialLayerCounts(lc: {
   L0_messages: number;
   L1: number;
@@ -68,28 +68,28 @@ export function buildInitialLayerCounts(lc: {
 }
 
 /**
- * 复制文本到剪贴板，返回是否成功。
+ * Copy text to the clipboard; returns whether it succeeded.
  *
- * navigator.clipboard 仅在安全上下文（HTTPS / localhost）可用；面板若经
- * http:// + 内网 IP 访问，navigator.clipboard 为 undefined，会导致复制失败。
- * 因此优先用 Clipboard API，不可用时降级到 document.execCommand('copy')
- * 的临时 textarea 方案，兼容非安全上下文。
+ * navigator.clipboard is available only in secure contexts (HTTPS / localhost); if the panel is accessed via
+ * http:// + an intranet IP, navigator.clipboard is undefined and copying fails.
+ * So the Clipboard API is preferred, and when unavailable it degrades to the document.execCommand('copy')
+ * temporary textarea approach, compatible with non-secure contexts.
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
-  // 优先：安全上下文下的 Clipboard API
+  // Preferred: Clipboard API in a secure context
   if (navigator.clipboard && window.isSecureContext) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // 落到下方 execCommand 兜底
+      // Fall through to the execCommand fallback below
     }
   }
-  // 兜底：非安全上下文（http + IP）用 execCommand
+  // Fallback: in a non-secure context (http + IP) use execCommand
   try {
     const ta = document.createElement('textarea');
     ta.value = text;
-    // 移出视口、避免滚动与聚焦跳动
+    // Move off-screen to avoid scrolling and focus jumping
     ta.style.position = 'fixed';
     ta.style.top = '-9999px';
     ta.style.left = '-9999px';

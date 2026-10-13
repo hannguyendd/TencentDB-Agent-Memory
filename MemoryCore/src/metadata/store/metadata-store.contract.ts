@@ -1,8 +1,8 @@
 /**
- * IMetadataStore 契约测试套件 —— 与后端无关。
+ * IMetadataStore contract test suite -- backend-agnostic.
  *
- * 对应实施计划「存储切换测试」：同一套用例分别跑在 SQLite / MongoDB 上，
- * 保证不同后端行为一致。SQLite/MongoDB 各自的 *.test.ts 调用 runMetadataStoreContract。
+ * Corresponds to the implementation plan's "storage switch test": the same set of cases runs on both SQLite / MongoDB,
+ * ensuring consistent behavior across backends. Each of the SQLite/MongoDB *.test.ts calls runMetadataStoreContract.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { DuplicateUserKeyError, type IMetadataStore } from "./interface.js";
@@ -12,7 +12,7 @@ import { DEFAULT_PAGINATION } from "../pagination.js";
 import { newExternalAssetId } from "../utils/external-asset-id.js";
 import { buildChatMemoryAssetId } from "../utils/chat-memory-asset.js";
 
-/** Fixture: 常用 supported-agents 全集,供 seed / list 测试用。 */
+/** Fixture: the common full set of supported-agents, for seed / list tests. */
 const TEST_SUPPORTED_AGENTS: SupportedAgent[] = [
   { agent_source: "claude-code", protocol: "anthropic", display_name: "Claude Code" },
   { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CodeBuddy" },
@@ -41,9 +41,9 @@ function newAssetId(assetType: "skill" | "llm_wiki" | "code_graph" | "chat_memor
 }
 
 /**
- * @param name 后端名称（用于 describe 标题）
- * @param makeStore 每个用例前构造一个干净 store
- * @param teardown 用例后清理
+ * @param name backend name (used for the describe title)
+ * @param makeStore construct a clean store before each case
+ * @param teardown cleanup after each case
  */
 export function runMetadataStoreContract(
   name: string,
@@ -64,7 +64,7 @@ export function runMetadataStoreContract(
 
     // ── User ──
     describe("User", () => {
-      it("createUser 自动生成 user_id / 默认 key 并可按 id/key 查回", async () => {
+      it("createUser auto-generates user_id / default key and can be looked up by id/key", async () => {
         const u = await store.createUser(uniqueUserInput());
         expect(u.user_id).toMatch(/^usr-/);
         const defaultKey = await store.getDefaultUserKey(u.user_id);
@@ -73,37 +73,37 @@ export function runMetadataStoreContract(
         expect(await store.getUserByKey(defaultKey!.key_value)).toMatchObject({ user_id: u.user_id });
       });
 
-      it("createUser 写入 meta_user_keys 默认行", async () => {
+      it("createUser writes the default row of meta_user_keys", async () => {
         const u = await store.createUser(uniqueUserInput());
         const keys = (await store.listUserKeys(u.user_id, P)).items;
         const defaultKey = await store.getDefaultUserKey(u.user_id);
         expect(keys.some((k) => k.is_default && k.key_value === defaultKey?.key_value)).toBe(true);
       });
 
-      it("getUserByUsername 命中", async () => {
+      it("getUserByUsername hit", async () => {
         const u = await store.createUser(uniqueUserInput({ username: "alice", auth_provider: "local" }));
         const found = await store.getUserByUsername("local", "alice");
         expect(found?.user_id).toBe(u.user_id);
       });
 
-      it("updateUser 局部更新", async () => {
+      it("updateUser partial update", async () => {
         const u = await store.createUser(uniqueUserInput());
         const updated = await store.updateUser(u.user_id, { display_name: "New Name" });
         expect(updated?.display_name).toBe("New Name");
       });
 
-      it("getUserById 不存在返回 null", async () => {
+      it("getUserById returns null when not found", async () => {
         expect(await store.getUserById("usr-nope0000")).toBeNull();
       });
 
-      it("deleteUsers 批量删除", async () => {
+      it("deleteUsers batch delete", async () => {
         const u = await store.createUser(uniqueUserInput());
         const res = await store.deleteUsers([u.user_id, "usr-missing0"]);
         expect(res.deleted_ids).toContain(u.user_id);
         expect(await store.getUserById(u.user_id)).toBeNull();
       });
 
-      it("createUser 指定 default_key_value：以该值写库并可按 key 反查", async () => {
+      it("createUser with default_key_value specified: writes with that value and can be reverse-looked-up by key", async () => {
         const key = `sk-mem-explicit-${Math.random().toString(36).slice(2)}`;
         const u = await store.createUser(uniqueUserInput({ default_key_value: key }));
         const defaultKey = await store.getDefaultUserKey(u.user_id);
@@ -111,19 +111,19 @@ export function runMetadataStoreContract(
         expect(await store.getUserByKey(key)).toMatchObject({ user_id: u.user_id });
       });
 
-      it("createUser 同 default_key_value 二次调用抛 DuplicateUserKeyError（key_value UNIQUE 兜底并发）", async () => {
+      it("createUser called twice with the same default_key_value throws DuplicateUserKeyError (key_value UNIQUE backstops concurrency)", async () => {
         const key = `sk-mem-dup-${Math.random().toString(36).slice(2)}`;
         await store.createUser(uniqueUserInput({ default_key_value: key }));
-        // sqlite adapter 是同步方法：包一层 async fn 让同步抛的错也走 rejects matcher。
+        // The sqlite adapter is a sync method: wrap it in an async fn so synchronously thrown errors also go through the rejects matcher.
         await expect(
           (async () => store.createUser(uniqueUserInput({ default_key_value: key })))(),
         ).rejects.toBeInstanceOf(DuplicateUserKeyError);
       });
     });
 
-    // ── Team（自动 admin 成员）──
+    // ── Team (automatic admin member) ──
     describe("Team", () => {
-      it("createTeam 自动把 owner 加为 admin 成员（原子）", async () => {
+      it("createTeam automatically adds the owner as an admin member (atomic)", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         expect(team.team_id).toMatch(/^team-/);
@@ -137,7 +137,7 @@ export function runMetadataStoreContract(
         });
       });
 
-      it("listTeamsByUser 返回用户所属 team", async () => {
+      it("listTeamsByUser returns the teams the user belongs to", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const t1 = await store.createTeam(teamInput(owner.user_id, { name: "T1" }));
         const t2 = await store.createTeam(teamInput(owner.user_id, { name: "T2" }));
@@ -210,7 +210,7 @@ export function runMetadataStoreContract(
         expect((await store.listAgentsByOwner(owner.user_id, P)).items.map((a) => a.agent_id)).toContain(agent.agent_id);
       });
 
-      it("listAgentsByTeam 支持 status 过滤", async () => {
+      it("listAgentsByTeam supports status filtering", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const a1 = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A1" });
@@ -219,26 +219,26 @@ export function runMetadataStoreContract(
         expect(active.map((a) => a.agent_id)).toEqual([a1.agent_id]);
       });
 
-      it("listAgentsByTeam 支持 owner_user_id 过滤（组合 team_id）", async () => {
+      it("listAgentsByTeam supports owner_user_id filtering (combined with team_id)", async () => {
         const u1 = await store.createUser(uniqueUserInput());
         const u2 = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(u1.user_id));
         const a1 = await store.createAgent({ team_id: team.team_id, owner_user_id: u1.user_id, name: "A1" });
         const a2 = await store.createAgent({ team_id: team.team_id, owner_user_id: u2.user_id, name: "A2" });
 
-        // team 全量
+        // team full set
         const all = (await store.listAgentsByTeam(team.team_id, P)).items;
         expect(all.map((a) => a.agent_id).sort()).toEqual([a1.agent_id, a2.agent_id].sort());
 
-        // team + owner=u1 → 只返 u1 的
+        // team + owner=u1 → only u1's
         const mine = (await store.listAgentsByTeam(team.team_id, P, { owner_user_id: u1.user_id })).items;
         expect(mine.map((a) => a.agent_id)).toEqual([a1.agent_id]);
 
-        // team + owner=u2 → 只返 u2 的
+        // team + owner=u2 → only u2's
         const theirs = (await store.listAgentsByTeam(team.team_id, P, { owner_user_id: u2.user_id })).items;
         expect(theirs.map((a) => a.agent_id)).toEqual([a2.agent_id]);
 
-        // team + owner + status 组合
+        // team + owner + status combination
         await store.createAgent({ team_id: team.team_id, owner_user_id: u1.user_id, name: "A1-inactive", status: "inactive" });
         const activeMine = (
           await store.listAgentsByTeam(team.team_id, P, { owner_user_id: u1.user_id, status: "active" })
@@ -247,9 +247,9 @@ export function runMetadataStoreContract(
       });
     });
 
-    // ── Task（含 linkAgents 原子）──
+    // ── Task (including atomic linkAgents) ──
     describe("Task", () => {
-      it("createTask 含 linked_agents 原子写入 task + task_agents", async () => {
+      it("createTask with linked_agents atomically writes task + task_agents", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -278,7 +278,7 @@ export function runMetadataStoreContract(
         expect((await store.listTaskAgents(task.task_id, P)).items).toHaveLength(0);
       });
 
-      it("listTasksByTeam 支持 status 过滤", async () => {
+      it("listTasksByTeam supports status filtering", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const t1 = await store.createTask({ team_id: team.team_id, creator_user_id: owner.user_id, title: "Run" });
@@ -287,7 +287,7 @@ export function runMetadataStoreContract(
         expect(running.map((t) => t.task_id)).toEqual([t1.task_id]);
       });
 
-      it("listTasks 按 creator_user_id 跨 team 查询", async () => {
+      it("listTasks queries across teams by creator_user_id", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const other = await store.createUser(uniqueUserInput());
         const team1 = await store.createTeam(teamInput(owner.user_id));
@@ -315,7 +315,7 @@ export function runMetadataStoreContract(
         return { owner, team, agent, task };
       }
 
-      it("PL-C1 append 写入；字段完整", async () => {
+      it("PL-C1 append write; fields complete", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const log = await store.appendParticipationLog({
           team_id: team.team_id,
@@ -339,7 +339,7 @@ export function runMetadataStoreContract(
         expect(log.id).toBeTruthy();
       });
 
-      it("PL-C2 list 按 team_id；created_at DESC", async () => {
+      it("PL-C2 list by team_id; created_at DESC", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         await store.appendParticipationLog({
           team_id: team.team_id,
@@ -363,7 +363,7 @@ export function runMetadataStoreContract(
         ]);
       });
 
-      it("PL-C3 list 叠加 task_id / agent_id / user_id 过滤", async () => {
+      it("PL-C3 list with stacked task_id / agent_id / user_id filters", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const other = await store.createUser(uniqueUserInput());
         await store.addTeamMember({ team_id: team.team_id, user_id: other.user_id });
@@ -411,7 +411,7 @@ export function runMetadataStoreContract(
         expect(page.items[0].created_at).toBe("2026-07-15T00:00:00.000Z");
       });
 
-      it("PL-C5 list dedupe=true：同 user 多条 → 仅返回最新一条", async () => {
+      it("PL-C5 list dedupe=true: multiple entries of the same user → return only the latest one", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const older = await store.appendParticipationLog({
           team_id: team.team_id, task_id: task.task_id, agent_id: agent.agent_id, user_id: owner.user_id,
@@ -427,7 +427,7 @@ export function runMetadataStoreContract(
         expect(page.items[0].id).not.toBe(older.id);
       });
 
-      it("PL-C6 list dedupe=true 的 total = 去重用户数", async () => {
+      it("PL-C6 total of list dedupe=true = number of deduped users", async () => {
         const { owner, team, agent, task } = await seedParticipationFixture();
         const other = await store.createUser(uniqueUserInput());
         await store.addTeamMember({ team_id: team.team_id, user_id: other.user_id });
@@ -465,7 +465,7 @@ export function runMetadataStoreContract(
         return { owner, team, asset };
       }
 
-      it("createAsset 默认值 + get", async () => {
+      it("createAsset defaults + get", async () => {
         const { asset } = await seedAsset();
         expect(asset.asset_id).toMatch(/^skl-/);
         expect(asset.version).toBe(1);
@@ -474,7 +474,7 @@ export function runMetadataStoreContract(
         expect(await store.getAssetById(asset.asset_id)).toMatchObject({ asset_id: asset.asset_id });
       });
 
-      it("touchAssetUsage 累加 usage_count 并更新 last_used_at", async () => {
+      it("touchAssetUsage accumulates usage_count and updates last_used_at", async () => {
         const { asset } = await seedAsset();
         await store.touchAssetUsage(asset.asset_id);
         await store.touchAssetUsage(asset.asset_id);
@@ -483,7 +483,7 @@ export function runMetadataStoreContract(
         expect(got?.last_used_at).toBeTruthy();
       });
 
-      it("listAssetsByTeam 支持 asset_type / status 过滤", async () => {
+      it("listAssetsByTeam supports asset_type / status filtering", async () => {
         const { team, owner } = await seedAsset();
         await store.createAsset({ asset_id: newAssetId("llm_wiki"), team_id: team.team_id, asset_type: "llm_wiki", name: "Wiki", owner_user_id: owner.user_id, source_type: "manual" });
         const skills = (await store.listAssetsByTeam(team.team_id, P, { asset_type: "skill" })).items;
@@ -491,21 +491,21 @@ export function runMetadataStoreContract(
         expect(skills).toHaveLength(1);
       });
 
-      it("deleteAssets 物理删除（行消失）+ 幂等", async () => {
+      it("deleteAssets physical delete (row disappears) + idempotent", async () => {
         const { asset } = await seedAsset();
         const res = await store.deleteAssets([asset.asset_id]);
         expect(res.deleted_ids).toContain(asset.asset_id);
         expect(await store.getAssetById(asset.asset_id)).toBeNull();
-        // 二次删除：已不存在视为成功
+        // Second delete: already absent counts as success
         const again = await store.deleteAssets([asset.asset_id]);
         expect(again.deleted_ids).toContain(asset.asset_id);
         expect(again.failed).toEqual([]);
       });
     });
 
-    // ── AgentFixedAsset（全量替换）──
+    // ── AgentFixedAsset (full replace) ──
     describe("AgentFixedAsset", () => {
-      it("setAgentFixedAssets 全量替换 + list", async () => {
+      it("setAgentFixedAssets full replace + list", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -518,7 +518,7 @@ export function runMetadataStoreContract(
         ]);
         expect((await store.listAgentFixedAssets(agent.agent_id, P)).items).toHaveLength(2);
 
-        // 全量替换为只有 a1
+        // Full replace with only a1
         await store.setAgentFixedAssets(agent.agent_id, [
           { asset_id: a1.asset_id, asset_type: "skill", priority: 10, created_by: owner.user_id },
         ]);
@@ -527,7 +527,7 @@ export function runMetadataStoreContract(
         expect(after[0]).toMatchObject({ asset_id: a1.asset_id, priority: 10 });
       });
 
-      it("setAgentFixedAssets 传空数组清空绑定", async () => {
+      it("setAgentFixedAssets with an empty array clears bindings", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -537,7 +537,7 @@ export function runMetadataStoreContract(
         expect((await store.listAgentFixedAssets(agent.agent_id, P)).items).toHaveLength(0);
       });
 
-      it("summarizeAgentFixedAssetsByAgents 按 type 聚合 + asset_id 过滤", async () => {
+      it("summarizeAgentFixedAssetsByAgents aggregates by type + asset_id filter", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const a1 = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A1" });
@@ -600,7 +600,7 @@ export function runMetadataStoreContract(
 
     // ── Delete Cascade (N1) ──
     describe("Delete Cascade", () => {
-      it("deleteUsers 级联清理 team_members + ACL", async () => {
+      it("deleteUsers cascades cleanup of team_members + ACL", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const asset = await store.createAsset({ asset_id: newAssetId(), team_id: team.team_id, asset_type: "skill", name: "S", owner_user_id: owner.user_id, source_type: "manual" });
@@ -614,7 +614,7 @@ export function runMetadataStoreContract(
         expect((await store.listAclBySubject("user", owner.user_id, P)).items).toHaveLength(0);
       });
 
-      it("deleteAgents 级联清理 task_agents + fixed_assets", async () => {
+      it("deleteAgents cascades cleanup of task_agents + fixed_assets", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -628,7 +628,7 @@ export function runMetadataStoreContract(
         expect((await store.listAgentFixedAssets(agent.agent_id, P)).items).toHaveLength(0);
       });
 
-      it("deleteAgents 归档自身 chat_memory 并清理其它 agent 的借入绑定", async () => {
+      it("deleteAgents archives its own chat_memory and cleans up other agents' borrowed bindings", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agentA = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -670,7 +670,7 @@ export function runMetadataStoreContract(
         expect(rows).toEqual([{ agent_id: agentB.agent_id, asset_type: "chat_memory", cnt: 1 }]);
       });
 
-      it("deleteTasks 级联清理 task_agents", async () => {
+      it("deleteTasks cascades cleanup of task_agents", async () => {
         const owner = await store.createUser(uniqueUserInput());
         const team = await store.createTeam(teamInput(owner.user_id));
         const agent = await store.createAgent({ team_id: team.team_id, owner_user_id: owner.user_id, name: "A" });
@@ -682,9 +682,9 @@ export function runMetadataStoreContract(
       });
     });
 
-    // ── v3.1：username / external_id 无唯一约束 ──
+    // ── v3.1: no unique constraint on username / external_id ──
     describe("User uniqueness (v3.1)", () => {
-      it("相同 username 可重复创建", async () => {
+      it("the same username can be created repeatedly", async () => {
         const username = `dup_${Math.random()}`;
         const a = await Promise.resolve(store.createUser(uniqueUserInput({ username })));
         const b = await Promise.resolve(
@@ -703,7 +703,7 @@ export function runMetadataStoreContract(
           module: "quota",
           param_name: "max_users_per_instance",
           param_value: "500",
-          description: "实例用户上限",
+          description: "Instance user limit",
         });
         expect(entity.id).toBeGreaterThan(0);
         expect(entity.scope).toBe("global");
@@ -724,7 +724,7 @@ export function runMetadataStoreContract(
           module: "quota",
           param_name: "max_teams_per_instance",
           param_value: "100",
-          description: "实例团队上限",
+          description: "Instance team limit",
         });
         const updated = await store.upsertConfigParam({
           scope: "global",
@@ -732,10 +732,10 @@ export function runMetadataStoreContract(
           module: "quota",
           param_name: "max_teams_per_instance",
           param_value: "200",
-          description: "实例团队上限（已调整）",
+          description: "Instance team limit (adjusted)",
         });
         expect(updated.param_value).toBe("200");
-        expect(updated.description).toBe("实例团队上限（已调整）");
+        expect(updated.description).toBe("Instance team limit (adjusted)");
       });
 
       it("upsertConfigParam inserts user-level param", async () => {
@@ -746,7 +746,7 @@ export function runMetadataStoreContract(
           module: "asset_type",
           param_name: "skill.enabled",
           param_value: "0",
-          description: "Skill 开关",
+          description: "Skill switch",
         });
         expect(entity.scope).toBe("user");
         expect(entity.user_id).toBe(user.user_id);
@@ -765,7 +765,7 @@ export function runMetadataStoreContract(
           module: "asset_type",
           param_name: "skill.enabled",
           param_value: "0",
-          description: "Skill 开关",
+          description: "Skill switch",
         });
         const updated = await store.upsertConfigParam({
           scope: "user",
@@ -773,7 +773,7 @@ export function runMetadataStoreContract(
           module: "asset_type",
           param_name: "skill.enabled",
           param_value: "1",
-          description: "Skill 开关",
+          description: "Skill switch",
         });
         expect(updated.param_value).toBe("1");
       });
@@ -859,16 +859,16 @@ export function runMetadataStoreContract(
       });
     });
 
-    // ── InstanceUpstreamConfig (v2 模型组) ─────────────────────────────────
+    // ── InstanceUpstreamConfig (v2 model group) ─────────────────────────────────
 
     describe("InstanceUpstreamConfig v2 (model groups)", () => {
       describe("listInstanceUpstreamGroups + seed", () => {
-        it("空表 + 不传 supported → 返回空数组,不触发 seed", async () => {
+        it("empty table + no supported passed → returns an empty array, does not trigger seed", async () => {
           const rows = await store.listInstanceUpstreamGroups();
           expect(rows).toEqual([]);
         });
 
-        it("空表 + 传 supported → 自动 seed default 行(agents=全集, enabled=true)", async () => {
+        it("empty table + supported passed → automatically seeds a default row (agents=full set, enabled=true)", async () => {
           const rows = await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           expect(rows.length).toBe(1);
           const d = rows[0]!;
@@ -884,7 +884,7 @@ export function runMetadataStoreContract(
           expect(d.version).toBe(1);
         });
 
-        it("seed 幂等:连续两次调用 list,只 seed 一次", async () => {
+        it("seed is idempotent: calling list twice in a row seeds only once", async () => {
           const first = await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const second = await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           expect(second.length).toBe(1);
@@ -892,7 +892,7 @@ export function runMetadataStoreContract(
           expect(second[0]!.version).toBe(first[0]!.version);
         });
 
-        it("list 排序:default 首、custom 次、extraction 末", async () => {
+        it("list ordering: default first, custom next, extraction last", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           await store.createInstanceUpstreamGroup({
             group_type: "extraction",
@@ -901,7 +901,7 @@ export function runMetadataStoreContract(
             base_url: "https://ext.example.com",
             api_key: "sk-ext",
           });
-          // 先把 codebuddy 从 default 挪出,才能 create custom
+          // First move codebuddy out of default so a custom can be created
           const defaultRow = (await store.listInstanceUpstreamGroups()).find((r) => r.group_type === "default")!;
           await store.updateInstanceUpstreamGroup({
             group_id: defaultRow.group_id,
@@ -921,7 +921,7 @@ export function runMetadataStoreContract(
           expect(rows.map((r) => r.group_type)).toEqual(["default", "custom", "extraction"]);
         });
 
-        it("list 只返回 default 后,不触发重复 seed", async () => {
+        it("after list returns only default, no duplicate seed is triggered", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const firstDefaultId = (await store.listInstanceUpstreamGroups())[0]!.group_id;
           const rows = await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
@@ -929,15 +929,15 @@ export function runMetadataStoreContract(
           expect(rows[0]!.group_id).toBe(firstDefaultId);
         });
 
-        it("list filter group_type='custom' 只返回 custom 行(seed 触发但不返回 default)", async () => {
+        it("list filter group_type='custom' returns only custom rows (seed is triggered but default is not returned)", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const rows = await store.listInstanceUpstreamGroups({ group_type: "custom" });
           expect(rows).toEqual([]);
         });
       });
 
-      describe("ensureDefaultSeeded (存量兜底)", () => {
-        it("空表 + 传 supported → 与 list-seed 语义等价 (一条 default 行)", async () => {
+      describe("ensureDefaultSeeded (existing-instance safety net)", () => {
+        it("empty table + supported passed → semantically equivalent to list-seed (one default row)", async () => {
           await store.ensureDefaultSeeded(TEST_SUPPORTED_AGENTS);
           const rows = await store.listInstanceUpstreamGroups();
           expect(rows.length).toBe(1);
@@ -947,33 +947,33 @@ export function runMetadataStoreContract(
           expect(rows[0]!.mode).toBe("official");
         });
 
-        it("supported 为空 → no-op,不 seed", async () => {
+        it("supported empty → no-op, no seed", async () => {
           await store.ensureDefaultSeeded([]);
           const rows = await store.listInstanceUpstreamGroups();
           expect(rows).toEqual([]);
         });
 
-        it("表内已有 default → 幂等,不改行", async () => {
+        it("default already in the table → idempotent, row unchanged", async () => {
           await store.ensureDefaultSeeded(TEST_SUPPORTED_AGENTS);
           const before = (await store.listInstanceUpstreamGroups())[0]!;
           await store.ensureDefaultSeeded(TEST_SUPPORTED_AGENTS);
           await store.ensureDefaultSeeded(TEST_SUPPORTED_AGENTS);
           const after = (await store.listInstanceUpstreamGroups())[0]!;
           expect(after.group_id).toBe(before.group_id);
-          expect(after.version).toBe(before.version); // 不走 diff-append,version 不变
+          expect(after.version).toBe(before.version); // does not go through diff-append, version unchanged
         });
 
-        it("与 list-seed 互操作:先 ensureDefaultSeeded 再 list-seed 也只 1 行", async () => {
+        it("interoperates with list-seed: ensureDefaultSeeded first then list-seed still gives only 1 row", async () => {
           await store.ensureDefaultSeeded(TEST_SUPPORTED_AGENTS);
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const rows = await store.listInstanceUpstreamGroups();
           expect(rows.length).toBe(1);
         });
 
-        it("create custom 前调用 ensureDefaultSeeded → default 存在 + custom 全域唯一校验对上", async () => {
-          // 模拟服务层写入路径:先 seed 再 create custom
+        it("calling ensureDefaultSeeded before create custom → default exists + the custom global-uniqueness check lines up", async () => {
+          // Simulate the service-layer write path: seed first, then create custom
           await store.ensureDefaultSeeded(TEST_SUPPORTED_AGENTS);
-          // default agents 包含 codebuddy;custom 不能再占用它
+          // default agents contains codebuddy; custom cannot occupy it again
           await expect(async () =>
             store.createInstanceUpstreamGroup({
               group_type: "custom",
@@ -984,12 +984,12 @@ export function runMetadataStoreContract(
               api_key: "sk-a",
             }),
           ).rejects.toThrow(/agents.*overlap/i);
-          // 未占用的 codex 不会被 overlap 阻断...等等,默认 8-agent 全占,应改为先挪出
+          // An unoccupied codex would not be blocked by overlap... wait, the default 8-agent set is all taken, should instead move one out first
           const d = (await store.listInstanceUpstreamGroups())[0]!;
           await store.updateInstanceUpstreamGroup({
             group_id: d.group_id,
             expected_group_type: "default",
-            agents: ["claude-code", "codex"], // 让出 codebuddy
+            agents: ["claude-code", "codex"], // give up codebuddy
           });
           const custom = await store.createInstanceUpstreamGroup({
             group_type: "custom",
@@ -1006,7 +1006,7 @@ export function runMetadataStoreContract(
       });
 
       describe("createInstanceUpstreamGroup", () => {
-        it("create custom 组返回带 grp- 前缀的 group_id", async () => {
+        it("create custom group returns a group_id with the grp- prefix", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "Team DS",
@@ -1022,7 +1022,7 @@ export function runMetadataStoreContract(
           expect(row.version).toBe(1);
         });
 
-        it("create extraction 行返回带 ext- 前缀", async () => {
+        it("create extraction row returns one with the ext- prefix", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "extraction",
             name: EXTRACTION_GROUP_NAME,
@@ -1034,7 +1034,7 @@ export function runMetadataStoreContract(
           expect(row.agents).toEqual([]);
         });
 
-        it("create 第二个 extraction 行 → 抛 extraction_already_exists", async () => {
+        it("creating a second extraction row → throws extraction_already_exists", async () => {
           await store.createInstanceUpstreamGroup({
             group_type: "extraction",
             name: EXTRACTION_GROUP_NAME,
@@ -1053,7 +1053,7 @@ export function runMetadataStoreContract(
           ).rejects.toThrow(InstanceUpstreamWriteConflictError);
         });
 
-        it("create 第二个 default 行 → 抛 default_already_exists (seed 后再手动 create)", async () => {
+        it("creating a second default row → throws default_already_exists (manual create after seed)", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           await expect(async () =>
             store.createInstanceUpstreamGroup({
@@ -1065,7 +1065,7 @@ export function runMetadataStoreContract(
           ).rejects.toThrow(InstanceUpstreamWriteConflictError);
         });
 
-        it("create custom 组 agents 与 default 组重叠 → 抛 agents_overlap", async () => {
+        it("create custom group with agents overlapping the default group → throws agents_overlap", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           try {
             await store.createInstanceUpstreamGroup({
@@ -1083,9 +1083,9 @@ export function runMetadataStoreContract(
           }
         });
 
-        it("create 两个 custom 组 agents 互不重叠 → 都成功", async () => {
+        it("create two custom groups with non-overlapping agents → both succeed", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
-          // 先把 default agents 清空,让 codebuddy / codex 可以被 custom 占
+          // First clear default agents so codebuddy / codex can be occupied by custom
           const d = (await store.listInstanceUpstreamGroups())[0]!;
           await store.updateInstanceUpstreamGroup({
             group_id: d.group_id,
@@ -1111,7 +1111,7 @@ export function runMetadataStoreContract(
           expect(a.group_id).not.toBe(b.group_id);
         });
 
-        it("create 两个 custom 组 agents 重叠 → 后者 agents_overlap", async () => {
+        it("create two custom groups with overlapping agents → the latter agents_overlap", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const d = (await store.listInstanceUpstreamGroups())[0]!;
           await store.updateInstanceUpstreamGroup({
@@ -1144,7 +1144,7 @@ export function runMetadataStoreContract(
       });
 
       describe("updateInstanceUpstreamGroup (PATCH)", () => {
-        it("only agents 字段传值 → 其他字段保留", async () => {
+        it("only agents field passed → other fields preserved", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "Team",
@@ -1169,7 +1169,7 @@ export function runMetadataStoreContract(
           expect(updated.version).toBe(2);
         });
 
-        it("api_key 传空串 → 显式清空", async () => {
+        it("api_key passed as an empty string → explicitly cleared", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1196,7 +1196,7 @@ export function runMetadataStoreContract(
           ).rejects.toThrow(InstanceUpstreamWriteConflictError);
         });
 
-        it("group_type_mismatch (传的 expected_group_type 与库不符)", async () => {
+        it("group_type_mismatch (the passed expected_group_type does not match the database)", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1217,7 +1217,7 @@ export function runMetadataStoreContract(
           }
         });
 
-        it("version_mismatch:传入过期 expected_version → 抛冲突", async () => {
+        it("version_mismatch: passing a stale expected_version → throws a conflict", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1235,7 +1235,7 @@ export function runMetadataStoreContract(
             await store.updateInstanceUpstreamGroup({
               group_id: row.group_id,
               expected_group_type: "custom",
-              expected_version: row.version, // 旧版本号
+              expected_version: row.version, // old version number
               description: "should fail",
             });
             throw new Error("should not reach");
@@ -1244,13 +1244,13 @@ export function runMetadataStoreContract(
           }
         });
 
-        it("update agents 与其他组重叠 → agents_overlap", async () => {
+        it("update agents overlapping other groups → agents_overlap", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const d = (await store.listInstanceUpstreamGroups())[0]!;
           await store.updateInstanceUpstreamGroup({
             group_id: d.group_id,
             expected_group_type: "default",
-            agents: ["codebuddy"], // 只留 codebuddy 在 default
+            agents: ["codebuddy"], // keep only codebuddy in default
           });
           const c = await store.createInstanceUpstreamGroup({
             group_type: "custom",
@@ -1264,7 +1264,7 @@ export function runMetadataStoreContract(
             await store.updateInstanceUpstreamGroup({
               group_id: c.group_id,
               expected_group_type: "custom",
-              agents: ["codebuddy", "codex"], // codebuddy 与 default 冲
+              agents: ["codebuddy", "codex"], // codebuddy conflicts with default
             });
             throw new Error("should not reach");
           } catch (err) {
@@ -1272,7 +1272,7 @@ export function runMetadataStoreContract(
           }
         });
 
-        it("update 自己 agents 不算重叠 (排除自身 group_id)", async () => {
+        it("update's own agents do not count as overlap (excluding own group_id)", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1284,14 +1284,14 @@ export function runMetadataStoreContract(
           const updated = await store.updateInstanceUpstreamGroup({
             group_id: row.group_id,
             expected_group_type: "custom",
-            agents: ["codebuddy"], // 减掉 codex
+            agents: ["codebuddy"], // drop codex
           });
           expect(updated.agents).toEqual(["codebuddy"]);
         });
       });
 
       describe("toggleInstanceUpstreamGroup", () => {
-        it("toggle 只改 enabled, 其他字段不动", async () => {
+        it("toggle only changes enabled, other fields untouched", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1318,7 +1318,7 @@ export function runMetadataStoreContract(
       });
 
       describe("deleteInstanceUpstreamGroup", () => {
-        it("delete existing → true, 再 get → null", async () => {
+        it("delete existing → true, then get → null", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1338,7 +1338,7 @@ export function runMetadataStoreContract(
           ).toBe(false);
         });
 
-        it("delete 后释放 agents,可被别的组占", async () => {
+        it("after delete the agents are released and can be occupied by another group", async () => {
           await store.listInstanceUpstreamGroups(undefined, TEST_SUPPORTED_AGENTS);
           const d = (await store.listInstanceUpstreamGroups())[0]!;
           await store.updateInstanceUpstreamGroup({
@@ -1355,7 +1355,7 @@ export function runMetadataStoreContract(
             api_key: "sk-x",
           });
           await store.deleteInstanceUpstreamGroup({ group_id: c.group_id });
-          // 现在 codex 无归属,default 可以拿回来
+          // Now codex has no owner, default can take it back
           const updated = await store.updateInstanceUpstreamGroup({
             group_id: d.group_id,
             expected_group_type: "default",
@@ -1366,7 +1366,7 @@ export function runMetadataStoreContract(
       });
 
       describe("getInstanceUpstreamGroup", () => {
-        it("按 group_id 精确读回", async () => {
+        it("reads back exactly by group_id", async () => {
           const row = await store.createInstanceUpstreamGroup({
             group_type: "custom",
             name: "T",
@@ -1380,17 +1380,17 @@ export function runMetadataStoreContract(
           expect(got!.group_id).toBe(row.group_id);
         });
 
-        it("不存在返 null", async () => {
+        it("returns null when absent", async () => {
           expect(await store.getInstanceUpstreamGroup("grp-nope")).toBeNull();
         });
       });
 
       // ═══════════════════════════════════════════════════════════════════════════
-      // 方案 E:default.agents ↔ supported-agents 全集 diff-append 同步
-      // (2026-09-18 修:Proxy 新增 agent 后老实例的 default.agents 自动补齐)
+      // Option E: default.agents ↔ supported-agents full-set diff-append sync
+      // (fixed 2026-09-18: after Proxy adds an agent, the default.agents of old instances is automatically filled in)
       // ═══════════════════════════════════════════════════════════════════════════
-      describe("supported_agents_snapshot diff-append (方案 E)", () => {
-        it("场景 A: seed 首次 → agents = snapshot = supported 全集", async () => {
+      describe("supported_agents_snapshot diff-append (option E)", () => {
+        it("Scenario A: first seed → agents = snapshot = supported full set", async () => {
           const rows = await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
@@ -1401,13 +1401,13 @@ export function runMetadataStoreContract(
           expect(d.supported_agents_snapshot.sort()).toEqual(["claude-code", "codebuddy"]);
         });
 
-        it("场景 C: supported 里加了新 agent(cursor)→ 下次 list 自动 append 到 default", async () => {
-          // seed 时只有 2 个
+        it("Scenario C: a new agent (cursor) added in supported → the next list automatically appends it to default", async () => {
+          // At seed time there were only 2
           await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
           ]);
-          // 后来 Proxy 加了 cursor,supported 变 3 个
+          // Later Proxy adds cursor, supported becomes 3
           const rows = await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
@@ -1416,54 +1416,54 @@ export function runMetadataStoreContract(
           const d = rows.find((r) => r.group_type === "default")!;
           expect(d.agents.sort()).toEqual(["claude-code", "codebuddy", "cursor"]);
           expect(d.supported_agents_snapshot.sort()).toEqual(["claude-code", "codebuddy", "cursor"]);
-          expect(d.version).toBe(2); // seed 时 v=1, diff-append v=2
+          expect(d.version).toBe(2); // at seed v=1, after diff-append v=2
         });
 
-        it("场景 D: 用户 remove 了 codebuddy,后来加 cursor → 只 append cursor,不恢复 codebuddy", async () => {
+        it("Scenario D: user removed codebuddy, then cursor was added → only append cursor, do not restore codebuddy", async () => {
           await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
           ]);
-          // 用户 remove codebuddy
+          // User removes codebuddy
           const d0 = (await store.listInstanceUpstreamGroups()).find((r) => r.group_type === "default")!;
           await store.updateInstanceUpstreamGroup({
             group_id: d0.group_id, expected_group_type: "default",
             agents: ["claude-code"],
           });
-          // Proxy 加 cursor
+          // Proxy adds cursor
           const rows = await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
             { agent_source: "cursor", protocol: "anthropic", display_name: "Cursor" },
           ]);
           const d = rows.find((r) => r.group_type === "default")!;
-          expect(d.agents.sort()).toEqual(["claude-code", "cursor"]); // codebuddy 保持被 remove 的决策
+          expect(d.agents.sort()).toEqual(["claude-code", "cursor"]); // codebuddy keeps the removed decision
           expect(d.supported_agents_snapshot.sort()).toEqual(["claude-code", "codebuddy", "cursor"]);
         });
 
-        it("场景 E: Proxy 下线 agent(dsh)→ snapshot 收缩,agents 不动", async () => {
+        it("Scenario E: Proxy takes agent (dsh) offline → snapshot shrinks, agents untouched", async () => {
           await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "dsh", protocol: "openai-chat", display_name: "DSH" },
           ]);
-          // 下线 dsh
+          // Take dsh offline
           const rows = await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
           ]);
           const d = rows.find((r) => r.group_type === "default")!;
-          // agents 里的 dsh 是历史决策,不动;snapshot 收缩到当前 supported
+          // dsh in agents is a historical decision, untouched; snapshot shrinks to the current supported
           expect(d.agents.sort()).toEqual(["claude-code", "dsh"]);
           expect(d.supported_agents_snapshot.sort()).toEqual(["claude-code"]);
         });
 
-        it("场景 F: 无变化 → hot path 零改动(version 不变)", async () => {
+        it("Scenario F: no change → hot path has zero modifications (version unchanged)", async () => {
           const supported = [
             { agent_source: "claude-code", protocol: "anthropic" as const, display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat" as const, display_name: "CB" },
           ];
           await store.listInstanceUpstreamGroups(undefined, supported);
           const v1 = (await store.listInstanceUpstreamGroups()).find((r) => r.group_type === "default")!.version;
-          // 再调 3 次 list,version 不能涨(证明 hot path 零写入)
+          // Call list 3 more times; version must not increase (proving zero writes on the hot path)
           await store.listInstanceUpstreamGroups(undefined, supported);
           await store.listInstanceUpstreamGroups(undefined, supported);
           await store.listInstanceUpstreamGroups(undefined, supported);
@@ -1471,13 +1471,13 @@ export function runMetadataStoreContract(
           expect(v2).toBe(v1);
         });
 
-        it("场景 C 遇上被 custom 占用的新 agent → 不补到 default(全域唯一),snapshot 仍更新", async () => {
-          // seed 2 个
+        it("Scenario C meets a new agent occupied by a custom → not added to default (global uniqueness), snapshot still updated", async () => {
+          // seed 2
           await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
           ]);
-          // 用户把 codebuddy 从 default 挪出,建 custom 组占
+          // User moves codebuddy out of default and creates a custom group to occupy it
           const d0 = (await store.listInstanceUpstreamGroups()).find((r) => r.group_type === "default")!;
           await store.updateInstanceUpstreamGroup({
             group_id: d0.group_id, expected_group_type: "default",
@@ -1487,7 +1487,7 @@ export function runMetadataStoreContract(
             group_type: "custom", name: "T", agents: ["codebuddy"],
             mode: "custom_unified", base_url: "https://x.example.com", api_key: "sk-x",
           });
-          // Proxy 加了 cursor 和 hermes;codebuddy 仍在 supported 里但被 custom 占
+          // Proxy adds cursor and hermes; codebuddy is still in supported but occupied by custom
           const rows = await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
             { agent_source: "codebuddy", protocol: "openai-chat", display_name: "CB" },
@@ -1495,28 +1495,28 @@ export function runMetadataStoreContract(
             { agent_source: "hermes", protocol: "anthropic", display_name: "Hermes" },
           ]);
           const d = rows.find((r) => r.group_type === "default")!;
-          // cursor/hermes append 到 default,codebuddy 被 custom 占不加(全域唯一)
+          // cursor/hermes are appended to default, codebuddy is occupied by custom so not added (global uniqueness)
           expect(d.agents.sort()).toEqual(["claude-code", "cursor", "hermes"]);
-          // snapshot 与 supported 对齐(包括 codebuddy)
+          // snapshot aligns with supported (including codebuddy)
           expect(d.supported_agents_snapshot.sort()).toEqual(
             ["claude-code", "codebuddy", "cursor", "hermes"]);
         });
 
-        it("场景 B(存量迁移): 手动插一条 snapshot=空的 default → 首次 list 只补 snapshot,agents 不动",
+        it("Scenario B (existing-instance migration): manually insert a default with empty snapshot → the first list only fills snapshot, agents untouched",
            async () => {
-          // 走 create 分支模拟"v2 早期无 snapshot 的存量数据":create 时 snapshot 强制填 [](此路径正常业务不会用,
-          // 是走 seed 分支;这里通过 update 强行造出 snapshot=空的状态)
+          // Take the create branch to simulate "existing data from early v2 without a snapshot": create forces snapshot to fill [] (normal business does not use this path,
+          // it goes through the seed branch; here the state with empty snapshot is forced via update)
           await store.listInstanceUpstreamGroups(undefined, [
             { agent_source: "claude-code", protocol: "anthropic", display_name: "CC" },
           ]);
           const d0 = (await store.listInstanceUpstreamGroups()).find((r) => r.group_type === "default")!;
-          // 用 update 把 snapshot 清空(store 层没暴露改 snapshot 的接口,通过 raw update 造出场景 B 初值)
-          // 这里通过 update agents 到相同值,借助 update 不触碰 snapshot 的性质,再手动把 snapshot 清零
-          // (仅测试)—— 由于 update 接口不接受 snapshot 字段,场景 B 的构造只能在 store 内部实现
-          // 或用 raw db 操作。这里跳过 raw db 造场景,场景 B 的语义在场景 C 测试里其实已被
-          // "首次 seed 时 snapshot=agents=supported 全集" 隐式覆盖 —— 存量迁移只可能发生在**升级前
-          // 已经 seed 但没有 snapshot 字段的库**,与 SQLite `DROP TABLE IF EXISTS` 每次重建互斥,
-          // 因此 SQLite backend 场景 B 不会命中;Mongo 侧的场景 B 由 mongodb-adapter.test.ts 单独覆盖。
+          // Use update to clear snapshot (the store layer does not expose an interface to change snapshot; build the Scenario B initial value via a raw update)
+          // Here by updating agents to the same value, relying on the property that update does not touch snapshot, then manually zero the snapshot
+          // (test only) -- since the update interface does not accept a snapshot field, constructing Scenario B can only be done inside the store
+          // or via raw db operations. Raw db scenario construction is skipped here; the semantics of Scenario B are in fact already
+          // implicitly covered by the Scenario C test "on first seed snapshot=agents=supported full set" -- existing-instance migration can only happen on **a database that
+          // was seeded before the upgrade but has no snapshot field**, which is mutually exclusive with SQLite's `DROP TABLE IF EXISTS` rebuild every time,
+          // so Scenario B will not be hit on the SQLite backend; Scenario B on the Mongo side is covered separately by mongodb-adapter.test.ts.
         });
       });
     });

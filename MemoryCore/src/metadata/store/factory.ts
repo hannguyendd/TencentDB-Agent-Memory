@@ -1,5 +1,5 @@
 /**
- * 元数据存储工厂 + 配置解析 + MetadataStorePool（v3.0 按实例分库）。
+ * Metadata store factory + config resolution + MetadataStorePool (v3.0 per-instance databases).
  */
 
 import { rm } from "node:fs/promises";
@@ -14,15 +14,15 @@ import {
 
 export interface MetadataStoreConfig {
   backend: MetadataBackend;
-  /** SQLite 根目录（backend=sqlite）。每个实例：{baseDir}/tdai_metadata_{id}/metadata.db */
+  /** SQLite root directory (backend=sqlite). Per instance: {baseDir}/tdai_metadata_{id}/metadata.db */
   sqliteBaseDir?: string;
-  /** MongoDB 连接串（backend=mongodb）。 */
+  /** MongoDB connection string (backend=mongodb). */
   mongoUri?: string;
-  /** MongoDB 是否启用事务（默认 true，需副本集）。 */
+  /** Whether MongoDB enables transactions (default true, requires a replica set). */
   mongoTransactions?: boolean;
-  /** 内存中最多缓存多少个实例 store 连接（LRU 驱逐，仅 close 不删库）。 */
+  /** Maximum number of instance store connections cached in memory (LRU eviction, only closes without deleting the database). */
   storeCacheMaxInstances?: number;
-  /** 元数据库名前缀，默认 `tdai_metadata`；完整库名 `{prefix}_{instance_id}`。 */
+  /** Metadata database name prefix, default `tdai_metadata`; full database name `{prefix}_{instance_id}`. */
   mongoDbPrefix?: string;
 }
 
@@ -45,7 +45,7 @@ function hasExplicitSqliteBaseDir(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
- * Mongo 与 SQLite 根目录不可同时显式配置（env / yaml 回填后校验）。
+ * The Mongo and SQLite root directories cannot both be explicitly configured (validated after env / yaml backfill).
  */
 export function assertMetadataStoreConfigExclusive(env: NodeJS.ProcessEnv = process.env): void {
   if (hasExplicitMongoUri(env) && hasExplicitSqliteBaseDir(env)) {
@@ -57,16 +57,16 @@ export function assertMetadataStoreConfigExclusive(env: NodeJS.ProcessEnv = proc
 }
 
 /**
- * 从环境变量解析存储配置。
+ * Resolve store config from environment variables.
  *
- * 推断规则（v3.0）：
- *   - TDAI_METADATA_MONGO_URI 非空 → mongodb
- *   - 否则 → sqlite（显式 TDAI_METADATA_SQLITE_BASE_DIR 或 fallback）
- *   - 二者同时显式配置 → 启动报错（见 assertMetadataStoreConfigExclusive）
+ * Inference rules (v3.0):
+ *   - TDAI_METADATA_MONGO_URI non-empty → mongodb
+ *   - otherwise → sqlite (explicit TDAI_METADATA_SQLITE_BASE_DIR or fallback)
+ *   - both explicitly configured → startup error (see assertMetadataStoreConfigExclusive)
  *
- * deployMode=service 时须 mongodb（见 validateMetadataStartupConfig）。
+ * With deployMode=service, mongodb is required (see validateMetadataStartupConfig).
  *
- * 废弃：TDAI_METADATA_BACKEND、TDAI_METADATA_MONGO_DB、TDAI_METADATA_SQLITE_PATH
+ * Deprecated: TDAI_METADATA_BACKEND, TDAI_METADATA_MONGO_DB, TDAI_METADATA_SQLITE_PATH
  */
 export function loadStoreConfig(
   env: NodeJS.ProcessEnv = process.env,
@@ -100,7 +100,7 @@ export function loadStoreConfig(
   };
 }
 
-/** service 模式元数据配置校验失败时抛出，Gateway 启动应 fail-fast。 */
+/** Thrown when service-mode metadata config validation fails; Gateway startup should fail fast. */
 export class MetadataStartupValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -131,7 +131,7 @@ export function validateMetadataStartupConfig(
 }
 
 /**
- * 构造并初始化单个实例库的 IMetadataStore。
+ * Construct and initialize the IMetadataStore of a single instance database.
  */
 export async function createMetadataStore(
   config: MetadataStoreConfig,
@@ -171,12 +171,12 @@ export async function createMetadataStore(
 interface CachedStore {
   instanceId: string;
   store: IMetadataStore;
-  /** mongodb 时持有 client 引用以便 close */
+  /** For mongodb, hold the client reference so it can be closed */
   mongoClient?: import("mongodb").MongoClient;
 }
 
 /**
- * 按实例懒建库、LRU 缓存、purge dropDatabase。
+ * Lazily create databases per instance, LRU cache, purge dropDatabase.
  */
 export class MetadataStorePool {
   private readonly cache = new Map<string, CachedStore>();

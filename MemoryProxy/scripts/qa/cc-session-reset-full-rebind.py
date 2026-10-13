@@ -403,7 +403,7 @@ def test_p0_3(timeout, log_dir):
     P0-3: already bound -> reset -> choose again (different team)
     1. hello -> form -> choose Yes -> pick item 1 everywhere to complete the binding
     2. model replies normally
-    3. mem:session-reset -> "已解除" (unbound)
+    3. mem:session-reset -> "已解除" (unbound; Chinese reply text matched at runtime)
     4. hi -> form -> this time pick the 2nd team
     5. complete -> model replies
     """

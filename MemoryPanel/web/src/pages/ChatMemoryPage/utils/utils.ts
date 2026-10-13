@@ -2,8 +2,8 @@ import type { MemoryBlock, MemoryLayer } from '../constants/types';
 import i18n from '@/i18n';
 
 /**
- * ISO 时间字符串 → 面板展示格式（本地时区，'YYYY-MM-DD HH:MM'）。
- * 输入非法或空 → 返空串，caller 用短路（`t && <span>...</span>`）跳过展示。
+ * ISO time string -> panel display format (local time zone, 'YYYY-MM-DD HH:MM').
+ * Invalid or empty input -> returns an empty string; the caller short-circuits (`t && <span>...</span>`) to skip display.
  */
 export function formatDisplayTime(iso: string | undefined | null): string {
   if (!iso) return '';
@@ -13,7 +13,7 @@ export function formatDisplayTime(iso: string | undefined | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** 紧凑时间：今天 HH:MM，昨天「昨天」，更早 MM-DD。 */
+/** Compact time: today HH:MM, yesterday "Yesterday", earlier MM-DD. */
 export function formatShortTime(ms: number): string {
   const now = new Date();
   const d = new Date(ms);
@@ -32,7 +32,7 @@ export function formatShortTime(ms: number): string {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** 从后端显式 role 字段提取 L0 角色；仅对旧数据回退解析 title 的 @ 前缀。 */
+/** Extract the L0 role from the backend's explicit role field; only for legacy data fall back to parsing the title's @ prefix. */
 export function extractRole(roleOrTitle: string): string {
   const raw = roleOrTitle.split('@')[0]?.trim().toLowerCase() || '';
   if (raw === 'user') return 'user';
@@ -42,7 +42,7 @@ export function extractRole(roleOrTitle: string): string {
   return raw || 'message';
 }
 
-/** 某层的展示条数：优先 layerCounts，回退到本地估算。 */
+/** Display count of a layer: prefer layerCounts, fall back to a local estimate. */
 export function getLayerCount(block: MemoryBlock, l: MemoryLayer): number {
   const real = block.layerCounts[l];
   if (real !== undefined) return real;

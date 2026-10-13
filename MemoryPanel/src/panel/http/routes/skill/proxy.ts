@@ -6,9 +6,9 @@ import { respondControlError, respondEnvelope } from '../../envelope.js';
 import type { MetaCallContext } from '../../../kernel/types.js';
 
 /**
- * 从请求路径中解析 skill action。
- * skill action 可能带二级路径（files/write、files/remove、files/read），
- * 故取 `/skill/` 之后的全部片段。
+ * Parse the skill action from the request path.
+ * A skill action may have a sub-path (files/write, files/remove, files/read),
+ * so take all segments after `/skill/`.
  */
 function readAction(path: string): string {
   const marker = '/skill/';
@@ -18,10 +18,10 @@ function readAction(path: string): string {
 }
 
 /**
- * 注册 skill 数据面透明代理：POST /api/v1/skill/{action} → 内核 POST /v3/skill/{action}。
+ * Register the skill data-plane transparent proxy: POST /api/v1/skill/{action} -> kernel POST /v3/skill/{action}.
  *
- * 复用 validatePanelMetaHeaders：对 /skill/* 路径 readAction 返回 ''（非 auth/verify），
- * 因此强制要求 X-Tdai-User-Key，与 skill 需要 owner 身份的语义一致。
+ * Reuses validatePanelMetaHeaders: for /skill/* paths readAction returns '' (not auth/verify),
+ * so X-Tdai-User-Key is mandatorily required, consistent with the semantics that skill requires owner identity.
  */
 export function registerSkillProxyRoutes(api: Hono, deps: PanelDeps): void {
   api.post('/skill/*', validatePanelMetaHeaders(deps), async (c) => {

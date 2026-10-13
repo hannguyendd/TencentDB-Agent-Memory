@@ -1,18 +1,18 @@
 /**
- * 颜色工具 — 从 App.tsx 抽出
+ * Color utilities -- extracted from App.tsx
  *
- * 团队头像配色：按 team_id 稳定取色，确保同一团队始终显示同一颜色。
+ * Team avatar colors: picked stably by team_id, ensuring the same team always shows the same color.
  */
 
-/** 团队头像配色列表 */
+/** Team avatar color list */
 export const TEAM_AVATAR_COLORS = [
   'bg-rose-500', 'bg-amber-500', 'bg-blue-500', 'bg-emerald-500', 'bg-violet-500',
   'bg-cyan-600', 'bg-orange-500', 'bg-pink-500', 'bg-teal-500', 'bg-indigo-500',
 ];
 
 /**
- * 根据 seed（通常是 team_id）稳定取一个 Tailwind 背景色类名。
- * 同一 seed 始终返回同一颜色。
+ * Pick a Tailwind background color class name stably from a seed (usually team_id).
+ * The same seed always returns the same color.
  */
 export function teamColor(seed: string): string {
   let h = 0;

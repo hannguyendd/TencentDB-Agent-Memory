@@ -1,21 +1,21 @@
 /**
- * AnalyticsPage — 「可观测」使用看板（仅 system_admin 可见）。
+ * AnalyticsPage -- "Observability" usage dashboard (visible to system_admin only).
  *
- * 数据源：Panel /api/v1/analytics/* 透明代理 → 内核 /v3/analytics/*（iwiki 4036925405），
- * 内核读 MemoryProxy 侧 ClickHouse（context_proxy）埋点表。本期不含 LLM / Langfuse
- * 效果分析（采用率、对任务结果的作用等需语义判断，SQL 表达不了）。
+ * Data source: Panel /api/v1/analytics/* transparent proxy -> kernel /v3/analytics/* (iwiki 4036925405),
+ * where the kernel reads the MemoryProxy-side ClickHouse (context_proxy) instrumentation tables. This iteration excludes LLM / Langfuse
+ * effectiveness analysis (adoption rate, impact on task results, etc. need semantic judgment that SQL cannot express).
  *
- * 两个 Tab 对应两种视角，各自懒加载（切到该 Tab 才发请求，避免首屏一次性
- * 打出 10+ 个 CH 查询）：
- *   - 使用情况：session 渗透 / 资产类别 / 成员 / trace 明细（tool_call + session_init 表）
- *   - 成本：token / credit / 模型分布 / 计费留档（usage_logs + usage_raw 表）
+ * The two Tabs correspond to two perspectives, each lazily loaded (requests are only sent once the Tab is opened, avoiding
+ * 10+ CH queries on first paint):
+ *   - Usage: session penetration / asset category / member / trace details (tool_call + session_init tables)
+ *   - Cost: token / credit / model distribution / billing archive (usage_logs + usage_raw tables)
  *
- * 下钻交互：成员 / 资产类别 / 模型的下钻统一呼出 DrillDownDrawer，页面主体不再
- * 承接联动过滤（原先"点卡片→改下方表格筛选"需要用户滚动找结果，体验差）。
+ * Drill-down interaction: drill-downs by member / asset category / model all open DrillDownDrawer; the page body no longer
+ * handles linked filtering (the old "click card -> change the table filter below" required users to scroll for results, a poor experience).
  *
- * 数据流约束（勿改回「load 内部再探测 config」）：config 只探测一次并归约为
- * chReady 布尔，若在 load 内 setConfig 会与以 config 对象为依赖的 effect 形成
- * 自激励循环（fetch 每次返回新引用），导致无限请求。
+ * Data flow constraint (do not change back to "probe config again inside load"): config is probed once and reduced to a
+ * chReady boolean; calling setConfig inside load would form a self-triggering loop with an effect that depends on the config object
+ * (each fetch returns a new reference), causing infinite requests.
  */
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -48,15 +48,15 @@ export function AnalyticsPage() {
 
   const [tab, setTab] = useState<ViewTab>('behavior');
   const [days, setDays] = useState<AnalyticsRangeDays>(7);
-  // 数据面实例隔离：Space 固定为当前登录实例（auth.instance_id = 内核
-  // x-tdai-service-id = CH 埋点写入的 space_id），不再提供「全部 Space」
-  // 与跨实例切换，避免共享 CH 库中其他实例的数据被聚合展示。
+  // Data-plane instance isolation: Space is fixed to the currently logged-in instance (auth.instance_id = kernel
+  // x-tdai-service-id = space_id written by CH instrumentation); "All Spaces"
+  // and cross-instance switching are no longer offered, so data of other instances in the shared CH database is not aggregated and shown.
   const [spaceId, setSpaceId] = useState(() => useAuthStore.getState().auth?.instance_id ?? '');
   const [endpointFilter, setEndpointFilter] = useState('');
   const [expandedRawKeys, setExpandedRawKeys] = useState<string[]>([]);
   const [drill, setDrill] = useState<DrillTarget | null>(null);
 
-  // config 探测与 Space 列表两个 Tab 共用，故不受 tab 影响
+  // The config probe and Space list are shared by both Tabs, so they are unaffected by tab
   const metrics = useAnalyticsMetrics({ enabled: isAdmin, days, spaceId });
   const { chReady } = metrics;
 
@@ -74,9 +74,9 @@ export function AnalyticsPage() {
   });
   const usage = useUsageStats({ enabled: costEnabled, days, spaceId });
 
-  // 汇集当前视图内出现的 user_id 做一次批量名称解析（成员表 + trace + 留档表）。
-  // 排除 UNASSIGNED_USER：它是空 user_id 的聚合桶标签而非真实用户，送去查询会
-  // 白占 user_ids 配额且必然查不到。
+  // Collect the user_ids appearing in the current view for one batch name resolution (member table + trace + archive table).
+  // Exclude UNASSIGNED_USER: it is the aggregate bucket label for empty user_id, not a real user; sending it to the query would
+  // waste a user_ids quota slot and is guaranteed not to be found.
   const visibleUserIds = useMemo(
     () =>
       [
@@ -89,8 +89,8 @@ export function AnalyticsPage() {
   );
   const resolveUserName = useUserNames(visibleUserIds);
 
-  // 面板 env 开关关闭（或获取失败）时整页不可用：菜单已隐藏，这里兜底拦截深链直敲。
-  // 注意 hooks 顺序：该判断必须位于所有 hooks 调用之后。
+  // When the panel env switch is off (or the fetch fails) the whole page is unavailable: the menu is hidden, and this guards against direct deep-link access.
+  // Note hooks order: this check must come after all hooks calls.
   const analyticsEnabled = usePanelAnalyticsEnabled();
   if (analyticsEnabled === false) {
     return (
@@ -171,8 +171,8 @@ export function AnalyticsPage() {
               appearance="button"
               value={spaceId}
               onChange={setSpaceId}
-              // 仅当前登录实例一项：spaces 列表接口返回的是共享 CH 全量 space_id
-              // （含其他实例），不再作为可选项下发到 UI。
+              // Only the currently logged-in instance: the spaces list endpoint returns all space_ids of the shared CH
+              // (including other instances), which are no longer offered as options in the UI.
               options={[{ value: spaceId, text: spaceId || t('analytics.allSpaces') }]}
               listWidth={260}
             />

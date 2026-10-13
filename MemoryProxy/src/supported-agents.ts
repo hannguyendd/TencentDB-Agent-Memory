@@ -1,45 +1,45 @@
 /**
- * Supported-agents 事实源常量。
+ * Supported-agents source-of-truth constants.
  *
- * 对应设计文档 docs/design/2026-08-25-instance-upstream-config.md §8.2。
+ * Corresponds to design doc docs/design/2026-08-25-instance-upstream-config.md §8.2.
  *
- * ## 定位
+ * ## Purpose
  *
- * Proxy 支持哪些 agent 由本文件的 `DEFAULT_SUPPORTED_AGENTS` 常量决定。它是:
- *   - Proxy 内部 handler 路由匹配的判据(见 server.ts 的 /:agent/:spaceId/... 段)
- *   - fixture / smoke / e2e 生成 request 时的 agent 白名单
- *   - Core `tdai-gateway.yaml` `upstream.supportedAgents` 段的**上游数据源**
+ * Which agents the Proxy supports is determined by the `DEFAULT_SUPPORTED_AGENTS` constant in this file. It is:
+ *   - The criterion for the Proxy's internal handler route matching (see the /:agent/:spaceId/... segment in server.ts)
+ *   - The agent allowlist used when fixtures / smoke / e2e tests generate requests
+ *   - The **upstream data source** for the `upstream.supportedAgents` section of Core `tdai-gateway.yaml`
  *
- * ## 与 Core yaml 的关系
+ * ## Relationship with the Core yaml
  *
- * v2.4 起本常量**不再对外暴露 HTTP 接口**(§6.A 挂到 Core 了),Panel 请求 supported-agents
- * 走 Core 一条线。Core `tdai-gateway.yaml` 的 `upstream.supportedAgents` 段是本常量的
- * 运行时副本,发版前必须手动核对一致(暂无 CI/CD 校验)。
+ * Since v2.4 this constant **no longer exposes an HTTP interface** (§6.A moved to Core); Panel requests for supported-agents
+ * go through Core only. The `upstream.supportedAgents` section of Core `tdai-gateway.yaml` is a
+ * runtime copy of this constant; it must be manually checked for consistency before release (no CI/CD check yet).
  *
- * ## 修改流程
+ * ## Change procedure
  *
- * 新增或删除 agent 时,严格按以下顺序操作:
- *   1. 更新本常量(添加/删除 entry)
- *   2. 同步更新 `MemoryCore/tdai-gateway.standalone.yaml` 和 `tdai-gateway.service.yaml`
- *      的 `upstream.supportedAgents` 段
- *   3. 部署 Core → 部署 Proxy(顺序不能反,否则 Core seed default 组时会引用不存在的 agent)
+ * When adding or removing an agent, follow this order strictly:
+ *   1. Update this constant (add/remove entry)
+ *   2. Also update the `upstream.supportedAgents` section of `MemoryCore/tdai-gateway.standalone.yaml`
+ *      and `tdai-gateway.service.yaml`
+ *   3. Deploy Core -> deploy Proxy (the order must not be reversed, otherwise Core would reference a non-existent agent when seeding the default group)
  */
 
 export type SupportedAgentProtocol = "anthropic" | "openai-chat" | "openai-responses";
 
 export interface SupportedAgent {
-  /** 内部枚举值,与 Proxy URL 路径首段一致(如 /codebuddy/:spaceId/...);数据库 agents 数组里存的就是这个 */
+  /** Internal enum value, matches the first segment of the Proxy URL path (e.g. /codebuddy/:spaceId/...); this is what the database agents array stores */
   agent_source: string;
-  /** wire 协议;前端据此提醒用户"自定义 baseUrl 需兼容这个协议" */
+  /** Wire protocol; the frontend uses it to remind users that "a custom baseUrl must be compatible with this protocol" */
   protocol: SupportedAgentProtocol;
-  /** 前端展示用的可读名(中英文均可) */
+  /** Human-readable name for frontend display (Chinese or English) */
   display_name: string;
 }
 
 /**
- * 当前 Proxy 部署支持的 agent 全集。
+ * The full set of agents supported by the current Proxy deployment.
  *
- * ⚠️ 修改本常量后必须同步更新 Core yaml,详见文件头注释"修改流程"。
+ * ⚠️ After modifying this constant you must also update the Core yaml; see "Change procedure" in the file header comment.
  */
 export const DEFAULT_SUPPORTED_AGENTS: SupportedAgent[] = [
   { agent_source: "claude-code", protocol: "anthropic",        display_name: "Claude Code" },
@@ -48,23 +48,23 @@ export const DEFAULT_SUPPORTED_AGENTS: SupportedAgent[] = [
   { agent_source: "workbuddy",   protocol: "openai-responses", display_name: "WorkBuddy" },
   { agent_source: "dsh",         protocol: "openai-chat",      display_name: "DeepSeek Harness" },
   { agent_source: "opencode",    protocol: "openai-chat",      display_name: "OpenCode" },
-  // ── header-only 客户端(通过 x-team-id / x-agent-id / x-task-id 请求头预选身份,
-  //    没有交互 form UI —— 客户端不认 proxy 伪造的 ask_followup_question tool_call,
-  //    preset 失败/mismatch 场景必须 bypass 而非弹 form)。
-  //    集合定义: src/session/preset.ts HEADER_ONLY_AGENTS
-  //    消费点:  handler.ts / anthropicHandler.ts session-reset pre-hook,
-  //             session/codebuddy/init.ts header-preselect 早退分支
+  // ── header-only clients (identity is preselected via the x-team-id / x-agent-id / x-task-id request headers,
+  //    with no interactive form UI -- the client does not recognize the ask_followup_question tool_call forged by the proxy,
+  //    so preset failure/mismatch scenarios must bypass rather than pop up a form).
+  //    Set definition: src/session/preset.ts HEADER_ONLY_AGENTS
+  //    Consumers:  handler.ts / anthropicHandler.ts session-reset pre-hook,
+  //             early-exit branch for header-preselect in session/codebuddy/init.ts
   { agent_source: "pi",          protocol: "openai-chat",      display_name: "Pi" },
   { agent_source: "hermes",      protocol: "anthropic",        display_name: "Hermes" },
   { agent_source: "openclaw",    protocol: "anthropic",        display_name: "OpenClaw" },
 ];
 
-/** O(1) 查表:agent_source → SupportedAgent。 */
+/** O(1) lookup: agent_source -> SupportedAgent. */
 const AGENT_MAP: ReadonlyMap<string, SupportedAgent> = new Map(
   DEFAULT_SUPPORTED_AGENTS.map((a) => [a.agent_source, a]),
 );
 
-/** 判断给定 agent_source 是否受支持(Proxy 路径首段是否合法)。 */
+/** Check whether the given agent_source is supported (whether the first segment of the Proxy path is valid). */
 export function isSupportedAgent(agentSource: string | undefined | null): boolean {
   if (!agentSource) return false;
   return AGENT_MAP.has(agentSource);

@@ -1,23 +1,23 @@
 /**
- * 纯 SSE 解析函数, 按协议提取 usage / assistant text / tool_call 意图。
+ * Pure SSE parsing functions that extract usage / assistant text / tool_call intents per protocol.
  *
- * 提取自 3 个 handler 的 stream tap 内部逻辑, 抽成纯函数便于:
- *   1. Phase 2 fixture 测试 (blueprint-review §3 硬门槛)
- *   2. Phase 4 组装 protocol.createStreamTap 时被 tap coroutine 复用
+ * Extracted from the stream tap internals of the 3 handlers and turned into pure functions to facilitate:
+ *   1. Phase 2 fixture tests (blueprint-review §3 hard gate)
+ *   2. Reuse by the tap coroutine when Phase 4 assembles protocol.createStreamTap
  *
- * ⚠️ 与老 handler 的差别: 老实现是流式增量累积 (维护 state),
- * 这里的函数是"整段 SSE 文本一次性解析", 用于:
- *   - fixture 测试 (输入完整 SSE 文本, 断言最终 usage / assistantText)
- *   - non-stream fallback (upstream 返 stream 但客户端非 stream 场景)
+ * Warning: difference from the old handlers: the old implementation accumulated incrementally over the stream (maintaining state),
+ * whereas the functions here "parse the whole SSE text in one pass", used for:
+ *   - fixture tests (input the full SSE text, assert the final usage / assistantText)
+ *   - non-stream fallback (upstream returns a stream but the client is non-stream)
  *
- * 增量版本 (为 createStreamTap 用) Phase 4 再抽; 现在先把语义固定下来。
+ * The incremental version (for createStreamTap) will be extracted in Phase 4; for now the semantics are pinned down first.
  */
 
 // ── OpenAI Chat Completions ──────────────────────────────────────────────
 
 /**
- * 从整段 openai SSE 文本提取 usage (取 last-write-wins)。
- * 复用 handler.ts:228 extractSseUsage 语义。
+ * Extract usage from the whole openai SSE text (last-write-wins).
+ * Reuses the handler.ts:228 extractSseUsage semantics.
  */
 export function extractOpenaiSseUsage(sseText: string): Record<string, unknown> | null {
   let lastUsage: Record<string, unknown> | null = null;
@@ -39,7 +39,7 @@ export function extractOpenaiSseUsage(sseText: string): Record<string, unknown> 
 }
 
 /**
- * 从整段 openai SSE 文本累积 assistant text (choices[0].delta.content)。
+ * Accumulate assistant text (choices[0].delta.content) from the whole openai SSE text.
  */
 export function extractOpenaiSseAssistantText(sseText: string): string {
   let text = "";
@@ -68,13 +68,13 @@ export function extractOpenaiSseAssistantText(sseText: string): string {
 export interface AnthropicStreamParsed {
   usage: Record<string, unknown>;
   assistantText: string;
-  /** tool_use 块的累积 (供 emitModelIntentTelemetry 用) */
+  /** accumulation of tool_use blocks (for emitModelIntentTelemetry) */
   toolUses: Array<{ name: string; inputJson: string }>;
 }
 
 /**
- * 解析 Anthropic SSE (event: xxx\ndata: {...}\n\n), 一次性提取 usage / text / tool_uses。
- * 复用 anthropicHandler.ts:2400+ 的 event switch。
+ * Parse Anthropic SSE (event: xxx\ndata: {...}\n\n), extracting usage / text / tool_uses in one pass.
+ * Reuses the event switch at anthropicHandler.ts:2400+.
  */
 export function parseAnthropicSseStream(sseText: string): AnthropicStreamParsed {
   const usage: Record<string, unknown> = {};
@@ -135,18 +135,18 @@ export function parseAnthropicSseStream(sseText: string): AnthropicStreamParsed 
 export interface ResponsesStreamParsed {
   usage: Record<string, unknown> | null;
   assistantText: string;
-  /** function_call 累积 (name + arguments) */
+  /** accumulation of function_call (name + arguments) */
   functionCalls: Array<{ name: string; arguments: string }>;
-  /** response 结束时的 response.id (供 upstreamRequestId 回填) */
+  /** response.id at the end of the response (for backfilling upstreamRequestId) */
   responseId: string | null;
 }
 
 /**
- * 解析 openai Responses API SSE, 事件类型:
- *   - response.output_text.delta: 累积 text
- *   - response.output_item.done (function_call): 追加到 functionCalls
+ * Parse openai Responses API SSE; event types:
+ *   - response.output_text.delta: accumulate text
+ *   - response.output_item.done (function_call): append to functionCalls
  *   - response.completed: response.usage + response.id
- * 复用 codexHandler.ts:1520 事件表 + 1695 的 completed 分支。
+ * Reuses the event table at codexHandler.ts:1520 + the completed branch at 1695.
  */
 export function parseResponsesSseStream(sseText: string): ResponsesStreamParsed {
   let usage: Record<string, unknown> | null = null;

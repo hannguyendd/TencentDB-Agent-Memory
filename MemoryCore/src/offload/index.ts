@@ -239,7 +239,7 @@ function _buildL15RecentContext(stateManager: OffloadStateManager): string {
     ? `[User]: ${rawPrompt.slice(0, 500)}`
     : (stateManager.cachedLatestTurnMessages || "(none)");
   const historyBlock = stateManager.cachedRecentHistory || "(none)";
-  return `历史消息，可作为参考：\n${historyBlock}\n\n最新user message：\n${currentLine}`;
+  return `Historical messages, for reference:\n${historyBlock}\n\nLatest user message:\n${currentLine}`;
 }
 
 /**
@@ -821,14 +821,14 @@ export function registerOffload(api: any, offloadConfig: OffloadConfig): void {
           // Write skill file locally
           const { mkdir, writeFile } = await import("node:fs/promises");
           const { join } = await import("node:path");
-          // NOTE: stateManager.ctx.dataDir 已经是 <dataRoot>/<agentName>（见 storage.ts createStorageContext），
-          // 因此 skill 的 owner 隔离已经天然由 dataDir 提供，**不要**在路径里再拼一层 agentName，
-          // 否则会得到 <dataRoot>/<agentName>/skills/<agentName>/<skillName>/SKILL.md（agent 重复）。
-          // 与 core/skill 模块统一的目录契约：<dataDir>/skills/<skillName>/SKILL.md
+          // NOTE: stateManager.ctx.dataDir is already <dataRoot>/<agentName> (see storage.ts createStorageContext),
+          // so the owner isolation of skills is naturally provided by dataDir already; **do not** append another agentName layer to the path,
+          // otherwise you would get <dataRoot>/<agentName>/skills/<agentName>/<skillName>/SKILL.md (agent duplicated).
+          // Unified directory contract with the core/skill module: <dataDir>/skills/<skillName>/SKILL.md
           const skillsDir = join(stateManager.ctx.dataDir, "skills", resp.skillName);
           await mkdir(skillsDir, { recursive: true });
           await writeFile(join(skillsDir, "SKILL.md"), resp.skillContent, "utf-8");
-          const resultPrompt = `<l4_skill_result>\n【Skill 生成完成】\n\n**Skill 名称:** ${resp.skillName}\n**描述:** ${resp.skillDescription}\n**文件路径:** ${join(skillsDir, "SKILL.md")}\n\n---\n${resp.skillContent}\n---\n</l4_skill_result>`;
+          const resultPrompt = `<l4_skill_result>\n[Skill generation complete]\n\n**Skill name:** ${resp.skillName}\n**Description:** ${resp.skillDescription}\n**File path:** ${join(skillsDir, "SKILL.md")}\n\n---\n${resp.skillContent}\n---\n</l4_skill_result>`;
           return { appendSystemContext: resultPrompt, phase: "completed", skillName: resp.skillName };
         }
       }

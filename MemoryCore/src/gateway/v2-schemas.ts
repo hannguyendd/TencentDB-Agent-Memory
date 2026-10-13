@@ -5,7 +5,7 @@
  * This file re-exports everything from the generated baseline, then adds
  * hand-written overrides that OpenAPI cannot express:
  *   - safePath refine (path traversal prevention)
- *   - conversationDelete / atomicDelete 批量删除上限 + 去重 + 至少一项校验
+ *   - conversationDelete / atomicDelete bulk delete limit + dedup + at-least-one-item validation
  *   - Generic ApiResponseEnvelope<T> interface
  *   - formatZodError utility
  */
@@ -281,13 +281,13 @@ export type ScenarioRmRequest = z.infer<typeof scenarioRmRequestSchema>;
 // Override: L0 / L1 batch delete
 // ============================
 
-/** L0 单次批量删除上限：message_ids 5000 条、session_ids 100 条。 */
+/** L0 per-call bulk delete limits: 5000 message_ids, 100 session_ids. */
 export const L0_DELETE_MESSAGE_IDS_MAX = 5000;
 export const L0_DELETE_SESSION_IDS_MAX = 100;
-/** L1 单次批量删除上限。 */
+/** L1 per-call bulk delete limit. */
 export const L1_DELETE_IDS_MAX = 5000;
 
-/** 去重 + 丢弃空串，保持原顺序。 */
+/** Dedup + drop empty strings, preserving the original order. */
 const dedupeIdList = (ids: string[]): string[] => {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -301,15 +301,15 @@ const dedupeIdList = (ids: string[]): string[] => {
 };
 
 /**
- * conversationDelete：message_ids / session_ids 至少填一个，可同时填。
+ * conversationDelete: at least one of message_ids / session_ids must be provided; both may be provided together.
  *
- * 兼容旧调用方：保留单数 `session_id`，解析后归一到 `session_ids`，
- * 所以handler 只需处理 `session_ids` 一条路径。
+ * Compatible with old callers: the singular `session_id` is kept and normalized into `session_ids` after parsing,
+ * so the handler only needs to handle the single `session_ids` path.
  */
 export const conversationDeleteRequestSchema = z.object({
   message_ids: z.array(z.string()).min(1).max(L0_DELETE_MESSAGE_IDS_MAX).optional(),
   session_ids: z.array(z.string()).min(1).max(L0_DELETE_SESSION_IDS_MAX).optional(),
-  /** @deprecated 改用 `session_ids`；仍支持以兼容现网调用方。*/
+  /** @deprecated Use `session_ids` instead; still supported for compatibility with existing callers. */
   session_id: z.string().optional(),
 }).transform((data) => {
   const messageIds = dedupeIdList(data.message_ids ?? []);
@@ -327,7 +327,7 @@ export const conversationDeleteRequestSchema = z.object({
 );
 export type ConversationDeleteRequest = z.infer<typeof conversationDeleteRequestSchema>;
 
-/** atomicDelete：ids 必填，单次至多 5000 条，自动去重。 */
+/** atomicDelete: ids required, at most 5000 per call, automatically deduplicated. */
 export const atomicDeleteRequestSchema = z.object({
   ids: z.array(z.string()).min(1).max(L1_DELETE_IDS_MAX),
 }).transform((data) => ({ ids: dedupeIdList(data.ids) })).refine(

@@ -1,51 +1,51 @@
 /**
- * AgentStrategy — 按客户端 (claude-code / codebuddy / codex / workbuddy / dsh /
- * opencode / pi / hermes / openclaw / default) 切分的策略接口。
+ * AgentStrategy — strategy interface split by client (claude-code / codebuddy / codex / workbuddy / dsh /
+ * opencode / pi / hermes / openclaw / default).
  *
- * 扩展现有 `AgentAdapter` (agent-adapters/types.ts) 增加:
- *   - stage 门控 (StageGates + preset) —— 唯一被 pipeline 真实消费的部分
- *   - session-init 契约字段 (supportsSessionForm / bypassOnPresetFail, 契约预留)
+ * Extends the existing `AgentAdapter` (agent-adapters/types.ts) with:
+ *   - stage gating (StageGates + preset) — the only part actually consumed by the pipeline
+ *   - session-init contract fields (supportsSessionForm / bypassOnPresetFail, reserved by contract)
  *
- * blueprint-review 决策:
- *   - 保持单接口 + 可选方法 (`?.()`) 方案 (§4 未采纳 mixin, 当前 agent 数够用)
- *   - 采纳 preset 模式 (§5) 降低 stageGates 组合复杂度
+ * blueprint-review decisions:
+ *   - Keep a single interface + optional methods (`?.()`) (§4 did not adopt mixins; the current agent count is manageable)
+ *   - Adopt the preset pattern (§5) to reduce the combinatorial complexity of stageGates
  *
- * addendum §4.3: `bypassOnPresetFail` 是 pi/hermes/openclaw 三方共用的
- * 硬约束, 不是可选特化。
+ * addendum §4.3: `bypassOnPresetFail` is a hard constraint shared by pi/hermes/openclaw,
+ * not an optional specialization.
  */
 
 import type { AgentAdapter, AgentKind } from "../../../agent-adapters/types.js";
 
 /**
- * 每个 stage 是否开启的独立门控 —— 本接口唯一被 pipeline 真实消费的部分。
+ * Independent gate for whether each stage is enabled — the only part of this interface actually consumed by the pipeline.
  *
- * 当前状态 (2026-10-08): **所有 10 个 agent 均走 `full` preset**。
- *   - 原设计里 codex/workbuddy 从 `minimal` 起步、按 Phase 5 逐步 opt-in,
- *     但 handler-audit B1-B8 的 bug 修复代码在 minimal 下不生效 (部署后没效果),
- *     已改为与 CC/CB 一致的 full。
- *   - `minimal` / `observe-only` 两个 preset 保留作为调试/回滚档位, 当前无调用方。
- *   - direct/utility (passthrough/auxiliary) 走独立 runner, 不吃 stageGates。
+ * Current state (2026-10-08): **all 10 agents use the `full` preset**.
+ *   - The original design had codex/workbuddy start from `minimal` and opt in step by step in Phase 5,
+ *     but the bug-fix code for handler-audit B1-B8 does not take effect under minimal (no effect after deployment),
+ *     so they were changed to full, consistent with CC/CB.
+ *   - The `minimal` / `observe-only` presets are kept as debug/rollback tiers and currently have no callers.
+ *   - direct/utility (passthrough/auxiliary) use a separate runner and do not consume stageGates.
  */
 export interface StageGates {
-  /** 模型是否在 pricing 表里 → 不在则 400 (阻断) */
+  /** Whether the model is in the pricing table → if not, 400 (block) */
   modelGate: boolean;
-  /** identity/inspectAndRecord 埋点 */
+  /** identity/inspectAndRecord instrumentation */
   identityRecord: boolean;
   /** rate limit (enforceRateLimit + recordInputTokenUsage) */
   rateLimit: boolean;
   /** credit report (tryReportCreditFromPath + writeFailedReportRaw) */
   creditReport: boolean;
-  /** opik trace + span 上报 */
+  /** opik trace + span reporting */
   opik: boolean;
-  /** writeLog(event:"usage") — stream/non-stream 完成后 CH usage 落表 */
+  /** writeLog(event:"usage") — write usage to the CH table after stream/non-stream completes */
   writeLogUsage: boolean;
-  /** emitModelIntentTelemetry — tool_use 意图落 tool_call_logs 表 */
+  /** emitModelIntentTelemetry — write tool_use intent to the tool_call_logs table */
   modelIntentTelemetry: boolean;
-  /** fetch 加 AbortSignal.timeout(config.forwardTimeoutMs) */
+  /** fetch with AbortSignal.timeout(config.forwardTimeoutMs) */
   forwardTimeout: boolean;
-  /** cost-guard retryTarget 存在时二次转发 (含 anthropic sanitizeForRetry 钩子) */
+  /** forward a second time when a cost-guard retryTarget exists (including the anthropic sanitizeForRetry hook) */
   forwardRetry: boolean;
-  /** systemUser 短路 (匹配到 systemUserId 直接 passthrough, 跳过 session/injection) */
+  /** systemUser short-circuit (passthrough directly when systemUserId matches, skipping session/injection) */
   systemUser: boolean;
 }
 
@@ -53,8 +53,8 @@ export type StagePreset = "full" | "minimal" | "observe-only";
 
 export const STAGE_PRESETS: Record<StagePreset, StageGates> = {
   /**
-   * handler.ts / anthropicHandler.ts 承载的现有行为完整版。
-   * 切换到 pipeline 后必须保持完全等价, 一个 gate 都不能少。
+   * The full version of the existing behavior carried by handler.ts / anthropicHandler.ts.
+   * It must stay fully equivalent after switching to the pipeline; not a single gate may be missing.
    */
   full: {
     modelGate: true,
@@ -69,10 +69,10 @@ export const STAGE_PRESETS: Record<StagePreset, StageGates> = {
     systemUser: true,
   },
   /**
-   * codex/workbuddy 初始版本 — 只走核心链路 (forward+stream), 不接观测/计费/限流。
-   * 与迁移前 codex/wb handler 行为完全一致 (蓝图明确的"零回归"基线)。
+   * Initial version for codex/workbuddy — only the core path (forward+stream), no observability/billing/rate limiting.
+   * Behavior is fully identical to the pre-migration codex/wb handlers (the blueprint's explicit "zero regression" baseline).
    *
-   * Phase 5 opt-in 时按 §5.1~5.8 逐个 flip 到 true, 每步独立 commit。
+   * On Phase 5 opt-in, flip to true one by one per §5.1~5.8, each step as an independent commit.
    */
   minimal: {
     modelGate: false,
@@ -87,8 +87,8 @@ export const STAGE_PRESETS: Record<StagePreset, StageGates> = {
     systemUser: false,
   },
   /**
-   * observe-only — Phase 5 半程状态: 观测性 stage 都开, 但计费/限流仍关。
-   * 用来先看数据流是否正常, 再决定 flip creditReport/rateLimit。
+   * observe-only — Phase 5 midway state: all observability stages on, but billing/rate limiting still off.
+   * Used to first check that the data flow is normal before deciding whether to flip creditReport/rateLimit.
    */
   "observe-only": {
     modelGate: false,
@@ -105,59 +105,59 @@ export const STAGE_PRESETS: Record<StagePreset, StageGates> = {
 };
 
 /**
- * archive hook 的 wire protocol 标签。
+ * Wire protocol label of the archive hook.
  *
- * 注意: 它不是 AgentStrategy 上的字段 —— `stageArchive` 通过自己的
- * `ArchiveProtocol` 参数接收各 runner 传入的字面量。类型定义放这里是因为
- * stages/archive.ts 从这里 import。
+ * Note: it is not a field on AgentStrategy — `stageArchive` receives the literal passed by each runner
+ * through its own `ArchiveProtocol` parameter. The type is defined here because
+ * stages/archive.ts imports from here.
  */
 export type ArchiveProtocol = "anthropic" | "openai" | "responses";
 
 /**
- * AgentStrategy — 扩展现有 AgentAdapter, 增加 stage 门控和客户端特化字段。
+ * AgentStrategy — extends the existing AgentAdapter, adding stage gating and client-specific fields.
  *
- * 只有 `stageGates` 被 pipeline 真实消费 (runner 里 17 处 `_gates.<name>`)。
- * 其余字段分两类:
- *   - `supportsSessionForm` / `bypassOnPresetFail`: **契约预留**, 当前无消费点,
- *     见各字段 JSDoc。取值必须正确, 以便未来接线时语义已就位。
- *   - 已删除的死字段 (2026-10-08 清理): `archiveProtocol` / `buildFormResponse` /
- *     `detectClientCapabilities` / `detectDefaultGate` —— 这 4 个在 strategy 上
- *     零读取点, 真正生效的实现分别在:
- *       * archiveProtocol      → runner 传硬编码字面量给 stageArchive
+ * Only `stageGates` is actually consumed by the pipeline (17 `_gates.<name>` uses in the runners).
+ * The remaining fields fall into two categories:
+ *   - `supportsSessionForm` / `bypassOnPresetFail`: **reserved by contract**, currently no consumers,
+ *     see each field's JSDoc. Values must be correct so the semantics are in place when wired up in the future.
+ *   - Dead fields removed (2026-10-08 cleanup): `archiveProtocol` / `buildFormResponse` /
+ *     `detectClientCapabilities` / `detectDefaultGate` — these 4 have
+ *     zero read sites on the strategy; the implementations that actually take effect are respectively in:
+ *       * archiveProtocol      → runner passes a hardcoded literal to stageArchive
  *       * buildFormResponse    → session/{codebuddy,claude-code,workbuddy,dsh,opencode}/form.ts
  *       * detectClientCapabilities → session/client-capabilities.ts
  *       * detectDefaultGate    → session/codebuddy/init.ts::detectCodexDefaultGate
- *     留着会在 strategy 里造出与实现不一致的第二份真相。
+ *     Keeping them would create a second source of truth in the strategy that is inconsistent with the implementation.
  */
 export interface AgentStrategy extends AgentAdapter {
   /**
-   * 是否弹 5-step form。false 表示 header-only 或 headless 客户端。
+   * Whether to show the 5-step form. false means a header-only or headless client.
    *
-   * ⚠️ 契约预留, 当前无消费点 —— 原消费点 `stages/session-init.ts` 已于
-   * Round 18 被 `stages/session-init-orchestrate.ts` 取代并删除 (该编排 stage
-   * 直接调 `handleSessionInit`, 不经此字段)。实际生效的 header-only / headless
-   * 判断在 `session/codebuddy/init.ts` (按 `isHeaderOnlyAgent` Set 判 agentSource)
-   * 与 runner 内联的 dshHeadless 分支。保留取值以维持 addendum §4.3 契约。
+   * Warning: reserved by contract, currently no consumers — the original consumer `stages/session-init.ts` was
+   * replaced by `stages/session-init-orchestrate.ts` in Round 18 and deleted (that orchestration stage
+   * calls `handleSessionInit` directly, not through this field). The header-only / headless
+   * detection that actually takes effect is in `session/codebuddy/init.ts` (judging agentSource by the `isHeaderOnlyAgent` Set)
+   * and the dshHeadless branch inlined in the runner. The values are kept to maintain the addendum §4.3 contract.
    */
   readonly supportsSessionForm: boolean;
 
   /**
-   * addendum §4.3: pi/hermes/openclaw preset 失败任何场景都 bypass 不弹 form。
-   * 只有 supportsSessionForm=false 的 header-only agent 才置 true。
+   * addendum §4.3: pi/hermes/openclaw always bypass on preset failure in every scenario and never show the form.
+   * Only header-only agents with supportsSessionForm=false are set to true.
    *
-   * ⚠️ 契约预留, 当前无消费点 (同 `supportsSessionForm`, 原消费点
-   * `stages/session-init.ts:70` 的两个 stage 已删)。实际生效的 bypass 在
-   * `session/codebuddy/init.ts:835` 的 `isHeaderOnlyAgent(agentSource)` 分支。
+   * Warning: reserved by contract, currently no consumers (same as `supportsSessionForm`; the two stages at the original consumer
+   * `stages/session-init.ts:70` were deleted). The bypass that actually takes effect is the
+   * `isHeaderOnlyAgent(agentSource)` branch at `session/codebuddy/init.ts:835`.
    */
   readonly bypassOnPresetFail?: boolean;
 
-  /** 每个 stage 的门控开关 —— 本接口唯一被 pipeline 真实消费的字段 */
+  /** Gate switch for each stage — the only field of this interface actually consumed by the pipeline */
   readonly stageGates: StageGates;
 }
 
 /**
- * 协议 × agent 合法组合白名单 (blueprint-review §6 采纳)。
- * pipeline/run.ts 入口处 assertValidCombo() 校验, 防 server.ts 60+ 条路由替换时组错。
+ * Whitelist of valid protocol x agent combinations (adopted from blueprint-review §6).
+ * assertValidCombo() validates at the pipeline/run.ts entry, to prevent mistakes when replacing the 60+ server.ts routes.
  */
 export const VALID_COMBOS: ReadonlySet<string> = new Set([
   "openai-chat:codebuddy",
@@ -174,7 +174,7 @@ export function assertValidCombo(
   protocolName: string,
   agentKind: AgentKind | null,
 ): void {
-  if (!agentKind) return; // passthrough / utility 不绑 agent
+  if (!agentKind) return; // passthrough / utility are not bound to an agent
   const key = `${protocolName}:${agentKind}`;
   if (!VALID_COMBOS.has(key)) {
     throw new Error(

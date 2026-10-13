@@ -1,8 +1,8 @@
 /**
- * SourceFetcherRegistry — 按 sourceUrl 协议路由到对应的 ISourceFetcher。
+ * SourceFetcherRegistry — routes to the matching ISourceFetcher by the sourceUrl protocol.
  *
- * module.ts 的 worker 通过 registry.resolve(url) 获取 fetcher，不再直接调 git。
- * 未来新增协议只需 implements ISourceFetcher + register()。
+ * The worker in module.ts obtains a fetcher via registry.resolve(url) and no longer calls git directly.
+ * To add a protocol in the future, just implements ISourceFetcher + register().
  */
 
 import type { ISourceFetcher, SourceType } from "./types.js";
@@ -13,15 +13,15 @@ export class SourceFetcherRegistry {
 
   constructor() {
     this.register(new GitSourceFetcher());
-    // 未来：this.register(new LocalSourceFetcher());
-    // 未来：this.register(new FtpSourceFetcher());
+    // Future: this.register(new LocalSourceFetcher());
+    // Future: this.register(new FtpSourceFetcher());
   }
 
   register(fetcher: ISourceFetcher): void {
     this.fetchers.set(fetcher.supportedType, fetcher);
   }
 
-  /** 根据 sourceUrl 自动探测协议类型，返回对应 fetcher；未注册则 throw。 */
+  /** Auto-detect the protocol type from sourceUrl and return the matching fetcher; throw if not registered. */
   resolve(sourceUrl: string): ISourceFetcher {
     const type = this.detectType(sourceUrl);
     const fetcher = this.fetchers.get(type);

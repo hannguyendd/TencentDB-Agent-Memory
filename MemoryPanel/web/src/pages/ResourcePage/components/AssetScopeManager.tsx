@@ -1,5 +1,5 @@
 /**
- * AssetScopeManager — 统一的「资产可配置范围」管理视图。
+ * AssetScopeManager -- unified management view for "configurable scope of assets".
  */
 
 import { useTranslation } from 'react-i18next';
@@ -24,7 +24,7 @@ export interface AssetScopeItem {
   meta?: string;
 }
 
-/** Owner 标签：显示 display_name（未命中回退 id），title 保留 user_id。抽子组件因 .map 内不能调 hook。 */
+/** Owner label: shows display_name (falls back to id when not found), title keeps user_id. Extracted as a sub-component because hooks cannot be called inside .map. */
 function ScopeOwnerLabel({ ownerId, isMe }: { ownerId: string; isMe: boolean }) {
   const { t } = useTranslation();
   const name = useUserDisplayName(ownerId);

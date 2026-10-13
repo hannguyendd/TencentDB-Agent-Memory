@@ -1,26 +1,26 @@
 /**
- * L3 Persona Generation Metric Reporter — L3 画像生成指标上报。
+ * L3 Persona Generation Metric Reporter — reports L3 persona generation metrics.
  *
- * 在 L3 画像生成完成后非侵入式上报以下指标到 Kafka：
- *   - l3_generation_latency_ms : L3 画像生成端到端总耗时（毫秒）
- *   - persona_length_before    : 更新前画像字符数（初始生成时为 0）
- *   - persona_length_after     : 更新后画像字符数
+ * After L3 persona generation completes, non-intrusively reports the following metrics to Kafka:
+ *   - l3_generation_latency_ms : total end-to-end L3 persona generation time (ms)
+ *   - persona_length_before    : persona character count before the update (0 on initial generation)
+ *   - persona_length_after     : persona character count after the update
  *
- * Trace 关联说明：
- *   所有指标通过 metricProducer.send() 自动注入当前 active span 的 traceId。
- *   L3 执行在 TracedTaskExecutor.executeL3() → withSpan("core.l3.generation") 中，
- *   其子 span 包含 Vercel AI SDK 自动产生的 ai.generateText / gen_ai.chat span，
- *   携带 gen_ai.request.model 属性。通过 traceId 可反查到：
- *     - 用了什么模型（gen_ai.request.model）
- *     - LLM prompt 和 response 详情
- *     - 画像生成的完整调用链路
- *     - 该次 LLM 调用的耗时
+ * Trace correlation notes:
+ *   All metrics automatically inject the traceId of the current active span via metricProducer.send().
+ *   L3 runs inside TracedTaskExecutor.executeL3() → withSpan("core.l3.generation"),
+ *   whose child spans include the ai.generateText / gen_ai.chat spans automatically produced by the Vercel AI SDK,
+ *   carrying the gen_ai.request.model attribute. Via the traceId you can look up:
+ *     - which model was used (gen_ai.request.model)
+ *     - LLM prompt and response details
+ *     - the complete call chain of persona generation
+ *     - the duration of that LLM call
  *
- * 设计原则：
- *   1. 生成完成后，try-catch 做上报（静默失败）
- *   2. 无论上报成功失败，不影响生成结果
- *   3. 生成失败（hasError=true）时不上报
- *   4. 无 instanceId 时不上报
+ * Design principles:
+ *   1. After generation completes, report inside try-catch (silent failure)
+ *   2. Whether reporting succeeds or fails, the generation result is unaffected
+ *   3. Do not report when generation fails (hasError=true)
+ *   4. Do not report when there is no instanceId
  */
 
 import { metricProducer } from "./kafka-metric-producer.js";
@@ -30,19 +30,19 @@ import { metricProducer } from "./kafka-metric-producer.js";
 // ============================
 
 export interface L3LatencyMetricInput {
-  /** 实例 ID（Kafka key） */
+  /** Instance ID (Kafka key) */
   instanceId: string;
-  /** L3 画像生成端到端总耗时（毫秒） */
+  /** Total end-to-end L3 persona generation time (ms) */
   generationLatencyMs: number;
-  /** 更新前画像字符数（初始生成时传 0） */
+  /** Persona character count before the update (pass 0 on initial generation) */
   personaLengthBefore: number;
-  /** 更新后画像字符数 */
+  /** Persona character count after the update */
   personaLengthAfter: number;
-  /** 更新前画像纯文本（用于计算 drift ratio，可选） */
+  /** Persona plain text before the update (used to compute the drift ratio, optional) */
   personaTextBefore?: string;
-  /** 更新后画像纯文本（用于计算 drift ratio，可选） */
+  /** Persona plain text after the update (used to compute the drift ratio, optional) */
   personaTextAfter?: string;
-  /** 是否生成失败 */
+  /** Whether generation failed */
   hasError: boolean;
 }
 
@@ -51,19 +51,19 @@ export interface L3LatencyMetricInput {
 // ============================
 
 /**
- * 上报 L3 画像生成指标到 Kafka。
+ * Reports L3 persona generation metrics to Kafka.
  *
- * 静默安全：任何异常都 try-catch 吞掉，绝不向外抛。
+ * Silent-safe: any exception is swallowed by try-catch and never thrown outward.
  */
 export function reportL3LatencyMetrics(input: L3LatencyMetricInput): void {
   try {
-    // Guard: 失败时不上报
+    // Guard: do not report on failure
     if (input.hasError) return;
 
-    // Guard: 无 instanceId 不上报
+    // Guard: do not report without instanceId
     if (!input.instanceId) return;
 
-    // 1. 上报 l3_generation_latency_ms
+    // 1. report l3_generation_latency_ms
     try {
       metricProducer.send({
         metric: "l3_generation_latency_ms",
@@ -72,10 +72,10 @@ export function reportL3LatencyMetrics(input: L3LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 2. 上报 persona_length_before
+    // 2. report persona_length_before
     try {
       metricProducer.send({
         metric: "persona_length_before",
@@ -84,10 +84,10 @@ export function reportL3LatencyMetrics(input: L3LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 3. 上报 persona_length_after
+    // 3. report persona_length_after
     try {
       metricProducer.send({
         metric: "persona_length_after",
@@ -96,13 +96,13 @@ export function reportL3LatencyMetrics(input: L3LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 4. 上报 persona_drift_ratio（行级 diff）
-    //    计算方式：将新旧画像按行切分，统计新增行数+删除行数 / 总行数
-    //    值域 [0, 1]：0 = 完全没变，1 = 完全重写
-    //    仅在有 before/after 文本且非首次生成时计算
+    // 4. report persona_drift_ratio (line-level diff)
+    //    Computation: split old and new persona by line; (added lines + deleted lines) / total lines
+    //    Range [0, 1]: 0 = unchanged, 1 = fully rewritten
+    //    Computed only when before/after text exist and it is not the first generation
     try {
       if (input.personaTextBefore != null && input.personaTextAfter != null && input.personaTextBefore.length > 0) {
         const driftRatio = computeLineDriftRatio(input.personaTextBefore, input.personaTextAfter);
@@ -114,10 +114,10 @@ export function reportL3LatencyMetrics(input: L3LatencyMetricInput): void {
         });
       }
     } catch {
-      // 静默失败
+      // silent failure
     }
   } catch {
-    // 最外层 catch — 绝不向外抛
+    // outermost catch — never throw outward
   }
 }
 
@@ -126,18 +126,18 @@ export function reportL3LatencyMetrics(input: L3LatencyMetricInput): void {
 // ============================
 
 /**
- * 计算行级 drift ratio（方案 C）。
+ * Computes the line-level drift ratio (approach C).
  *
- * 将新旧画像按行切分（忽略空行），计算：
- *   drift = (新增行数 + 删除行数) / max(旧行数 + 新行数, 1)
+ * Splits the old and new persona by line (ignoring blank lines) and computes:
+ *   drift = (added lines + deleted lines) / max(old lines + new lines, 1)
  *
- * 值域 [0, 1]：
- *   0   = 内容完全一致
- *   ~0.1 = 微调（改了几行）
- *   ~0.5 = 大幅修改
- *   1   = 完全重写（没有一行相同）
+ * Range [0, 1]:
+ *   0   = content identical
+ *   ~0.1 = minor tweak (a few lines changed)
+ *   ~0.5 = major modification
+ *   1   = fully rewritten (no line in common)
  *
- * 性能：O(n) 时间 + O(n) 空间，画像通常 50-200 行，耗时 < 0.1ms。
+ * Performance: O(n) time + O(n) space; a persona is typically 50-200 lines, taking < 0.1ms.
  */
 export function computeLineDriftRatio(before: string, after: string): number {
   const oldLines = before.split("\n").filter((l) => l.trim().length > 0);
@@ -152,6 +152,6 @@ export function computeLineDriftRatio(before: string, after: string): number {
   const total = oldLines.length + newLines.length;
   if (total === 0) return 0;
 
-  // 归一化到 [0, 1]
+  // normalize to [0, 1]
   return Math.min((added + removed) / total, 1);
 }

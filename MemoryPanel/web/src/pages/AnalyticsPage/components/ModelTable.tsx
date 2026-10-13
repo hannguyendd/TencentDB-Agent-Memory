@@ -1,8 +1,8 @@
 /**
- * ModelTable — 按模型的用量与成本分布（usage/by-model）。
+ * ModelTable -- usage and cost distribution by model (usage/by-model).
  *
- * 内核已按 credit 降序返回，占比列由 SQL 计算（分母为 0 时为 null → 显示占位符）。
- * `routed_to_count` 表示「由其他模型路由到该模型」的请求数，可用于观察降级/兜底路由。
+ * The kernel already returns rows sorted by credit descending; the share column is computed in SQL (null when the denominator is 0 -> placeholder shown).
+ * `routed_to_count` is the number of requests "routed to this model from other models", useful for observing fallback / downgrade routing.
  */
 import { useTranslation } from 'react-i18next';
 import { Button, Card, Table, Text } from 'tea-component';
@@ -22,7 +22,7 @@ export function ModelTable({
 }) {
   const { t } = useTranslation();
 
-  // 以最大 credit 占比为满格基准，给出直观的成本分布条
+  // Use the largest credit share as the full-bar baseline to give an intuitive cost distribution bar
   const maxCreditPct = Math.max(...models.map((m) => m.pct_credit ?? 0), 1);
 
   const columns = [

@@ -3,33 +3,33 @@
  *
  * Design: docs/design/2026-06-30-skill-router.md §4.2
  *
- * 与主通道（BM25 / embedding / hybrid via ISkillStore.searchSkills）并行执行的独立快速通道。
- * 当 skill name 长度 ≥ NAME_MATCH_MIN_LENGTH（默认 4），且用户 query（小写）包含该
- * skill name（子串匹配）时，该 skill 被快速通道命中。
+ * An independent fast path that runs in parallel with the main channel (BM25 / embedding / hybrid via ISkillStore.searchSkills).
+ * When the skill name length is ≥ NAME_MATCH_MIN_LENGTH (default 4) and the user's query (lowercased) contains that
+ * skill name (substring match), the skill is hit by the fast path.
  *
- * 合并规则（在 handleListing 中实现）：
- * - 快速通道命中的 skill 放到最终结果首位
- * - 主通道结果去重后拼接在后面
- * - 不进 reranker，避免打乱已 rerank 的主通道顺序
+ * Merge rules (implemented in handleListing):
+ * - skills hit by the fast path are placed first in the final result
+ * - main-channel results are deduplicated and appended after
+ * - does not go through the reranker, to avoid disturbing the already-reranked main-channel order
  *
- * 性能：纯内存字符串操作，无 I/O，无模型推理；80k skill 遍历 <5ms。
+ * Performance: pure in-memory string operations, no I/O, no model inference; iterating 80k skills takes <5ms.
  *
- * DECISION (2026-06-30): 暂不接入。评估结论：
- *   - fast-path 需要先拉全集（name + description），VDB 模式下 HTTP 拉取
- *     1000+ skill 需 80-150ms（同 region）甚至更多，远超纯内存匹配的 <5ms。
- *   - 主通道 BM25/hybrid 对 name 字段权重天然高（FTS5 name 列 position 0），
- *     用户提到名称时主通道大概率已 top-K 命中。
- *   - 收益有限（仅服务"用户显式提到 skill 名"的边缘 case）但成本为
- *     2~6 倍查询（search + 全量 list + 内存匹配 vs 单次 search）。
- *   保留文件待后续数据证明召回不足时再重新评估。
+ * DECISION (2026-06-30): not wired in for now. Evaluation conclusion:
+ *   - the fast path needs to fetch the full set first (name + description); in VDB mode an HTTP fetch of
+ *     1000+ skills takes 80-150ms (same region) or even more, far above the <5ms of pure in-memory matching.
+ *   - the main channel BM25/hybrid naturally weights the name field highly (FTS5 name column at position 0),
+ *     so when the user mentions a name, the main channel has most likely already hit it in top-K.
+ *   - the benefit is limited (only serving the edge case where "the user explicitly mentions a skill name") but the cost is
+ *     2-6x the queries (search + full list + in-memory matching vs a single search).
+ *   The file is kept, to be re-evaluated once later data proves recall is insufficient.
  */
 import type { Skill } from "./types.js";
 
 export const DEFAULT_NAME_MATCH_MIN_LENGTH = 4;
 
 /**
- * 返回 `skills` 中 `name` 长度 ≥ `minLength` 且 query（小写）包含该 name（小写）的 skill。
- * 空 query 或全空白短路返回 `[]`。
+ * Returns the skills in `skills` whose `name` length ≥ `minLength` and where the query (lowercased) contains that name (lowercased).
+ * An empty query or all-whitespace short-circuits and returns `[]`.
  */
 export function nameMatchFastPath(
   query: string,

@@ -1,6 +1,6 @@
 /**
- * CodeDetailView —— Code 资产详情视图（仓库信息 / 代码搜索 / 代码探索）。
- * 数据与回调来自 useCodeSources 返回对象；Markdown 用共享 AssetMarkdown（compact 密度）。
+ * CodeDetailView -- Code asset detail view (repository info / code search / code exploration).
+ * Data and callbacks come from the object returned by useCodeSources; Markdown uses the shared AssetMarkdown (compact density).
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, MetricsBoard, SearchBox, StatusTip, Text } from 'tea-component';
@@ -35,7 +35,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
 
   return (
     <div className="_codedetail-root">
-      {/* 返回面包屑 */}
+      {/* Back breadcrumb */}
       <div className="_codedetail-breadcrumb">
         <Button type="link" onClick={() => setSubView('list')}>
           <span className="_codedetail-inline-icon">
@@ -46,7 +46,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
         <span className="_codedetail-breadcrumb-current _codedetail-mono">{selRepo}</span>
       </div>
 
-      {/* 头部 */}
+      {/* Header */}
       <Card>
         <Card.Body className="_codedetail-header-body">
           <div className="_codedetail-header-row">
@@ -90,7 +90,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
         </Alert>
       )}
 
-      {/* 统计 */}
+      {/* Stats */}
       {selected?.stats && (
         <div className="_codedetail-stats">
           <MetricsBoard
@@ -108,7 +108,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
         </div>
       )}
 
-      {/* 仓库信息 */}
+      {/* Repository info */}
       {selected && (
         <Card>
           <Card.Body title={t('code.detail.repoInfo')}>
@@ -126,7 +126,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
         </Card>
       )}
 
-      {/* 代码搜索 */}
+      {/* Code search */}
       <Card>
         <Card.Body title={t('code.detail.search')}>
           <Text theme="label" parent="div" className="_codedetail-hint">
@@ -150,7 +150,7 @@ export function CodeDetailView({ store }: { store: CodeSourcesStore }) {
         </Card.Body>
       </Card>
 
-      {/* 代码探索 */}
+      {/* Code exploration */}
       <Card>
         <Card.Body title={t('code.detail.explore')}>
           <Text theme="label" parent="div" className="_codedetail-hint">

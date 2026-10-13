@@ -1,4 +1,4 @@
-/** Re-export for router/schemas（实现见 metadata/pagination.ts）。 */
+/** Re-export for router/schemas (implementation in metadata/pagination.ts). */
 export {
   paginationInputSchema,
   resolvePagination,

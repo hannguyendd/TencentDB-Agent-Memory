@@ -1,43 +1,43 @@
 /**
- * Core 侧内置的 supported-agents fallback 常量。
+ * Built-in supported-agents fallback constant on the Core side.
  *
- * ## 定位
+ * ## Role
  *
- * 与 Proxy 侧的事实源 ``MemoryProxy/src/supported-agents.ts::DEFAULT_SUPPORTED_AGENTS``
- * **一一对应**,是 Core 部署时 yaml 未配置 ``upstream.supportedAgents`` 时的 fallback。
+ * **One-to-one** with the Proxy-side source of truth ``MemoryProxy/src/supported-agents.ts::DEFAULT_SUPPORTED_AGENTS``;
+ * it is the fallback used when the Core deployment's yaml does not configure ``upstream.supportedAgents``.
  *
- * ## 触发时机
+ * ## When it applies
  *
- * ``gateway/config.ts`` 里,`upstream.supportedAgents` yaml 段:
- *   - **有值**(非空数组):以 yaml 为准。用于运维**临时下线**某 agent 而不改代码
- *   - **无值 / 空数组**:自动使用本常量。Core 升级上线**无需**同步改 yaml,新 agent 只要
- *     改 Proxy 常量 + **同步**本 fallback 常量,即可端到端生效
+ * In ``gateway/config.ts``, for the `upstream.supportedAgents` yaml section:
+ *   - **Has a value** (non-empty array): the yaml wins. Used by ops to **temporarily take down** an agent without changing code
+ *   - **No value / empty array**: this constant is used automatically. A Core upgrade rollout **does not need** to change yaml in sync; for a new agent, just
+ *     change the Proxy constant + **synchronously** this fallback constant, and it takes effect end to end
  *
- * ## 与 Proxy 常量同步的要求
+ * ## Requirement to stay in sync with the Proxy constant
  *
- * 修改本常量 = 与 Proxy `DEFAULT_SUPPORTED_AGENTS` 同步。发版前手工核对(v2.5 决策),
- * 不一致时 v2.6 方案 E 的 diff-append 会把差异当作 "Proxy 上线新 agent" 处理 —— 老实例
- * default 会 diff-append 常量里有 Proxy 没有的 agent,行为不符预期。
+ * Changing this constant = syncing with the Proxy `DEFAULT_SUPPORTED_AGENTS`. Manually verify before release (v2.5 decision);
+ * if they disagree, the diff-append of v2.6 option E treats the difference as "Proxy launched a new agent" -- old instances'
+ * default would diff-append agents that are in the constant but not in Proxy, which is not the expected behavior.
  *
- * ## 与 yaml 混用的语义
+ * ## Semantics when mixed with yaml
  *
- * yaml 里配一个 agent(比如只留 claude-code)= 运维显式声明 "本 Core 只支持这些",
- * 即使 fallback 常量有 8 agent 也**不 fallback**。yaml 非空 = 完整覆盖,不是叠加。
+ * Configuring an agent in yaml (e.g. keeping only claude-code) = ops explicitly declaring "this Core only supports these",
+ * and even if the fallback constant has 8 agents there is **no fallback**. Non-empty yaml = full override, not additive.
  */
 
 import type { SupportedAgent } from "./types.js";
 
 /**
- * Core 侧 fallback 全集。与 Proxy `MemoryProxy/src/supported-agents.ts::DEFAULT_SUPPORTED_AGENTS` 完全对齐。
+ * Full Core-side fallback set. Fully aligned with Proxy `MemoryProxy/src/supported-agents.ts::DEFAULT_SUPPORTED_AGENTS`.
  *
- * ⚠️ 修改本常量后同步更新 Proxy 常量 + `tdai-gateway.standalone.yaml` / `service.yaml`
- * 里的 `upstream.supportedAgents`(可选,不改也 fallback 到本常量)。
+ * Warning: after changing this constant, also update the Proxy constant + `upstream.supportedAgents` in `tdai-gateway.standalone.yaml` / `service.yaml`
+ * (optional; if not changed it still falls back to this constant).
  *
- * 新增 agent 上线 SOP:
- *   1. 改 Proxy `src/supported-agents.ts` 常量
- *   2. **改本文件常量**(fallback 保证 Core 部署即使忘更新 yaml 也能生效)
- *   3. 可选:改 `tdai-gateway.*.yaml`(运维想显式管理时才需要)
- *   4. 部署 Core → 部署 Proxy
+ * SOP for launching a new agent:
+ *   1. Change the Proxy `src/supported-agents.ts` constant
+ *   2. **Change the constant in this file** (the fallback ensures a Core deployment still works even if yaml was not updated)
+ *   3. Optional: change `tdai-gateway.*.yaml` (only needed when ops wants to manage it explicitly)
+ *   4. Deploy Core → deploy Proxy
  */
 export const DEFAULT_SUPPORTED_AGENTS_FALLBACK: readonly SupportedAgent[] = Object.freeze([
   { agent_source: "claude-code", protocol: "anthropic",        display_name: "Claude Code" },

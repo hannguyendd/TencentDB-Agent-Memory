@@ -1,31 +1,31 @@
 /**
- * Claude Code request classification — 基于 Anthropic body 的 `cache_control`
- * marker 位置 + tools/thinking 兜底，把 CC 客户端发到 /v1/messages 的所有请求
- * 三分成 main / fork / sidequery。
+ * Claude Code request classification -- based on the position of the `cache_control`
+ * marker in the Anthropic body + tools/thinking fallback, classify all requests the CC client sends to /v1/messages
+ * into three kinds: main / fork / sidequery.
  *
- * 判定依据（源码硬约束 + 抓包实证）：
- *   - MAIN 主对话：cache_control marker 在 messages[n-1]（含 msgs=1 边界）
- *   - FORK 复用缓存（SUGGESTION/RECAP/COMPACT/...）：marker 在 messages[n-2]
- *     源码 forkedAgent.ts + claude.ts:3242-3243 强制 skipCacheWrite=true 挪
- *     marker 到 n-2 位置以避免误算 cache write cost
- *   - SIDEQUERY 独立请求（TITLE/verify_api_key/...）：无 marker + tools=[] +
- *     thinking.disabled；源码 sessionTitle.ts:434 + queryHaiku 强制关 caching
+ * Criteria (hard constraints from the source + evidence from packet captures):
+ *   - MAIN main conversation: the cache_control marker is at messages[n-1] (including the msgs=1 boundary)
+ *   - FORK reusing the cache (SUGGESTION/RECAP/COMPACT/...): the marker is at messages[n-2];
+ *     the source forkedAgent.ts + claude.ts:3242-3243 forces skipCacheWrite=true, moving the
+ *     marker to position n-2 to avoid miscounting cache write cost
+ *   - SIDEQUERY independent requests (TITLE/verify_api_key/...): no marker + tools=[] +
+ *     thinking.disabled; the source sessionTitle.ts:434 + queryHaiku forcibly turn caching off
  *
- * 3P provider 关缓存的兜底：body 全无 marker 时，用 tools=[] && thinking.disabled
- * 两条硬约束联合判 sidequery；否则保底 main —— 退化到原有一刀切逻辑，不会更糟。
+ * Fallback for 3P providers that turn caching off: when the body has no marker at all, tools=[] && thinking.disabled
+ * are the two hard constraints jointly used to judge sidequery; otherwise default to main -- degrading to the original one-size-fits-all logic, no worse.
  *
- * 详细设计与抓包实证见:
+ * For detailed design and packet-capture evidence see:
  *   docs/design/2026-07-30-cc-request-routing-plan.md
  */
 
 export type CcRequestKind = "main" | "fork" | "sidequery";
 
 /**
- * 根据 Anthropic 请求 body 判定请求类型。
+ * Determine the request kind from the Anthropic request body.
  *
- * 输入是 handler 已解析的 body（Record<string, unknown>），字段访问全部走
- * 防御性 narrowing，未知/畸形 body 一律回退 "main" —— 保证判定失败时行为
- * 等价原有链路。
+ * The input is the body already parsed by the handler (Record<string, unknown>); all field access goes through
+ * defensive narrowing, and unknown/malformed bodies always fall back to "main" -- guaranteeing that on a failed determination the behavior
+ * is equivalent to the original path.
  */
 export function classifyCcRequest(body: Record<string, unknown>): CcRequestKind {
   const rawMsgs = Array.isArray(body.messages) ? (body.messages as unknown[]) : [];
@@ -39,17 +39,17 @@ export function classifyCcRequest(body: Record<string, unknown>): CcRequestKind 
   const n = msgs.length;
   const markerIdx = findLastCacheControlIndex(msgs);
 
-  // 主判定：cache_control marker 位置
+  // Primary determination: cache_control marker position
   if (markerIdx >= 0) {
-    // messages[n-2] → FORK（skipCacheWrite=true 强制）
+    // messages[n-2] -> FORK (forced by skipCacheWrite=true)
     if (markerIdx === n - 2) return "fork";
-    // 其它位置（含 last=n-1）→ MAIN
+    // Other positions (including last=n-1) -> MAIN
     return "main";
   }
 
-  // 无 marker：可能是 SIDEQUERY，也可能是 3P provider 关 caching 的 MAIN
-  // 兜底信号：SIDEQUERY 硬约束是 tools=[] AND thinking.disabled 同时命中
-  //          用 && 而非 || 避免误伤"用户单独禁 tools 或单独禁 thinking"的主对话
+  // No marker: may be a SIDEQUERY, or a MAIN of a 3P provider with caching off
+  // Fallback signal: the SIDEQUERY hard constraint is that tools=[] AND thinking.disabled both hit
+  //          use && rather than || to avoid hurting main conversations where "the user disabled only tools or only thinking"
   const toolsEmpty = !Array.isArray(body.tools) || (body.tools as unknown[]).length === 0;
   const thinking = body.thinking as { type?: string } | undefined;
   const thinkingOff = thinking?.type === "disabled";
@@ -59,11 +59,11 @@ export function classifyCcRequest(body: Record<string, unknown>): CcRequestKind 
 }
 
 /**
- * 在 messages 数组里找**最后一条**包含 cache_control marker 的 message 索引。
+ * Find the index of the **last** message in the messages array that contains a cache_control marker.
  *
- * cache_control 在 CC 客户端是塞在 content block 层（不是 message 顶层），
- * 所以要扫每条 message 的 content 数组里任意 block 是否含 cache_control 键。
- * 无匹配返回 -1。
+ * In the CC client, cache_control is placed at the content block level (not at the message top level),
+ * so every message's content array must be scanned for any block containing a cache_control key.
+ * Returns -1 when there is no match.
  */
 export function findLastCacheControlIndex(msgs: unknown[]): number {
   for (let i = msgs.length - 1; i >= 0; i--) {

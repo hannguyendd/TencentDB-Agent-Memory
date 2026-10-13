@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# p1-api-test.sh —— Handler Pipeline 重构 P1 自动化项验证
+# p1-api-test.sh -- Handler Pipeline refactor P1 automated-item verification
 #
-# 对照 docs/design/2026-09-22-refactor-verification-prioritized.md §P1
-# 只覆盖标记为 🤖 的项目；👁️/👤 项由 p1-semi-auto.sh + TUI 驱动覆盖。
+# Cross-reference: docs/design/2026-09-22-refactor-verification-prioritized.md §P1
+# Only covers items marked 🤖; 👁️/👤 items are covered by p1-semi-auto.sh + the TUI driver.
 #
-# 用法: bash p1-api-test.sh
+# Usage: bash p1-api-test.sh
 
 #
-# 必填环境变量:
-#   PROXY     proxy 根地址
-#   KEY       合法 user_key
+# Required environment variables:
+#   PROXY     proxy root URL
+#   KEY       a valid user_key
 #   SPACE     spaceId
-#   MODEL     价目表内的模型
-# 可选:
-#   PRESET_TEAM_ID   预选团队 header 值 (如 team-xxxxxxxx)
-#   PRESET_AGENT_ID  预选 agent header 值 (如 agt-xxxxxxxx)
-#   PROXY_STDOUT     proxy 日志路径 (默认 /tmp/proxy-refactor.log)
-#   PROXY_LOG_DIR    proxy.log 所在目录 (用于 credit.report 断言)
+#   MODEL     a model in the price list
+# Optional:
+#   PRESET_TEAM_ID   preselected team header value (e.g. team-xxxxxxxx)
+#   PRESET_AGENT_ID  preselected agent header value (e.g. agt-xxxxxxxx)
+#   PROXY_STDOUT     proxy log path (default /tmp/proxy-refactor.log)
+#   PROXY_LOG_DIR    directory containing proxy.log (used for credit.report assertions)
 
 set -uo pipefail
 
@@ -51,7 +51,7 @@ req() {
   BODY=$(printf '%s' "$out" | sed '$d')
 }
 
-# 取代理 stdout 里新增的行
+# Get the lines newly added to the proxy stdout
 log_delta() {
   local before="$1"
   tail -n +$((before+1)) "$PROXY_STDOUT" 2>/dev/null || true
@@ -59,58 +59,58 @@ log_delta() {
 log_lines() { wc -l < "$PROXY_STDOUT" 2>/dev/null || echo 0; }
 
 ##############################################################################
-head_ "P1-E 模型门控 + 别名 (4)"
+head_ "P1-E model gate + alias (4)"
 ##############################################################################
 
-# P1-E1 model 在价目表 → 200
+# P1-E1 model in the price list -> 200
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
-if [[ "$HTTP_CODE" == "200" ]]; then ok "P1-E1" "价目表内 model → 200"; else
-  bad "P1-E1" "期望 200, 实际 $HTTP_CODE｜$(printf '%s' "$BODY" | head -c 150)"; fi
+if [[ "$HTTP_CODE" == "200" ]]; then ok "P1-E1" "model in price list -> 200"; else
+  bad "P1-E1" "expected 200, got $HTTP_CODE | $(printf '%s' "$BODY" | head -c 150)"; fi
 
-# P1-E2 model 不在价目表 → 400 (须走不带 instance 覆盖的路径)
+# P1-E2 model not in the price list -> 400 (must use a path without instance override)
 req "/proxy/$SPACE/v1/messages" \
   "{\"model\":\"totally-fake-model-zzz\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 if [[ "$HTTP_CODE" == "400" ]] && printf '%s' "$BODY" | grep -q "not a registered display name"; then
-  ok "P1-E2" "未登记 model → 400 + not a registered display name"
+  ok "P1-E2" "unregistered model -> 400 + not a registered display name"
 else
-  bad "P1-E2" "期望 400+未登记文案, 实际 $HTTP_CODE｜$(printf '%s' "$BODY" | head -c 200)"
+  bad "P1-E2" "expected 400 + unregistered message, got $HTTP_CODE | $(printf '%s' "$BODY" | head -c 200)"
 fi
 
-# P1-E3 alias 回写 → 上游收到 model_id (用 display name 发, 看上游是否接受)
-# 价目表里 "ep-pksklwtb" 的 modelName 是 "LLM-A1"; 发 "LLM-A1" 应被 alias 成 ep-pksklwtb
+# P1-E3 alias write-back -> upstream receives model_id (send with display name, check whether upstream accepts it)
+# In the price list, the modelName of "ep-pksklwtb" is "LLM-A1"; sending "LLM-A1" should be aliased to ep-pksklwtb
 req "/proxy/$SPACE/v1/messages" \
   "{\"model\":\"LLM-A1\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 if [[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "400" || "$HTTP_CODE" == "401" ]]; then
-  # 只要不是 "not a registered display name" 就说明 gate 通过了 alias
+  # As long as it is not "not a registered display name", the gate passed the alias
   if printf '%s' "$BODY" | grep -q "not a registered display name"; then
-    bad "P1-E3" "alias 未生效 (gate 拒了 display name LLM-A1)"
+    bad "P1-E3" "alias not in effect (gate rejected display name LLM-A1)"
   else
-    ok "P1-E3" "alias 解析通过 gate (LLM-A1 → $HTTP_CODE)"
+    ok "P1-E3" "alias resolved through gate (LLM-A1 -> $HTTP_CODE)"
   fi
 else
-  bad "P1-E3" "意外状态 $HTTP_CODE"
+  bad "P1-E3" "unexpected status $HTTP_CODE"
 fi
 
-# P1-E4 custom upstream 跳过 gate → 随意 model 不 400
+# P1-E4 custom upstream skips the gate -> arbitrary model does not 400
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"whatever-custom-model\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 if [[ "$HTTP_CODE" != "400" ]] || ! printf '%s' "$BODY" | grep -q "not a registered display name"; then
-  ok "P1-E4" "custom upstream 跳过 gate ($HTTP_CODE)"
+  ok "P1-E4" "custom upstream skips gate ($HTTP_CODE)"
 else
-  bad "P1-E4" "custom upstream 仍被 gate 拒"
+  bad "P1-E4" "custom upstream still rejected by gate"
 fi
 
 ##############################################################################
-head_ "P1-F Session-Init 自动化项 (2)"
+head_ "P1-F Session-Init automated items (2)"
 ##############################################################################
 
-# P1-F5 preset identity: 带 headerAutoSelect 配置的 header 名 (x-team-id / x-agent-id)
-# ⚠️ header 名来自 config.sessionInit.headerAutoSelect.* ，默认 x-team-id / x-agent-id
-#    (不是 x-tdai-preset-*)。发错名字会退化成普通 custom header，请求仍 200 但没走预选。
+# P1-F5 preset identity: use the header names configured in headerAutoSelect (x-team-id / x-agent-id)
+# WARNING: header names come from config.sessionInit.headerAutoSelect.*, defaulting to x-team-id / x-agent-id
+#    (not x-tdai-preset-*). A wrong name degrades to an ordinary custom header; the request still returns 200 but skips preselection.
 F5SID="preset-probe-$(date +%s)"
 if [[ -z "$PRESET_TEAM_ID" || -z "$PRESET_AGENT_ID" ]]; then
-  skip "P1-F5" "需 PRESET_TEAM_ID + PRESET_AGENT_ID (真实实例的 team-/agt- id)"
+  skip "P1-F5" "requires PRESET_TEAM_ID + PRESET_AGENT_ID (team-/agt- ids of a real instance)"
   before=$(log_lines); delta=""
 else
 before=$(log_lines)
@@ -118,47 +118,47 @@ req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}" \
   "x-claude-code-session-id: $F5SID" "x-team-id: $PRESET_TEAM_ID" "x-agent-id: $PRESET_AGENT_ID"
 delta=$(log_delta "$before")
-# 判据: 没有弹 form (无 pending_asset_confirm)，且注入了 (injection 生效)
+# Criterion: no form was shown (no pending_asset_confirm) and injection took effect
 if printf '%s' "$delta" | grep -q "pending_asset_confirm\|pending_team_select"; then
-  bad "P1-F5" "header 预选未生效，仍弹了 form"
+  bad "P1-F5" "header preselection not in effect, form was still shown"
 elif printf '%s' "$delta" | grep -qE "prewarm|injection\]|tdai-recorder:write-l0"; then
-  ok "P1-F5" "header 预选生效: 跳过 form 直接注入+转发"
+  ok "P1-F5" "header preselection in effect: skipped form, injected + forwarded directly"
 else
-  bad "P1-F5" "无法确认预选效果｜$(printf '%s' "$delta" | head -3)"
+  bad "P1-F5" "cannot confirm preselection effect | $(printf '%s' "$delta" | head -3)"
 fi
 fi  # end PRESET_TEAM_ID/PRESET_AGENT_ID guard
 
-# P1-F8 form 响应格式: 各协议 form 格式需真实客户端触发 → 由 TUI 驱动覆盖
-skip "P1-F8" "form 响应格式需新 session 触发｜由 TUI 驱动覆盖"
+# P1-F8 form response format: each protocol's form format needs a real client to trigger it -> covered by the TUI driver
+skip "P1-F8" "form response format needs a new session to trigger | covered by the TUI driver"
 
-# P1-F9 session-init 异常降级: 需 mock store 报错
-skip "P1-F9" "需 mock session store 报错"
+# P1-F9 session-init error degradation: needs a mock store error
+skip "P1-F9" "needs a mock session store error"
 
 ##############################################################################
-head_ "P1-G Mem 命令 (6)"
+head_ "P1-G Mem commands (6)"
 ##############################################################################
 
-# 建一个已初始化 session（用 header 预选，跳过 form）—— mem 命令要求
-# session 已绑定 team/agent，否则被 blocked: session not initialized。
+# Create an initialized session (preselect via header, skipping the form) -- mem commands require
+# the session to be bound to a team/agent, otherwise blocked: session not initialized.
 MEMSID="memcmd-probe-$(date +%s)"
 MEM_SKIP=0
 if [[ -z "$PRESET_TEAM_ID" || -z "$PRESET_AGENT_ID" ]]; then
-  skip "P1-G*" "跳过整组 mem 命令: 需 PRESET_TEAM_ID + PRESET_AGENT_ID 预热 session"
+  skip "P1-G*" "skipping the whole mem command group: needs PRESET_TEAM_ID + PRESET_AGENT_ID to warm up the session"
   MEM_SKIP=1
 fi
 if (( MEM_SKIP == 0 )); then
-# 预选 header 分开传（curl -H 不吃逗号分隔）
+# Pass the preselect headers separately (curl -H does not accept comma separation)
 PRESEL_TEAM="x-team-id: $PRESET_TEAM_ID"
 PRESEL_AGENT="x-agent-id: $PRESET_AGENT_ID"
-# 预热: 先发一条普通消息把 session 建起来
+# Warm-up: send an ordinary message first to create the session
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"warmup\"}]}" \
   "x-claude-code-session-id: $MEMSID" "$PRESEL_TEAM" "$PRESEL_AGENT" >/dev/null 2>&1
 
-# mem 命令用同一 session + 预选 header。
-# ⚠️ 不能用 `delta=$(mem_req ...)` 调用 —— 命令替换会把函数放进子 shell，
-#    函数内设置的 BODY/HTTP_CODE 在父 shell 全部丢失（曾导致 txt 恒为空）。
-#    改为: 调 mem_req <cmd> 后, 读全局 $MEM_DELTA / $BODY。
+# mem commands use the same session + preselect headers.
+# WARNING: do not call it as `delta=$(mem_req ...)` -- command substitution runs the function in a subshell,
+#    so BODY/HTTP_CODE set inside the function are all lost in the parent shell (this once left txt permanently empty).
+#    Instead: call mem_req <cmd>, then read the globals $MEM_DELTA / $BODY.
 MEM_DELTA=""
 mem_req() {
   local cmd="$1"
@@ -170,192 +170,192 @@ mem_req() {
   MEM_DELTA=$(log_delta "$before")
 }
 
-# 提取响应里的 assistant 文本（用于断言"真实回文案"而不是"日志出现命令名"）
+# Extract the assistant text from the response (to assert on the "actual reply text" rather than "the command name appearing in logs")
 resp_text() {
   printf '%s' "$BODY" | jq -r '[.content[]? | select(.type=="text") | .text] | join(" ")' 2>/dev/null \
     || printf '%s' "$BODY" | jq -r '.choices[0].message.content // empty' 2>/dev/null || true
 }
 
-# ⚠️ 顺序关键: mem:session-reset 会**解绑** session, 之后所有 mem 命令都会被
-#    "session not initialized" 挡下。所以 reset 必须放在 mem 组最后测。
+# WARNING: order matters: mem:session-reset **unbinds** the session, after which every mem command is
+#    blocked by "session not initialized". So reset must be tested last in the mem group.
 
-# P1-G4 mem:sync → 响应文案含"已刷新"
+# P1-G4 mem:sync -> response text contains "已刷新" (Chinese reply text matched at runtime)
 mem_req "mem:sync"
 delta="$MEM_DELTA"
 txt=$(resp_text)
 if printf '%s' "$txt" | grep -q "已刷新"; then
-  ok "P1-G4" "mem:sync → 响应含『已刷新』: $(printf '%s' "$txt" | head -c 60)"
+  ok "P1-G4" "mem:sync -> response contains '已刷新': $(printf '%s' "$txt" | head -c 60)"
 elif printf '%s' "$delta" | grep -qE "mem-command\] cmd=sync.*success=true"; then
-  ok "P1-G4" "mem:sync → success=true (日志)"
+  ok "P1-G4" "mem:sync -> success=true (log)"
 else
-  bad "P1-G4" "mem:sync 未成功｜txt=$(printf '%s' "$txt" | head -c 80)"
+  bad "P1-G4" "mem:sync not successful | txt=$(printf '%s' "$txt" | head -c 80)"
 fi
 
-# P1-G3 mem:create-skill → 响应含"归档"
-mem_req "mem:create-skill 测试用技能"
+# P1-G3 mem:create-skill -> response contains "归档" (Chinese reply text matched at runtime)
+mem_req "mem:create-skill test skill"
 delta="$MEM_DELTA"
 txt=$(resp_text)
 if printf '%s' "$txt" | grep -qE "归档"; then
-  ok "P1-G3" "mem:create-skill → 响应含『归档』: $(printf '%s' "$txt" | head -c 60)"
+  ok "P1-G3" "mem:create-skill -> response contains '归档': $(printf '%s' "$txt" | head -c 60)"
 else
-  bad "P1-G3" "create-skill 未成功｜txt=$(printf '%s' "$txt" | head -c 120)"
+  bad "P1-G3" "create-skill not successful | txt=$(printf '%s' "$txt" | head -c 120)"
 fi
 
-# P1-G5 mem:status —— 代码里无此命令 (KNOWN_COMMANDS 只有 help/sync/create-skill/
-# create-task/update-task/session-reset), 清单该项为文档误写
+# P1-G5 mem:status -- this command does not exist in the code (KNOWN_COMMANDS only has help/sync/create-skill/
+# create-task/update-task/session-reset); this checklist item is a documentation error
 mem_req "mem:status"
 delta="$MEM_DELTA"
 txt=$(resp_text)
 if printf '%s' "$txt" | grep -q "未知命令"; then
-  skip "P1-G5" "清单误写: 无 status 命令, 客户端收到『未知命令』(与代码实现一致)"
+  skip "P1-G5" "checklist error: no status command, client receives '未知命令' (consistent with the code)"
 else
-  bad "P1-G5" "status 行为异常｜$(printf '%s' "$txt" | head -c 120)"
+  bad "P1-G5" "status behaved unexpectedly | $(printf '%s' "$txt" | head -c 120)"
 fi
 
-# P1-G6 mem 响应格式：由 TUI 驱动覆盖（真客户端渲染）
-skip "P1-G6" "mem 响应格式需真客户端渲染｜由 TUI 驱动覆盖"
+# P1-G6 mem response format: covered by the TUI driver (rendered by a real client)
+skip "P1-G6" "mem response format needs real client rendering | covered by the TUI driver"
 
-# P1-G7 非 mem 命令不拦截
+# P1-G7 non-mem commands are not intercepted
 before=$(log_lines)
 req "/claude-code/$SPACE/v1/messages" \
-  "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"请正常回答，这不是命令\"}]}" \
+  "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"Please answer normally, this is not a command\"}]}" \
   "x-claude-code-session-id: $MEMSID" "$PRESEL_TEAM" "$PRESEL_AGENT"
 delta=$(log_delta "$before")
 if ! printf '%s' "$delta" | grep -qE "mem-command\] cmd="; then
-  ok "P1-G7" "普通对话未被 mem 拦截"
+  ok "P1-G7" "ordinary conversation not intercepted by mem"
 else
-  bad "P1-G7" "普通对话被误判为 mem 命令"
+  bad "P1-G7" "ordinary conversation misidentified as a mem command"
 fi
 
-# P1-G1 mem:session-reset 识别（放最后：会解绑 session）
+# P1-G1 mem:session-reset recognition (run last: it unbinds the session)
 mem_req "mem:session-reset"
 delta="$MEM_DELTA"
 txt=$(resp_text)
 if printf '%s' "$delta" | grep -qE "mem-command:pre.*session-reset|falling through to pop form"; then
-  ok "P1-G1" "mem:session-reset 被 pre-hook 拦截 → 重弹 form"
+  ok "P1-G1" "mem:session-reset intercepted by pre-hook -> form re-shown"
 elif printf '%s' "$txt" | grep -qE "重置|重新选择|关联团队资产"; then
-  ok "P1-G1" "mem:session-reset → 响应含重置/form 文案"
+  ok "P1-G1" "mem:session-reset -> response contains reset/form text"
 else
-  bad "P1-G1" "mem:session-reset 未被识别"
+  bad "P1-G1" "mem:session-reset not recognized"
 fi
 fi  # end MEM_SKIP guard
 
 ##############################################################################
-head_ "P1-K Cost-Guard 路由 (2 可自动)"
+head_ "P1-K Cost-Guard routing (2 automatable)"
 ##############################################################################
 
-# P1-K4 markerOptIn=false → 默认 useGuard (本实例 markerOptIn=false)
+# P1-K4 markerOptIn=false -> useGuard by default (this instance has markerOptIn=false)
 before=$(log_lines)
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 delta=$(log_delta "$before")
 if printf '%s' "$delta" | grep -qE "COST_GUARD"; then
-  ok "P1-K4" "markerOptIn=false 默认行为生效: $(printf '%s' "$delta" | grep -oE 'COST_GUARD[^(]*\([^)]*\)' | head -1)"
+  ok "P1-K4" "markerOptIn=false default behavior in effect: $(printf '%s' "$delta" | grep -oE 'COST_GUARD[^(]*\([^)]*\)' | head -1)"
 else
-  bad "P1-K4" "无 COST_GUARD 日志"
+  bad "P1-K4" "no COST_GUARD log"
 fi
 
-# P1-K6 analyzerTrace report：cost-guard 关闭时无 → 依赖 K4 状态
+# P1-K6 analyzerTrace report: absent when cost-guard is off -> depends on K4 state
 if [[ "$(curl -s -m 5 "$PROXY/health" | jq -r '.costGuard')" == "disabled" ]]; then
-  skip "P1-K6" "costGuard 未启用，analyzer trace 不产生（config 决定）"
+  skip "P1-K6" "costGuard not enabled, analyzer trace not produced (determined by config)"
 else
   before=$(log_lines)
   req "/claude-code/$SPACE/v1/messages" \
     "{\"model\":\"$MODEL\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
   delta=$(log_delta "$before")
   if printf '%s' "$delta" | grep -qi "analyzer\|analyse"; then
-    ok "P1-K6" "analyzer trace 有调用"
+    ok "P1-K6" "analyzer trace was invoked"
   else
-    skip "P1-K6" "未见 analyzer trace 日志"
+    skip "P1-K6" "no analyzer trace log seen"
   fi
 fi
 
-# P1-K7 CC anthropic 独立上游: 本实例已被 instance-upstream 覆盖成 api.deepseek.com
+# P1-K7 CC anthropic independent upstream: this instance is overridden by instance-upstream to api.deepseek.com
 before=$(log_lines)
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 delta=$(log_delta "$before")
 fwd=$(printf '%s' "$delta" | grep -oE "FORWARD upstream=\S+" | head -1)
 if [[ -n "$fwd" ]]; then
-  ok "P1-K7" "CC 转发目标: $fwd"
+  ok "P1-K7" "CC forward target: $fwd"
 else
-  skip "P1-K7" "未捕获转发目标"
+  skip "P1-K7" "forward target not captured"
 fi
 
 ##############################################################################
-head_ "P1-L 压缩 (2 可自动)"
+head_ "P1-L compression (2 automatable)"
 ##############################################################################
 
-# P1-L3/L4 CFQ tag 剥离: cost-guard 关闭时压缩不启用 → SKIP
-skip "P1-L3" "CFQ tag 剥离需 requestPrepare 启用（本实例 space policy 未开）"
-skip "P1-L4" "同上"
+# P1-L3/L4 CFQ tag stripping: compression is not enabled when cost-guard is off -> SKIP
+skip "P1-L3" "CFQ tag stripping needs requestPrepare enabled (this instance's space policy has it off)"
+skip "P1-L4" "same as above"
 
 ##############################################################################
-head_ "P1-M 转发 + 重试 (2 可自动)"
+head_ "P1-M forwarding + retry (2 automatable)"
 ##############################################################################
 
-# P1-M5 上游 4xx 错误体透传
+# P1-M5 upstream 4xx error body passthrough
 req "/proxy/$SPACE/v1/messages" \
   "{\"model\":\"totally-fake-model-zzz\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 if [[ "$HTTP_CODE" == "400" ]] && printf '%s' "$BODY" | grep -q "error"; then
-  ok "P1-M5" "客户端收到完整错误体 ($HTTP_CODE)"
+  ok "P1-M5" "client received the full error body ($HTTP_CODE)"
 else
-  bad "P1-M5" "错误体未透传｜$HTTP_CODE $(printf '%s' "$BODY" | head -c 150)"
+  bad "P1-M5" "error body not passed through | $HTTP_CODE $(printf '%s' "$BODY" | head -c 150)"
 fi
 
-# P1-M1 AbortSignal.timeout: 本实例 forwardTimeoutMs=600000，构造超时需改配置 → SKIP
-skip "P1-M1" "需 forwardTimeoutMs 调小 + mock 慢上游"
+# P1-M1 AbortSignal.timeout: this instance has forwardTimeoutMs=600000; triggering a timeout needs a config change -> SKIP
+skip "P1-M1" "needs a smaller forwardTimeoutMs + a mock slow upstream"
 
 ##############################################################################
-head_ "P1-N 限流 + 计费 (4 可自动)"
+head_ "P1-N rate limiting + billing (4 automatable)"
 ##############################################################################
 
-# P1-N1 enforceRateLimit 拦截: 本实例 QPM=100，需打满 → 用低 QPM 实例不可得
-# 改为验证 rate-limit 日志存在 + 计数递增
+# P1-N1 enforceRateLimit interception: this instance has QPM=100 and would need to be saturated -> a low-QPM instance is not available
+# Instead verify the rate-limit log exists + the count increments
 before=$(log_lines)
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 delta=$(log_delta "$before")
 if printf '%s' "$delta" | grep -q "rate_limit.decision"; then
-  ok "P1-N1" "rate-limit 判定生效: $(printf '%s' "$delta" | grep -oE '\"allowed\":\w+' | head -1)"
+  ok "P1-N1" "rate-limit decision in effect: $(printf '%s' "$delta" | grep -oE '\"allowed\":\w+' | head -1)"
 elif [[ -f "$PROXY_STDOUT" ]] && grep -q "rate_limit.decision" "$PROXY_STDOUT"; then
-  ok "P1-N1" "rate-limit 判定生效 (日志在别处)"
+  ok "P1-N1" "rate-limit decision in effect (log elsewhere)"
 else
-  skip "P1-N1" "未见 rate_limit.decision（可能写 proxy.log）"
+  skip "P1-N1" "no rate_limit.decision seen (may be written to proxy.log)"
 fi
 
-# P1-N3 custom upstream 不限流：本实例 CC 走 instance 覆盖
-skip "P1-N3" "需配 custom upstream + 低 QPM 实例"
+# P1-N3 custom upstream is not rate limited: this instance's CC uses the instance override
+skip "P1-N3" "needs a custom upstream + low-QPM instance"
 
-# P1-N4 tryReportCreditFromPath → 查计费日志
+# P1-N4 tryReportCreditFromPath -> check the billing log
 before=$(log_lines)
 req "/claude-code/$SPACE/v1/messages" \
   "{\"model\":\"$MODEL\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
 delta=$(log_delta "$before")
 if [[ -z "$PROXY_LOG_DIR" ]]; then
-  skip "P1-N4" "需 PROXY_LOG_DIR 指向 proxy.log 目录才能断言 credit.report"
+  skip "P1-N4" "needs PROXY_LOG_DIR pointing to the proxy.log directory to assert credit.report"
 else
   recent_credit=$(tail -50 "$PROXY_LOG_DIR/proxy.log" 2>/dev/null | grep -c "credit.report" || true)
   if (( recent_credit > 0 )); then
-    ok "P1-N4" "计费上报有记录 (proxy.log 近 50 行 $recent_credit 条)"
+    ok "P1-N4" "billing report recorded (proxy.log last 50 lines: $recent_credit entries)"
   else
-    bad "P1-N4" "计费日志无 credit.report"
+    bad "P1-N4" "no credit.report in billing log"
   fi
 fi
 
-# P1-N5 x-credit-report-error: 需 mock 计费 API 失败
-skip "P1-N5" "需 mock 计费 API 返错"
+# P1-N5 x-credit-report-error: needs the mock billing API to fail
+skip "P1-N5" "needs the mock billing API to return an error"
 
-# P1-N6 skipCreditReport: custom upstream 时不上报 → 需 custom 实例
-skip "P1-N6" "需 custom upstream 实例"
+# P1-N6 skipCreditReport: no reporting with a custom upstream -> needs a custom instance
+skip "P1-N6" "needs a custom upstream instance"
 
 ##############################################################################
 printf '\n\033[1m========================================\033[0m\n'
-printf '\033[1m P1 API TEST 汇总\033[0m\n'
+printf '\033[1m P1 API TEST summary\033[0m\n'
 printf '\033[1m========================================\033[0m\n'
 printf '  PASS=%d  FAIL=%d  SKIP=%d\n' "$PASS" "$FAIL" "$SKIP"
 if (( ${#FAILED_ITEMS[@]} > 0 )); then
-  printf '\n  失败项:\n'
+  printf '\n  Failed items:\n'
   for it in "${FAILED_ITEMS[@]}"; do printf '    ✗ %s\n' "$it"; done
 fi
 printf '\n'

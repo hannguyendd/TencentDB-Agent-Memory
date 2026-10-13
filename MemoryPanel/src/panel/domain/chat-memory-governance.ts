@@ -1,24 +1,24 @@
 /**
- * chat-memory-governance.ts —— chat_memory 资产专属的归属/共享数据模型。
+ * chat-memory-governance.ts -- ownership / sharing data model specific to the chat_memory asset.
  *
- * 跟 skill / wiki / code 不共用：每种资产的归属模型不同，硬抽象会绑架后续。
+ * Not shared with skill / wiki / code: each asset type has a different ownership model, and forcing an abstraction would hold back future work.
  *
- * 数据形状：
- *   每个 Agent 上挂一个 ChatMemoryAgentRel（共享开关 + 借入 ≤ 2）
+ * Data shape:
+ *   Each Agent carries a ChatMemoryAgentRel (sharing switch + imports <= 2)
  *
- * 持久化：
- *   后端 schema 还没落 chat_memory_rel 真字段；演示阶段把它塞进
- *   Agent.metadata_json 的 "chat_memory" namespace，与前端共用同一份契约。
- *   后端补字段后，把 readChatMemoryRel / writeChatMemoryRel 的实现切到真字段即可。
+ * Persistence:
+ *   The backend schema does not yet have a real chat_memory_rel field; for the demo phase it is stored in
+ *   the "chat_memory" namespace of Agent.metadata_json, sharing the same contract with the frontend.
+ *   Once the backend adds the field, switch the readChatMemoryRel / writeChatMemoryRel implementations to the real field.
  */
 
-/** 借入上限 —— chat_memory 专属。其他资产将来如有借入概念，自行定义。 */
+/** Import limit -- specific to chat_memory. Other assets define their own if they ever get an import concept. */
 export const MAX_IMPORTED_AGENTS = 2;
 
 export interface ChatMemoryAgentRel {
-  /** 自己的记忆是否对全 team 可见。本期 UI 锁定 true（"只要有就全局展示"）。 */
+  /** Whether its own memory is visible to the whole team. This release's UI locks it to true ("show globally whenever it exists"). */
   memory_shared_with_team: boolean;
-  /** 借入的 agent_id（≤ MAX_IMPORTED_AGENTS、必须同 team、不含自己、去重）。 */
+  /** Imported agent_ids (<= MAX_IMPORTED_AGENTS, must be in the same team, exclude self, deduplicated). */
   imported_agent_ids: string[];
 }
 
@@ -29,23 +29,23 @@ export const DEFAULT_CHAT_MEMORY_REL: ChatMemoryAgentRel = {
 
 export type ValidateResult = { ok: true } | { ok: false; reason: string };
 
-/** 校验 self 借入 ids 的规则；前端、后端共用。 */
+/** Rules for validating self's imported ids; shared by frontend and backend. */
 export function validateImportedAgents(
   selfId: string,
   ids: string[],
   teamAgents: Array<{ agent_id: string }>,
 ): ValidateResult {
-  if (!Array.isArray(ids)) return { ok: false, reason: 'imported_agent_ids 必须是数组' };
+  if (!Array.isArray(ids)) return { ok: false, reason: 'imported_agent_ids must be an array' };
   if (ids.length > MAX_IMPORTED_AGENTS) {
-    return { ok: false, reason: `最多只能借入 ${MAX_IMPORTED_AGENTS} 个 agent` };
+    return { ok: false, reason: `At most ${MAX_IMPORTED_AGENTS} agents can be imported` };
   }
   const teamSet = new Set(teamAgents.map((a) => a.agent_id));
   const seen = new Set<string>();
   for (const id of ids) {
-    if (!id || typeof id !== 'string') return { ok: false, reason: '存在无效的 agent_id' };
-    if (id === selfId) return { ok: false, reason: '不能借入自己的记忆' };
-    if (!teamSet.has(id)) return { ok: false, reason: `agent_id "${id}" 不在当前 team 中` };
-    if (seen.has(id)) return { ok: false, reason: '借入列表中存在重复 agent' };
+    if (!id || typeof id !== 'string') return { ok: false, reason: 'Invalid agent_id present' };
+    if (id === selfId) return { ok: false, reason: 'Cannot import its own memory' };
+    if (!teamSet.has(id)) return { ok: false, reason: `agent_id "${id}" is not in the current team` };
+    if (seen.has(id)) return { ok: false, reason: 'Duplicate agent in the import list' };
     seen.add(id);
   }
   return { ok: true };
@@ -58,7 +58,7 @@ interface AgentLike {
   metadata_json?: string;
 }
 
-/** 从 Agent 读 chat_memory_rel；缺失时返回默认值。永不抛异常。 */
+/** Read chat_memory_rel from the Agent; returns the default when missing. Never throws. */
 export function readChatMemoryRel(agent: AgentLike): ChatMemoryAgentRel {
   if (!agent.metadata_json) return { ...DEFAULT_CHAT_MEMORY_REL };
   try {
@@ -68,12 +68,12 @@ export function readChatMemoryRel(agent: AgentLike): ChatMemoryAgentRel {
       return normalizeRel(slot as Partial<ChatMemoryAgentRel>);
     }
   } catch {
-    /* 旧值不合法，走默认 */
+    /* Old value invalid, use the default */
   }
   return { ...DEFAULT_CHAT_MEMORY_REL };
 }
 
-/** 把 chat_memory_rel 合并写回 metadata_json，返回新的 JSON 字符串（不修改入参）。 */
+/** Merge chat_memory_rel back into metadata_json and return the new JSON string (input not modified). */
 export function writeChatMemoryRel(
   prevMetadataJson: string | undefined,
   rel: ChatMemoryAgentRel,
@@ -84,7 +84,7 @@ export function writeChatMemoryRel(
       const parsed = JSON.parse(prevMetadataJson);
       if (parsed && typeof parsed === 'object') meta = parsed as Record<string, unknown>;
     } catch {
-      /* 丢弃 */
+      /* discard */
     }
   }
   meta[METADATA_NS] = normalizeRel(rel);

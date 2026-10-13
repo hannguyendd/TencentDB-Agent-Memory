@@ -40,18 +40,18 @@ function readAction(path: string): string {
   return path.slice(idx + marker.length);
 }
 
-// ── 创建时重复名称检查 ──
+// ── Duplicate name check at creation ──
 
 interface DupCheckConfig {
-  /** 用来查重的 list action。 */
+  /** The list action used for the duplicate check. */
   listAction: string;
-  /** 从 create body 构造 list 请求体（限定可见范围）。 */
+  /** Build the list request body from the create body (limits the visible scope). */
   listBody: (body: Record<string, unknown>) => Record<string, unknown>;
-  /** 内核新增的精确过滤参数名。 */
+  /** Name of the exact-filter parameter newly added in the kernel. */
   filterParam: string;
-  /** 从 create body 提取待匹配的值。 */
+  /** Extract the value to match from the create body. */
   matchValue: (body: Record<string, unknown>) => string | undefined;
-  /** 中文实体名，用于错误消息。 */
+  /** Entity name, used in error messages. */
   entityLabel: string;
 }
 
@@ -61,28 +61,28 @@ const DUP_CHECK_MAP: Record<string, DupCheckConfig> = {
     listBody: () => ({}),
     filterParam: 'username',
     matchValue: (b) => (typeof b.username === 'string' ? b.username : undefined),
-    entityLabel: '用户',
+    entityLabel: 'User',
   },
-  // user/create 的姊妹接口：查重口径与 user/create 完全一致（先按 username 精确 list）。
-  // user_key 的重复由内核 duplicate_user_key(409) 兜底，Panel 直接透传。
+  // Sibling endpoint of user/create: the duplicate-check standard is exactly the same as user/create (first an exact list by username).
+  // Duplicate user_key is caught by the kernel's duplicate_user_key(409); Panel passes it through directly.
   'user/create-with-key': {
     listAction: 'user/list',
     listBody: () => ({}),
     filterParam: 'username',
     matchValue: (b) => (typeof b.username === 'string' ? b.username : undefined),
-    entityLabel: '用户',
+    entityLabel: 'User',
   },
   'team/create': {
     listAction: 'team/list',
     listBody: (b) => ({ user_id: b.owner_user_id }),
     filterParam: 'name',
     matchValue: (b) => (typeof b.name === 'string' ? b.name : undefined),
-    entityLabel: '团队',
+    entityLabel: 'Team',
   },
   'agent/create': {
     listAction: 'agent/list',
-    // 面板「删除」走 agent/archive（status→inactive），列表只展示 active；
-    // 查重须同样过滤，否则归档后同名重建会被误拦 409。
+    // The panel's "delete" goes through agent/archive (status -> inactive), and the list only shows active;
+    // the duplicate check must filter the same way, otherwise recreating a same-named agent after archiving would be wrongly blocked with 409.
     listBody: (b) => ({ team_id: b.team_id, owner_user_id: b.owner_user_id, status: 'active' }),
     filterParam: 'name',
     matchValue: (b) => (typeof b.name === 'string' ? b.name : undefined),
@@ -90,7 +90,7 @@ const DUP_CHECK_MAP: Record<string, DupCheckConfig> = {
   },
   'task/create': {
     listAction: 'task/list',
-    // 面板删 Task 走物理 task/delete；completed 仍在工作台可见，故查重含全部状态。
+    // The panel deletes Task via physical task/delete; completed ones are still visible in the workbench, so the duplicate check covers all statuses.
     listBody: (b) => ({ team_id: b.team_id, creator_user_id: b.creator_user_id }),
     filterParam: 'title',
     matchValue: (b) => (typeof b.title === 'string' ? b.title : undefined),
@@ -99,8 +99,8 @@ const DUP_CHECK_MAP: Record<string, DupCheckConfig> = {
 };
 
 /**
- * 对 create 类 action 做"先查后写"重复检查。
- * 返回 null 表示不重复；否则返回中文错误消息。
+ * Perform a "check first, then write" duplicate check for create-type actions.
+ * Returns null when there is no duplicate; otherwise returns an error message.
  */
 async function checkDuplicate(
   action: string,
@@ -123,8 +123,8 @@ async function checkDuplicate(
   try {
     const envelope = await deps.metaKernel.invoke(config.listAction, listBody, ctx);
     if (envelope.code === 0) {
-      // 以返回 items 中的精确同名为准；部分内核版本可能暂不支持 name 过滤，
-      // 不能因为 items 非空就误判重复。
+      // Go by an exact same-name match among the returned items; some kernel versions may not support name filtering yet,
+      // so a non-empty items must not be misjudged as a duplicate.
       const data = envelope.data as { items?: unknown[] } | undefined;
       if (Array.isArray(data?.items)) {
         const duplicated = data.items.some((item) => {
@@ -133,17 +133,17 @@ async function checkDuplicate(
           return typeof value === 'string' && value === targetValue;
         });
         if (duplicated) {
-          return `已存在同名${config.entityLabel}「${targetValue}」，请更换名称后重试。`;
+          return `A ${config.entityLabel} named "${targetValue}" already exists. Please choose a different name and try again.`;
         }
       }
     }
   } catch {
-    // 查重失败时放行，宁可允许重复也不错杀正常创建
+    // On duplicate-check failure let it through; better to allow a duplicate than to wrongly block a normal create
   }
   return null;
 }
 
-// ── 路由注册 ──
+// ── Route registration ──
 
 export function registerMetaProxyRoutes(api: Hono, deps: PanelDeps): void {
   api.post('/meta/*', validatePanelMetaHeaders(deps), async (c) => {
@@ -176,13 +176,13 @@ export function registerMetaProxyRoutes(api: Hono, deps: PanelDeps): void {
       reqId: c.get('reqId'),
     };
 
-    // create 类 action：先查重
+    // create-type actions: duplicate check first
     const duplicateMsg = await checkDuplicate(action, body, ctx, deps);
     if (duplicateMsg) {
       return respondControlError(c, 409, duplicateMsg);
     }
 
-    // ── 默认 Agent 模板读写：Panel 直接读写本地文件（不转发内核）──
+    // ── Default Agent template read/write: Panel reads/writes local files directly (not forwarded to the kernel) ──
     if (action === 'agent/set-default-template') {
       if (!(await isCallerSystemAdmin(deps, ctx))) {
         return respondControlError(c, 403, 'permission_denied');
@@ -203,7 +203,7 @@ export function registerMetaProxyRoutes(api: Hono, deps: PanelDeps): void {
 
     const envelope = await deps.metaKernel.invoke(action, body, ctx);
 
-    // team-member/add 成功后，为默认 Agent 复制模板资产（best-effort，异步不阻塞响应）
+    // After team-member/add succeeds, copy template assets for the default Agent (best-effort, async, does not block the response)
     if (action === 'team-member/add' && envelope.code === 0) {
       void cloneDefaultAgentForNewMember(body, ctx, deps);
     }
@@ -211,27 +211,27 @@ export function registerMetaProxyRoutes(api: Hono, deps: PanelDeps): void {
     if (action === 'user/list' && envelope.code === 0) {
       hideKnowledgeServiceUser(envelope.data);
     }
-    // 切私密后：不再由 backend 主动 prune 其它 agent 的绑定。
-    // 内核权限模型下 caller 只能 set 自己 owner 的 agent，跨 owner 会 403。
-    // 保留脏 binding 也无害：injection / memory-bridge / 面板详情页在读侧调
-    // apply_visibility_filter=true 过滤掉 canBindAsset=false 的项。
+    // After switching to private: the backend no longer actively prunes other agents' bindings.
+    // Under the kernel permission model the caller can only set agents it owns; across owners it would get 403.
+    // Keeping dirty bindings is harmless: injection / memory-bridge / the panel detail page call
+    // apply_visibility_filter=true on the read side to filter out items with canBindAsset=false.
     return respondEnvelope(c, envelope);
   });
 }
 
-// ── team-member/add 成功后：为默认 Agent 复制模板资产（best-effort）──
+// ── After team-member/add succeeds: copy template assets for the default Agent (best-effort) ──
 
-// 默认 Agent 预置字段（对齐内核 DEFAULT_AGENT_*，无模板时建 default-agent 用）
+// Default Agent preset fields (aligned with kernel DEFAULT_AGENT_*, used to create default-agent when there is no template)
 const DEFAULT_AGENT_NAME = 'default-agent';
-const DEFAULT_AGENT_DESCRIPTION = '默认助手，可处理通用开发任务与日常协作。';
+const DEFAULT_AGENT_DESCRIPTION = 'Default assistant that handles general development tasks and everyday collaboration.';
 const DEFAULT_AGENT_PROMPT = '';
 const DEFAULT_AGENT_METADATA_JSON = JSON.stringify({
   ui: { role_prompt: '', rules_prompt: '' },
 });
 
 /**
- * 有模板 → 建同名 Agent（owner=新用户）→ 复制模板资产（skill fork / code_graph·wiki allocate）；
- * 无模板 → 建 default-agent-{username} → 导入预置 Skill。
+ * Template present -> create an Agent with the same name (owner = new user) -> copy template assets (skill fork / code_graph, wiki allocate);
+ * no template -> create default-agent-{username} -> import preset Skills.
  */
 async function cloneDefaultAgentForNewMember(
   body: Record<string, unknown>,
@@ -242,19 +242,19 @@ async function cloneDefaultAgentForNewMember(
   const teamId = body.team_id as string | undefined;
   if (!userId || !teamId) return;
 
-  // 1. 读本地模板文件
+  // 1. Read the local template file
   const template = readTemplateFile(deps.config.agentTemplateDir, ctx.instanceId, teamId);
   const hasTemplate = !!template?.name;
 
-  // 2. 拿 username（拼 default-agent 名）
+  // 2. Get username (to build the default-agent name)
   const userEnv = await deps.metaKernel.invoke('user/get', { user_id: userId }, ctx);
   const user = userEnv.code === 0 ? (userEnv.data as { username?: string } | null) : null;
   const defaultAgentName = `${DEFAULT_AGENT_NAME}-${user?.username ?? userId}`;
 
-  // 3. 决定目标 Agent：有模板同名 / 无模板 default-agent
+  // 3. Decide the target Agent: same-name template / default-agent when no template
   const agentName = hasTemplate ? template!.name : defaultAgentName;
 
-  // 4. 幂等查重：已存在同名 active agent 则跳过建本体
+  // 4. Idempotent duplicate check: if an active agent with the same name already exists, skip creating the agent itself
   const agentsEnv = await deps.metaKernel.invoke('agent/list', {
     team_id: teamId,
     owner_user_id: userId,
@@ -267,7 +267,7 @@ async function cloneDefaultAgentForNewMember(
   let defaultAgent = agents.find((a) => a.name === agentName);
 
   if (!defaultAgent) {
-    // 建本体（owner=新用户；有模板用模板字段，无模板用 default-agent 预置字段）
+    // Create the agent itself (owner = new user; use template fields when there is a template, default-agent preset fields otherwise)
     const createEnv = await deps.metaKernel.invoke('agent/create', {
       team_id: teamId,
       owner_user_id: userId,
@@ -291,7 +291,7 @@ async function cloneDefaultAgentForNewMember(
     };
   }
 
-  // 5. 有模板 → 复制资产；无模板 → 导入预置 skill
+  // 5. Template present -> copy assets; no template -> import preset skills
   if (hasTemplate) {
     await cloneTemplateAssets(deps, ctx, userId, teamId, template!, defaultAgent.agent_id);
   } else {
@@ -299,7 +299,7 @@ async function cloneDefaultAgentForNewMember(
   }
 }
 
-/** 复制模板资产：skill fork 副本 + code_graph/wiki allocate 引用。 */
+/** Copy template assets: skill fork copies + code_graph/wiki allocate references. */
 async function cloneTemplateAssets(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -308,7 +308,7 @@ async function cloneTemplateAssets(
   template: AgentTemplateConfig,
   agentId: string,
 ): Promise<void> {
-  // skills：fork 独立副本
+  // skills: fork independent copies
   for (const skillId of template.asset_ids?.skills ?? []) {
     try {
       await forkSkillToAgent(deps, ctx, userId, teamId, skillId, agentId);
@@ -320,7 +320,7 @@ async function cloneTemplateAssets(
     }
   }
 
-  // code_graph / wiki：allocate 引用
+  // code_graph / wiki: allocate references
   const knowledgeIds: Array<{ assetId: string; assetType: string }> = [
     ...(template.asset_ids?.code_graphs ?? []).map((assetId) => ({ assetId, assetType: 'code_graph' })),
     ...(template.asset_ids?.wikis ?? []).map((assetId) => ({ assetId, assetType: 'llm_wiki' })),
@@ -337,7 +337,7 @@ async function cloneTemplateAssets(
   }
 }
 
-/** fork skill 到目标 agent（get → files/read → create），复用前端 forkToAgent 的语义。 */
+/** Fork a skill to the target agent (get -> files/read -> create), reusing the semantics of the frontend forkToAgent. */
 async function forkSkillToAgent(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -386,7 +386,7 @@ async function forkSkillToAgent(
         });
       }
     } catch {
-      /* 单个资源读取失败则跳过 */
+      /* skip when a single resource read fails */
     }
   }
 
@@ -404,7 +404,7 @@ async function forkSkillToAgent(
   }
 }
 
-/** 把 knowledge 资产（code_graph / wiki）引用绑定到 agent（list → append → set）。 */
+/** Bind knowledge asset (code_graph / wiki) references to the agent (list -> append -> set). */
 async function allocateKnowledgeToAgent(
   deps: PanelDeps,
   ctx: MetaCallContext,
@@ -422,7 +422,7 @@ async function allocateKnowledgeToAgent(
     priority?: number;
     created_by?: string;
   }>(listEnv);
-  if (bindings.some((b) => b.asset_id === assetId)) return; // 已绑定，幂等跳过
+  if (bindings.some((b) => b.asset_id === assetId)) return; // already bound, skip idempotently
 
   const newBindings = [
     ...bindings.map((b) => ({
@@ -440,7 +440,7 @@ async function allocateKnowledgeToAgent(
   }
 }
 
-// ── team-member/add 成功后：为 default-agent 导入预置 Skill ──
+// ── After team-member/add succeeds: import preset Skills for default-agent ──
 
 async function importDefaultSkillsForNewMember(
   body: Record<string, unknown>,
@@ -452,13 +452,13 @@ async function importDefaultSkillsForNewMember(
     const teamId = body.team_id as string | undefined;
     if (!userId || !teamId) return;
 
-    // 1. 获取用户信息（拿 username 拼 agent 名称）
+    // 1. Get user info (to build the agent name from username)
     const userEnv = await deps.metaKernel.invoke('user/get', { user_id: userId }, ctx);
     if (userEnv.code !== 0) return;
     const user = userEnv.data as { username?: string };
     const agentName = `default-agent-${user.username ?? userId}`;
 
-    // 2. 查 default-agent
+    // 2. Look up default-agent
     const agentsEnv = await deps.metaKernel.invoke('agent/list', {
       team_id: teamId,
       owner_user_id: userId,
@@ -475,7 +475,7 @@ async function importDefaultSkillsForNewMember(
       return;
     }
 
-    // 3. 创建预置 Skill（依赖内核 name 唯一约束做幂等，42201 直接跳过）
+    // 3. Create preset Skills (relies on the kernel's unique name constraint for idempotency; 42201 is skipped directly)
     for (const skill of DEFAULT_SKILLS) {
       try {
         const createEnv = await deps.skillKernel.invoke('create', {
@@ -491,7 +491,7 @@ async function importDefaultSkillsForNewMember(
             agentId: defaultAgent.agent_id,
           });
         } else if (createEnv.code !== 42201) {
-          // 42201 = SKILL_NAME_DUPLICATE，忽略
+          // 42201 = SKILL_NAME_DUPLICATE, ignore
           deps.logger.warn(`default skill "${skill.name}" create failed`, {
             instanceId: ctx.instanceId,
             code: createEnv.code,

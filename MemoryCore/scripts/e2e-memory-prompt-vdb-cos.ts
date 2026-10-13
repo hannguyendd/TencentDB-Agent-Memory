@@ -85,10 +85,10 @@ const logIds: string[] = [];
 const generationRefIds: string[] = [];
 const generatedMemoryIds: string[] = [];
 const generatedProfileIds: string[] = [];
-const oldPromptText = `OLD_PROMPT_MARKER_${run}: 忽略长期项目代号。`;
-const latestPromptText = `LATEST_AGENT_L1_MARKER_${run}: 重点提取用户明确声明的长期项目代号，并保存为长期事实。`;
-const teamL2PromptText = `TEAM_L2_MARKER_${run}: 将项目代号、长期目标、架构约束和执行原则整理到同一个场景记忆。`;
-const instanceL3PromptText = `INSTANCE_L3_MARKER_${run}: 在长期画像中突出项目代号、长期目标、稳定约束和持续协作方式。`;
+const oldPromptText = `OLD_PROMPT_MARKER_${run}: Ignore long-term project codenames.`;
+const latestPromptText = `LATEST_AGENT_L1_MARKER_${run}: Focus on extracting the long-term project codename explicitly stated by the user and save it as a long-term fact.`;
+const teamL2PromptText = `TEAM_L2_MARKER_${run}: Consolidate the project codename, long-term goals, architectural constraints, and execution principles into the same scenario memory.`;
+const instanceL3PromptText = `INSTANCE_L3_MARKER_${run}: In the long-term profile, highlight the project codename, long-term goals, stable constraints, and ongoing collaboration style.`;
 const projectCode = `ORBIT-${run}`;
 
 const logger = {
@@ -324,9 +324,9 @@ async function main(): Promise<void> {
     const startedAt = Date.now();
     const extraction = await extractL1Memories({
       messages: [
-        { id: `msg-${run}-1`, role: "user", content: `我的长期项目代号是 ${projectCode}，请将其作为稳定工作背景长期保存。`, timestamp: startedAt },
-        { id: `msg-${run}-2`, role: "assistant", content: "明白，我会把这个项目代号作为长期事实保存。", timestamp: startedAt + 1 },
-        { id: `msg-${run}-3`, role: "user", content: `${projectCode} 是未来一年持续维护的核心项目，不是临时任务。`, timestamp: startedAt + 2 },
+        { id: `msg-${run}-1`, role: "user", content: `My long-term project codename is ${projectCode}; please save it long-term as stable working background.`, timestamp: startedAt },
+        { id: `msg-${run}-2`, role: "assistant", content: "Understood, I will save this project codename as a long-term fact.", timestamp: startedAt + 1 },
+        { id: `msg-${run}-3`, role: "user", content: `${projectCode} is a core project that will be maintained continuously over the next year, not a temporary task.`, timestamp: startedAt + 2 },
       ],
       sessionKey: `session-${run}`,
       sessionId: `session-${run}`,

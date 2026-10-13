@@ -2,11 +2,11 @@
  * CoreSkillClient — minimal HTTP client for the openclaw-plugin skill gateway.
  *
  * Scope: only the endpoints the proxy itself calls.
- *   - POST /v3/skill/search              → SkillInjector RAG 检索.
+ *   - POST /v3/skill/search              → SkillInjector RAG retrieval.
  *   - POST /v3/skill/listing             → SkillInjector owner-agent listing.
- *   - POST /v3/skill/conversation/add    → handler-glue 新链路, 每轮真人对话结束推送.
- *   - POST /v3/skill/extract 等其他方法保留在类里, 供 agent 通过 skill-bridge
- *     反代时透传使用 (agent 通过 curl 直接命中, 不由 proxy 主动触发)。
+ *   - POST /v3/skill/conversation/add    → handler-glue new path, pushed at the end of each real-human conversation round.
+ *   - POST /v3/skill/extract and other methods are kept in the class, for pass-through use when the agent goes through
+ *     the skill-bridge reverse proxy (the agent hits it directly via curl, not actively triggered by the proxy).
  *
  * The other /v3/skill/* endpoints are NOT wrapped here on purpose — the LLM
  * curls them directly via the /skill-bridge reverse proxy, so wrapping them
@@ -30,21 +30,21 @@ type Fetcher = typeof fetch;
 const TAG = "[core-skill-client]";
 
 /**
- * 身份字段。
+ * Identity fields.
  *
- * 重要：`user_id` 是 **可选** 的——skill 表上的 `user_id` 列只是 audit
- * （"上一次写入的 caller 是谁"），而非 ownership。skill 的归属维度由 schema
- * 的唯一索引 `(team_id, owner_agent_id, name)` 决定，与 user_id 无关。
+ * Important: `user_id` is **optional** -- the `user_id` column on the skill table is only audit
+ * ("who the last writing caller was"), not ownership. The ownership dimension of a skill is determined by the schema's
+ * unique index `(team_id, owner_agent_id, name)`, unrelated to user_id.
  *
- * 因此 read 路径（search / list）**不应该** 传 user_id 过滤，否则会把所有
- * "非当前 caller 写入"的 skill 全部毙掉（包括同 team / 同 agent 共享的 skill）。
- * write 路径（extract / save / update）才需要 user_id 用于审计。
+ * Therefore the read path (search / list) **should not** pass a user_id filter, otherwise it would knock out all
+ * skills "not written by the current caller" (including skills shared within the same team / same agent).
+ * Only the write path (extract / save / update) needs user_id for auditing.
  *
- * Plugin 端 store 已经是 "传啥过滤啥" 的语义（`if (opts.user_id) WHERE user_id=?`），
- * 这里把字段改成可选即可让 read 路径自然跳过该过滤。
+ * The plugin-side store already has "filter on whatever is passed" semantics (`if (opts.user_id) WHERE user_id=?`),
+ * so making the field optional here lets the read path naturally skip that filter.
  */
 export interface IdFields {
-  /** 可选 — 仅 audit 用。read 路径不要传，否则会过滤掉团队共享 skill。 */
+  /** Optional -- audit only. Do not pass on the read path, otherwise team-shared skills get filtered out. */
   user_id?: string;
   team_id: string;
   agent_id?: string;
@@ -88,12 +88,12 @@ export interface ExtractMessage {
 }
 
 /**
- * `/v3/skill/conversation/add` 请求体里单条消息形状。
+ * The shape of a single message in the `/v3/skill/conversation/add` request body.
  *
- * 相较于 `ExtractMessage`：
- *   - 允许 `system` role（跟设计 §11.1 的 5 种 role 对齐）
- *   - `tool_call` / `tool_result` 必须携带 `tool_name` + `tool_call_id`
- *   - `timestamp` 可以是数字（ms epoch）或 ISO 8601 字符串
+ * Compared with `ExtractMessage`:
+ *   - allows the `system` role (aligned with the 5 roles of design §11.1)
+ *   - `tool_call` / `tool_result` must carry `tool_name` + `tool_call_id`
+ *   - `timestamp` can be a number (ms epoch) or an ISO 8601 string
  */
 export interface ConversationTurnMessage {
   role: "user" | "assistant" | "tool_call" | "tool_result" | "system";
@@ -119,16 +119,16 @@ export interface ExtractAsyncResult {
 }
 
 /**
- * `/v3/skill/conversation/add` 输入。
+ * Input of `/v3/skill/conversation/add`.
  *
- * 强约束：
- *   - session_id / space_id / user_id / team_id / agent_id 全部必填
- *   - ID 字段不能包含 `|`（Core 拒绝，返回 400）
- *   - messages 是本轮增量（user + 中间 tool_call/tool_result + assistant 总结），
- *     不重传历史（Core 不去重，重传会造成 buffer 重复）
- *   - 同 session 必须严格串行（一轮 200 之后才发下一轮）
+ * Hard constraints:
+ *   - session_id / space_id / user_id / team_id / agent_id are all required
+ *   - ID fields must not contain `|` (Core rejects with 400)
+ *   - messages is this round's increment (user + intermediate tool_call/tool_result + assistant summary),
+ *     history is not re-sent (Core does not dedupe, and re-sending would duplicate the buffer)
+ *   - the same session must be strictly serial (the next round is sent only after one round returns 200)
  *
- * 详见 `2026-07-15-skill-trigger-in-core-design.md` §11.1 & §13。
+ * See `2026-07-15-skill-trigger-in-core-design.md` §11.1 & §13.
  */
 export interface ConversationAddInput extends IdFields {
   session_id: string;
@@ -137,7 +137,7 @@ export interface ConversationAddInput extends IdFields {
 }
 
 /**
- * 归档触发时的元数据；`status: "ok"` 时不带此字段。
+ * Metadata at archive trigger time; this field is not included when `status: "ok"`.
  */
 export interface ConversationAddArchived {
   task_id: string;
@@ -151,7 +151,7 @@ export interface ConversationAddResult {
   archived?: ConversationAddArchived;
 }
 
-/** Input for /v3/skill/conversation/force-archive — 手动强制归档。 */
+/** Input for /v3/skill/conversation/force-archive -- manual forced archive. */
 export interface ForceArchiveInput {
   space_id: string;
   user_id: string;
@@ -174,9 +174,9 @@ export interface ForceArchiveResponse {
 /**
  * Input for /v3/skill/list — owner-agent skill enumeration.
  *
- * Used by skill-bridge team-search to build the "agent 自有全量" 部分的
- * whitelist（见 `docs/design/2026-08-10-skill-search-scope-fix.md` §4）。
- * limit 走 core schema 上限 1000，一次拿完，不分页。
+ * Used by skill-bridge team-search to build the "agent's own full set" part of the
+ * whitelist (see `docs/design/2026-08-10-skill-search-scope-fix.md` §4).
+ * limit goes up to the core schema cap of 1000, fetched in one go, no pagination.
  */
 export interface ListSkillsInput extends IdFields {
   filters?: {
@@ -201,20 +201,20 @@ export interface ListingInput extends IdFields {
   char_budget?: number;
   /**
    * Recall mode:
-   *   - undefined / 'auto': plugin 走 BM25 (query 非空) 或 list head (query 空);
-   *   - 'activity': 读 skill_usage_logs 按 MRR 排序 (default-task 场景专用).
+   *   - undefined / 'auto': plugin uses BM25 (non-empty query) or list head (empty query);
+   *   - 'activity': reads skill_usage_logs sorted by MRR (dedicated to the default-task scenario).
    *
-   * 'activity' 在 CH 未配置/查询失败/冷启动时会 fallback 到 'auto' 逻辑,
-   * response.mode 会体现最终使用的模式 ('activity' / 'search' / 'full').
+   * 'activity' falls back to the 'auto' logic when CH is not configured / the query fails / on cold start,
+   * and response.mode reflects the mode finally used ('activity' / 'search' / 'full').
    *
-   * 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
+   * Design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
    */
   mode?: "auto" | "activity";
 }
 
 /** Result from /v3/skill/listing. `listing` is the pre-rendered `<available_skills>` block. */
 export interface ListingResult {
-  /** 实际使用的召回模式 —— activity 请求可能因 fallback 返回 full/search。 */
+  /** The recall mode actually used -- an activity request may return full/search due to fallback. */
   mode: "full" | "search" | "activity";
   listing: string;
   hits: Array<{ skill_id: string; version: number; name: string }>;
@@ -278,11 +278,11 @@ export class CoreSkillClient {
   }
 
   /**
-   * `POST /v3/skill/conversation/add` — 新链路：每轮增量推送到 core，
-   * core 内部决定归档 + 抽取时机。见 §21.2。
+   * `POST /v3/skill/conversation/add` -- new path: pushes each round's increment to core,
+   * and core decides internally when to archive + extract. See §21.2.
    *
-   * **同步等待**：本方法内部 `await` fetch → envelope 解析。调用方必须
-   * 也 `await` 本方法，保证同 session 严格串行（Core 侧的核心前提）。
+   * **Synchronous wait**: this method internally does `await` fetch → envelope parsing. The caller must
+   * also `await` this method, to guarantee strict serialization within the same session (a core premise on the Core side).
    */
   async addConversation(
     input: ConversationAddInput,
@@ -292,8 +292,8 @@ export class CoreSkillClient {
   }
 
   /**
-   * `POST /v3/skill/conversation/force-archive` — 手动强制归档当前 session buffer。
-   * 跳过阈值判断，直接调 trigger.archive()。
+   * `POST /v3/skill/conversation/force-archive` -- manually force-archive the current session buffer.
+   * Skips the threshold check and calls trigger.archive() directly.
    */
   async forceArchive(
     input: ForceArchiveInput,
@@ -303,14 +303,14 @@ export class CoreSkillClient {
   }
 
   /**
-   * `POST /v3/skill/list` — 枚举 agent 自有 skill 的 skill_id / 元数据。
+   * `POST /v3/skill/list` -- enumerate the skill_id / metadata of the agent's own skills.
    *
-   * skill-bridge team-search 用来扩大 whitelist：把 agent 自己（含 private）
-   * 的 skill 也纳入检索池，避免 session-init `<available_skills>` 20 条上限
-   * 之外的私有 skill 永远搜不到。见
-   * `docs/design/2026-08-10-skill-search-scope-fix.md`。
+   * Used by skill-bridge team-search to widen the whitelist: bringing the agent's own (including private)
+   * skills into the retrieval pool too, so private skills beyond the 20-item cap of session-init `<available_skills>`
+   * can never go unfound. See
+   * `docs/design/2026-08-10-skill-search-scope-fix.md`.
    *
-   * 语义：默认只返回 head + active。owner 归属由 (team_id, agent_id) 决定。
+   * Semantics: by default returns only head + active. Owner attribution is determined by (team_id, agent_id).
    */
   async listSkills(
     input: ListSkillsInput,
@@ -333,12 +333,12 @@ export class CoreSkillClient {
   }
 
   /**
-   * plugin 端 Zod schema 要求 team_id 和 agent_id 互绑：
-   * 要么都传（有值），要么都不传（undefined/空）。
-   * 如果 agent_id 为空但 team_id 有值，触发 "must both be provided or both be omitted"。
+   * The plugin-side Zod schema requires team_id and agent_id to be bound together:
+   * either both are passed (with values), or neither (undefined/empty).
+   * If agent_id is empty but team_id has a value, it triggers "must both be provided or both be omitted".
    *
-   * 修复策略：当 team_id 有值而 agent_id 为空时，填充 "default" 作为 agent_id。
-   * plugin core 层本身也会对 undefined agent_id fallback 到 "default"（见 skill-core.ts）。
+   * Fix strategy: when team_id has a value and agent_id is empty, fill in "default" as agent_id.
+   * The plugin core layer itself also falls back an undefined agent_id to "default" (see skill-core.ts).
    */
   private normalizeTeamAgent(body: Record<string, unknown>): void {
     const teamId = body.team_id;
@@ -346,7 +346,7 @@ export class CoreSkillClient {
     if (teamId && (agentId === undefined || agentId === '')) {
       body.agent_id = 'default';
     }
-    // 如果两个都为空，清理 key（不带到 plugin 端）
+    // If both are empty, clean the keys (not carried to the plugin side)
     if (!body.team_id && !body.agent_id) {
       delete body.team_id;
       delete body.agent_id;
@@ -359,9 +359,9 @@ export class CoreSkillClient {
     body: unknown,
     opts: CoreSkillRequestOptions = {},
   ): Promise<T> {
-    // 浅拷贝 body，避免 normalizeTeamAgent 副作用污染调用者传入的对象。
-    // 原先直接修改 body 会导致调用方的输入对象被意外改写（例如 agent_id
-    // 被填入 "default"），引发跨调用或重试时的数据错乱。
+    // Shallow-copy the body to avoid normalizeTeamAgent side effects polluting the object passed in by the caller.
+    // Originally modifying the body directly caused the caller's input object to be unexpectedly rewritten (e.g. agent_id
+    // being filled with "default"), causing data corruption across calls or on retry.
     let normalizedBody: unknown = body;
     if (body && typeof body === 'object' && !Array.isArray(body)) {
       normalizedBody = { ...(body as Record<string, unknown>) };

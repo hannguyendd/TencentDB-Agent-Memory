@@ -1,9 +1,9 @@
 /**
- * 按实例解析元数据库名（v3.0 库级隔离）。
- * MongoDB database / SQLite 目录名均为 {mongoDbPrefix}_{sanitized_id}。
+ * Resolve the metadata database name per instance (v3.0 database-level isolation).
+ * MongoDB database / SQLite directory names are both {mongoDbPrefix}_{sanitized_id}.
  */
 
-/** 未配置 `mongoDbPrefix` / `TDAI_METADATA_MONGO_DB_PREFIX` 时的默认值。 */
+/** Default value when `mongoDbPrefix` / `TDAI_METADATA_MONGO_DB_PREFIX` is not configured. */
 export const DEFAULT_METADATA_DB_PREFIX = "tdai_metadata";
 
 export class InvalidInstanceIdError extends Error {
@@ -13,7 +13,7 @@ export class InvalidInstanceIdError extends Error {
   }
 }
 
-/** MongoDB 库名非法字符 → `_` */
+/** Illegal characters in MongoDB database names → `_` */
 export function sanitizeInstanceIdForDb(instanceId: string): string {
   return instanceId
     .trim()
@@ -26,8 +26,8 @@ function normalizeDbPrefix(dbPrefix?: string): string {
 }
 
 /**
- * 解析逻辑库名，如 `tdai_metadata_default`。
- * @throws InvalidInstanceIdError 空或规范化后为空
+ * Resolve the logical database name, e.g. `tdai_metadata_default`.
+ * @throws InvalidInstanceIdError if empty or empty after normalization
  */
 export function resolveMetadataDbName(
   instanceId: string,
@@ -43,7 +43,7 @@ export function resolveMetadataDbName(
   return `${prefix}_${truncated}`;
 }
 
-/** SQLite：{baseDir}/{dbName}/metadata.db */
+/** SQLite: {baseDir}/{dbName}/metadata.db */
 export function resolveSqliteDbPath(
   baseDir: string,
   instanceId: string,
@@ -53,7 +53,7 @@ export function resolveSqliteDbPath(
   return `${baseDir.replace(/\/$/, "")}/${dbName}/metadata.db`;
 }
 
-/** SQLite 实例库目录（destroy 时递归删除） */
+/** SQLite instance database directory (recursively deleted on destroy) */
 export function resolveSqliteDbDir(
   baseDir: string,
   instanceId: string,

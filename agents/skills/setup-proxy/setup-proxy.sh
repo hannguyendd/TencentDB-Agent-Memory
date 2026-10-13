@@ -59,8 +59,8 @@ confirm() {
   echo -en "${BOLD}?${RESET} ${prompt} ${DIM}${hint}${RESET}: "
   read -r ans
   ans="${ans:-$default}"
-  # 不用 ${ans,,}：那是 bash 4+ 语法，macOS 自带 bash 3.2 会报 bad substitution。
-  # 改用 tr 转小写，等价且兼容所有 bash。
+  # Don't use ${ans,,}: that is bash 4+ syntax, and macOS's bundled bash 3.2 fails with bad substitution.
+  # Use tr to lowercase instead: equivalent and compatible with all bash versions.
   ans="$(printf '%s' "$ans" | tr '[:upper:]' '[:lower:]')"
   [[ "$ans" == "y" || "$ans" == "yes" ]]
 }
@@ -95,8 +95,8 @@ AGENT_LABELS=(
   "Codex             — OpenAI Responses, ~/.codex/config.toml"
   "WorkBuddy         — OpenAI Responses/Chat, ~/.workbuddy/models.json"
   "dsh (DeepSeek)    — OpenAI Chat, ~/.dsh/settings.yaml + .credentials.yaml"
-  "Hermes            — OpenAI Chat + Header预选, ~/.hermes/config.yaml"
-  "OpenClaw          — OpenAI Chat + Header预选, ~/.openclaw/openclaw.json"
+  "Hermes            — OpenAI Chat + Header preselect, ~/.hermes/config.yaml"
+  "OpenClaw          — OpenAI Chat + Header preselect, ~/.openclaw/openclaw.json"
 )
 
 DEFAULT_CONFIG_PATHS=(
@@ -227,7 +227,7 @@ echo -e "${RESET}"
 check_jq
 
 # ━━━ Step 0: Scan existing agent configs for proxy settings ━━━━━━━━━━━━━━━━━━
-header "扫描现有配置"
+header "Scanning existing config"
 
 SCAN_PROXY="" ; SCAN_KEY="" ; SCAN_MODEL="" ; SCAN_INSTANCE=""
 SCAN_FOUND=false
@@ -342,9 +342,9 @@ fi
 # --- Show scan results and let user confirm or override ---
 USE_SCANNED=false
 if $SCAN_FOUND; then
-  success "检测到现有 Proxy 配置:"
+  success "Existing Proxy config detected:"
   echo ""
-  echo -e "  来源:      ${DIM}${SCAN_SOURCES[*]}${RESET}"
+  echo -e "  Source:    ${DIM}${SCAN_SOURCES[*]}${RESET}"
   echo -e "  Proxy:     ${BOLD}${SCAN_PROXY}${RESET}"
   echo -e "  Instance:  ${BOLD}${SCAN_INSTANCE}${RESET}"
   if [[ ${#SCAN_KEY} -gt 8 ]]; then
@@ -354,42 +354,42 @@ if $SCAN_FOUND; then
   fi
   echo -e "  Model:     ${BOLD}${SCAN_MODEL}${RESET}"
   echo ""
-  if confirm "使用上述配置? (选 n 则手动输入)" "y"; then
+  if confirm "Use the config above? (choose n to enter manually)" "y"; then
     USE_SCANNED=true
     PROXY_HOST="$SCAN_PROXY"
     INSTANCE_ID="${SCAN_INSTANCE:-default}"
     USER_KEY="$SCAN_KEY"
     MODEL_ID="$SCAN_MODEL"
-    success "已采用现有配置"
+    success "Using existing config"
   fi
 else
-  info "未检测到现有 Proxy 配置，将引导手动输入"
+  info "No existing Proxy config detected; guiding you through manual input"
 fi
 
 # ━━━ Step 1: Proxy address + Instance ID ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if ! $USE_SCANNED; then
   header "Step 1: Proxy Address"
 
-  prompt_input PROXY_HOST "Proxy 地址 (含协议和端口)" "http://127.0.0.1:8096"
+  prompt_input PROXY_HOST "Proxy address (including protocol and port)" "http://127.0.0.1:8096"
   # Strip trailing slash
   PROXY_HOST="${PROXY_HOST%/}"
 
-  prompt_input INSTANCE_ID "Memory 实例 ID (本地部署一般是 default)" "default"
+  prompt_input INSTANCE_ID "Memory instance ID (usually default for local deployments)" "default"
 
   success "Proxy: ${PROXY_HOST}, Instance: ${INSTANCE_ID}"
 
   # ━━━ Step 2: User Key ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   header "Step 2: User API Key"
 
-  info "这是团队记忆下发的 API Key，从面板 → API Key 页获取"
+  info "This is the API Key issued by team memory; get it from the panel -> API Key page"
   while true; do
     prompt_input USER_KEY "User Key"
     if [[ -n "$USER_KEY" ]]; then
       break
     fi
-    warn "Key 不能为空，请重新输入"
+    warn "Key cannot be empty, please re-enter"
   done
-  # 只显示首尾，中间脱敏
+  # Show only the first and last characters, mask the middle
   if [[ ${#USER_KEY} -gt 8 ]]; then
     success "User Key: ${USER_KEY:0:4}...${USER_KEY: -4}"
   else
@@ -398,7 +398,7 @@ if ! $USE_SCANNED; then
 fi
 
 # ━━━ Select Agent ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "选择要配置的 Agent"
+header "Choose the Agent to configure"
 
 if [[ -n "$ARG_AGENT" ]]; then
   # Validate pre-selected agent
@@ -418,23 +418,23 @@ if [[ -n "$ARG_AGENT" ]]; then
   fi
   info "Pre-selected: ${AGENTS[$SELECTED_IDX]}"
 else
-  select_one "本次要配置哪个 Agent?" "${AGENT_LABELS[@]}"
+  select_one "Which Agent do you want to configure this time?" "${AGENT_LABELS[@]}"
 fi
 
 CHOSEN_AGENT="${AGENTS[$SELECTED_IDX]}"
 CHOSEN_CONFIG_PATH="${DEFAULT_CONFIG_PATHS[$SELECTED_IDX]}"
-success "选择: ${CHOSEN_AGENT}"
+success "Selected: ${CHOSEN_AGENT}"
 
 # ━━━ Model ID ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 if $USE_SCANNED && [[ -n "$MODEL_ID" ]]; then
-  header "模型配置"
-  info "使用扫描到的模型: ${BOLD}${MODEL_ID}${RESET}"
-  info "如需更换，输入新模型 ID；直接回车保持不变"
-  prompt_input MODEL_ID "模型 ID" "$MODEL_ID"
+  header "Model configuration"
+  info "Using the scanned model: ${BOLD}${MODEL_ID}${RESET}"
+  info "To change it, enter a new model ID; press Enter to keep it"
+  prompt_input MODEL_ID "Model ID" "$MODEL_ID"
 else
-  header "模型配置"
-  info "输入上游模型 ID (Proxy 的 upstream 必须支持此模型)"
-  info "例: claude-sonnet-4-20250514, claude-opus-4.7, gpt-5.5, deepseek-r1"
+  header "Model configuration"
+  info "Enter the upstream model ID (the Proxy's upstream must support this model)"
+  info "e.g.: claude-sonnet-4-20250514, claude-opus-4.7, gpt-5.5, deepseek-r1"
 
   case "$CHOSEN_AGENT" in
     claude-code) DEFAULT_MODEL="claude-sonnet-4-20250514" ;;
@@ -443,12 +443,12 @@ else
     *)           DEFAULT_MODEL="claude-sonnet-4-20250514" ;;
   esac
 
-  prompt_input MODEL_ID "模型 ID" "$DEFAULT_MODEL"
+  prompt_input MODEL_ID "Model ID" "$DEFAULT_MODEL"
 fi
-success "模型: ${MODEL_ID}"
+success "Model: ${MODEL_ID}"
 
-# ━━━ Health Probe (使用真实 agent + model) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "Proxy 健康探测"
+# ━━━ Health Probe (using the real agent + model) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+header "Proxy health probe"
 
 # Build probe URL based on chosen agent's actual protocol path
 case "$CHOSEN_AGENT" in
@@ -461,12 +461,12 @@ case "$CHOSEN_AGENT" in
     PROBE_BODY="{\"model\":\"${MODEL_ID}\",\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"ping\"}]}],\"stream\":false}"
     ;;
   workbuddy)
-    # WorkBuddy 双协议 (Desktop=Responses, Web=Chat)，探测用 Chat 更通用
+    # WorkBuddy has two protocols (Desktop=Responses, Web=Chat); Chat is more generic for probing
     PROBE_URL="${PROXY_HOST}/workbuddy/${INSTANCE_ID}/v1/chat/completions"
     PROBE_BODY="{\"model\":\"${MODEL_ID}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1,\"stream\":false}"
     ;;
   dsh)
-    # dsh 不带 /v1
+    # dsh has no /v1
     PROBE_URL="${PROXY_HOST}/dsh/${INSTANCE_ID}/chat/completions"
     PROBE_BODY="{\"model\":\"${MODEL_ID}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1,\"stream\":false}"
     ;;
@@ -477,8 +477,8 @@ case "$CHOSEN_AGENT" in
     ;;
 esac
 
-info "探测 URL: ${PROBE_URL}"
-info "探测 Model: ${MODEL_ID}"
+info "Probe URL: ${PROBE_URL}"
+info "Probe Model: ${MODEL_ID}"
 
 PROBE_RESPONSE_FILE=$(mktemp)
 HTTP_CODE=$(curl -s -w "%{http_code}" \
@@ -490,28 +490,28 @@ HTTP_CODE=$(curl -s -w "%{http_code}" \
   -o "$PROBE_RESPONSE_FILE" 2>/dev/null || echo "000")
 
 if [[ "$HTTP_CODE" == "000" ]]; then
-  error "无法连接到 Proxy (${PROXY_HOST})，请检查地址和端口是否正确"
-  error "确认 proxy 服务已启动: docker ps | grep proxy"
+  error "Cannot connect to Proxy (${PROXY_HOST}); check that the address and port are correct"
+  error "Confirm the proxy service is running: docker ps | grep proxy"
   rm -f "$PROBE_RESPONSE_FILE"
   exit 1
 elif [[ "$HTTP_CODE" =~ ^2 ]]; then
-  success "Proxy 连通正常，请求成功 (HTTP ${HTTP_CODE})"
+  success "Proxy connectivity OK, request succeeded (HTTP ${HTTP_CODE})"
 elif [[ "$HTTP_CODE" =~ ^4 ]]; then
   # 4xx = proxy alive, show response for transparency
-  success "Proxy 连通正常 (HTTP ${HTTP_CODE})"
+  success "Proxy connectivity OK (HTTP ${HTTP_CODE})"
   PROBE_RESP=$(cat "$PROBE_RESPONSE_FILE" 2>/dev/null)
   if [[ -n "$PROBE_RESP" ]]; then
-    info "响应内容 (供参考):"
+    info "Response body (for reference):"
     echo -e "  ${DIM}$(echo "$PROBE_RESP" | head -c 500)${RESET}"
   fi
 else
-  warn "Proxy 返回 HTTP ${HTTP_CODE}，服务可能有问题"
+  warn "Proxy returned HTTP ${HTTP_CODE}; the service may have a problem"
   PROBE_RESP=$(cat "$PROBE_RESPONSE_FILE" 2>/dev/null)
   if [[ -n "$PROBE_RESP" ]]; then
-    error "响应内容:"
+    error "Response body:"
     echo -e "  ${RED}$(echo "$PROBE_RESP" | head -c 500)${RESET}"
   fi
-  if ! confirm "是否继续配置?" "y"; then
+  if ! confirm "Continue with configuration?" "y"; then
     rm -f "$PROBE_RESPONSE_FILE"
     exit 1
   fi
@@ -529,14 +529,14 @@ needs_header_preselect() {
 }
 
 if needs_header_preselect "$CHOSEN_AGENT"; then
-  header "Header 预选配置 (${CHOSEN_AGENT})"
-  info "${CHOSEN_AGENT} 不支持交互式 Form，需要在配置文件中预填 team/agent/task ID"
+  header "Header preselection (${CHOSEN_AGENT})"
+  info "${CHOSEN_AGENT} does not support interactive Forms; team/agent/task IDs must be prefilled in the config file"
   echo ""
 
   # Ask if user wants to provide Panel address for auto-discovery
   USE_PANEL_API=false
-  if confirm "是否提供面板后端地址以自动拉取 Team/Agent/Task 列表?" "y"; then
-    prompt_input PANEL_URL "面板后端地址 (Panel API)" "http://127.0.0.1:8125"
+  if confirm "Provide the panel backend address to auto-fetch the Team/Agent/Task lists?" "y"; then
+    prompt_input PANEL_URL "Panel backend address (Panel API)" "http://127.0.0.1:8125"
     PANEL_URL="${PANEL_URL%/}"
 
     # Verify panel connectivity
@@ -545,9 +545,9 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
       "${PANEL_URL}/health" 2>/dev/null || echo "000")
 
     if [[ "$PANEL_HTTP" == "000" || "$PANEL_HTTP" =~ ^5 ]]; then
-      warn "面板后端不可达 (HTTP ${PANEL_HTTP})，将改为手动输入"
+      warn "Panel backend unreachable (HTTP ${PANEL_HTTP}); falling back to manual input"
     else
-      success "面板后端连通正常"
+      success "Panel backend connectivity OK"
       USE_PANEL_API=true
     fi
   fi
@@ -562,11 +562,11 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
       -d "{\"user_key\":\"${USER_KEY}\"}" 2>/dev/null || echo '{}')
     RESOLVED_USER_ID=$(echo "$VERIFY_JSON" | jq -r '.data.user.user_id // empty' 2>/dev/null)
     if [[ -n "$RESOLVED_USER_ID" ]]; then
-      info "用户: $(echo "$VERIFY_JSON" | jq -r '.data.user.username // empty') (${RESOLVED_USER_ID})"
+      info "User: $(echo "$VERIFY_JSON" | jq -r '.data.user.username // empty') (${RESOLVED_USER_ID})"
     fi
 
     # ── Pick Team ──
-    info "正在拉取 Team 列表..."
+    info "Fetching Team list..."
     TEAMS_JSON=$(curl -s --connect-timeout 5 -m 10 \
       -X POST "${PANEL_URL}/api/v1/meta/team/list" \
       -H "Content-Type: application/json" \
@@ -577,7 +577,7 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
     TEAM_COUNT=$(echo "$TEAMS_JSON" | jq -r '.data.items // .data // [] | length' 2>/dev/null || echo "0")
 
     if [[ "$TEAM_COUNT" -eq 0 ]]; then
-      warn "未找到 Team（可能 Key 权限不足或未创建 Team），改为手动输入"
+      warn "No Team found (the Key may lack permission or no Team has been created); falling back to manual input"
       USE_PANEL_API=false
     else
       # Build team options — Panel returns {data: {items: [...]}}
@@ -590,12 +590,12 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
         TEAM_IDS+=("$line")
       done < <(echo "$TEAMS_JSON" | jq -r '(.data.items // .data // [])[] | .team_id // .id')
 
-      select_one "选择 Team:" "${TEAM_NAMES[@]}"
+      select_one "Select Team:" "${TEAM_NAMES[@]}"
       TEAM_ID="${TEAM_IDS[$SELECTED_IDX]}"
       success "Team: ${TEAM_NAMES[$SELECTED_IDX]} (${TEAM_ID})"
 
       # ── Pick Agent ──
-      info "正在拉取 Agent 列表..."
+      info "Fetching Agent list..."
       _agent_body="{\"team_id\":\"${TEAM_ID}\",\"user_key\":\"${USER_KEY}\"}"
       if [[ -n "$RESOLVED_USER_ID" ]]; then
         _agent_body="{\"team_id\":\"${TEAM_ID}\",\"user_key\":\"${USER_KEY}\",\"owner_user_id\":\"${RESOLVED_USER_ID}\"}"
@@ -610,7 +610,7 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
       AGENT_COUNT=$(echo "$AGENTS_JSON" | jq -r '.data.items // .data // [] | length' 2>/dev/null || echo "0")
 
       if [[ "$AGENT_COUNT" -eq 0 ]]; then
-        warn "该 Team 下未找到 Agent，请手动输入 agent_id"
+        warn "No Agent found under this Team; please enter agent_id manually"
         prompt_input AGENT_ID "Agent ID"
       else
         AGENT_NAMES=()
@@ -622,13 +622,13 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
           AGENT_IDS_LIST+=("$line")
         done < <(echo "$AGENTS_JSON" | jq -r '(.data.items // .data // [])[] | .agent_id // .id')
 
-        select_one "选择 Agent:" "${AGENT_NAMES[@]}"
+        select_one "Select Agent:" "${AGENT_NAMES[@]}"
         AGENT_ID="${AGENT_IDS_LIST[$SELECTED_IDX]}"
         success "Agent: ${AGENT_NAMES[$SELECTED_IDX]} (${AGENT_ID})"
       fi
 
       # ── Pick Task ──
-      info "正在拉取 Task 列表..."
+      info "Fetching Task list..."
       TASKS_JSON=$(curl -s --connect-timeout 5 -m 10 \
         -X POST "${PANEL_URL}/api/v1/meta/task/list" \
         -H "Content-Type: application/json" \
@@ -639,14 +639,14 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
       TASK_COUNT=$(echo "$TASKS_JSON" | jq -r '.data.items // .data // [] | length' 2>/dev/null || echo "0")
 
       if [[ "$TASK_COUNT" -eq 0 ]]; then
-        warn "该 Team 下未找到 Task"
-        if confirm "是否跳过 Task 绑定 (使用 'no-task')?" "y"; then
+        warn "No Task found under this Team"
+        if confirm "Skip Task binding (use 'no-task')?" "y"; then
           TASK_ID="no-task"
         else
           prompt_input TASK_ID "Task ID"
         fi
       else
-        TASK_NAMES=("本次不关联任务 (no-task)")
+        TASK_NAMES=("Do not link a task this time (no-task)")
         TASK_IDS_LIST=("no-task")
         while IFS= read -r line; do
           TASK_NAMES+=("$line")
@@ -655,7 +655,7 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
           TASK_IDS_LIST+=("$line")
         done < <(echo "$TASKS_JSON" | jq -r '(.data.items // .data // [])[] | .task_id // .id')
 
-        select_one "选择 Task (可选):" "${TASK_NAMES[@]}"
+        select_one "Select Task (optional):" "${TASK_NAMES[@]}"
         TASK_ID="${TASK_IDS_LIST[$SELECTED_IDX]}"
         success "Task: ${TASK_NAMES[$SELECTED_IDX]} (${TASK_ID})"
       fi
@@ -664,47 +664,47 @@ if needs_header_preselect "$CHOSEN_AGENT"; then
 
   # Manual fallback
   if ! $USE_PANEL_API; then
-    info "手动输入 Header 预选信息 (从面板对应页面获取 ID)"
-    prompt_input TEAM_ID "x-team-id (团队 ID)"
+    info "Enter the Header preselection info manually (get the IDs from the corresponding panel pages)"
+    prompt_input TEAM_ID "x-team-id (team ID)"
     prompt_input AGENT_ID "x-agent-id (Agent ID)"
-    prompt_input TASK_ID "x-task-id (Task ID, 无 Task 填 no-task)" "no-task"
+    prompt_input TASK_ID "x-task-id (Task ID; use no-task if there is no Task)" "no-task"
   fi
 
   # conversation-id: auto-generate a default
   DEFAULT_CONV_ID="conv-$(date +%Y%m%d)-$(head -c 4 /dev/urandom | xxd -p)"
-  prompt_input CONVERSATION_ID "x-conversation-id (会话标识，每次新对话需更换)" "$DEFAULT_CONV_ID"
-  success "Header 预选完成"
+  prompt_input CONVERSATION_ID "x-conversation-id (conversation identifier; change it for each new conversation)" "$DEFAULT_CONV_ID"
+  success "Header preselection done"
 else
-  header "Header 预选配置"
-  info "${CHOSEN_AGENT} 支持交互式 Form，无需预填 header (跳过)"
+  header "Header preselection"
+  info "${CHOSEN_AGENT} supports interactive Forms; no need to prefill headers (skipped)"
 fi
 
 # ━━━ Config File Path & Write ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-header "写入配置文件"
+header "Writing config file"
 
 # dsh has two files
 if [[ "$CHOSEN_AGENT" == "dsh" ]]; then
   DSH_DISPLAY_SETTINGS="~/.dsh/settings.yaml"
   DSH_DISPLAY_CREDENTIALS="~/.dsh/.credentials.yaml"
-  info "dsh 需要配置两个文件:"
+  info "dsh needs two files configured:"
   echo -e "  1) ${BOLD}${DSH_DISPLAY_SETTINGS}${RESET}"
   echo -e "  2) ${BOLD}${DSH_DISPLAY_CREDENTIALS}${RESET}"
-  if ! confirm "使用上述默认路径?" "y"; then
-    prompt_input DSH_DISPLAY_SETTINGS "settings.yaml 路径" "$DSH_DISPLAY_SETTINGS"
+  if ! confirm "Use the default paths above?" "y"; then
+    prompt_input DSH_DISPLAY_SETTINGS "settings.yaml path" "$DSH_DISPLAY_SETTINGS"
     DSH_DISPLAY_CREDENTIALS="$(dirname "$DSH_DISPLAY_SETTINGS")/.credentials.yaml"
-    prompt_input DSH_DISPLAY_CREDENTIALS "credentials.yaml 路径" "$DSH_DISPLAY_CREDENTIALS"
+    prompt_input DSH_DISPLAY_CREDENTIALS "credentials.yaml path" "$DSH_DISPLAY_CREDENTIALS"
   fi
   DSH_SETTINGS_PATH="$(expand_path "$DSH_DISPLAY_SETTINGS")"
   DSH_CREDENTIALS_PATH="$(expand_path "$DSH_DISPLAY_CREDENTIALS")"
   CONFIG_PATH="$DSH_SETTINGS_PATH"
   CONFIG_DISPLAY="$DSH_DISPLAY_SETTINGS"
 else
-  info "配置文件默认路径: ${BOLD}${CHOSEN_CONFIG_PATH}${RESET}"
-  if confirm "使用此路径?" "y"; then
+  info "Default config file path: ${BOLD}${CHOSEN_CONFIG_PATH}${RESET}"
+  if confirm "Use this path?" "y"; then
     CONFIG_DISPLAY="$CHOSEN_CONFIG_PATH"
     CONFIG_PATH="$(expand_path "$CHOSEN_CONFIG_PATH")"
   else
-    prompt_input CONFIG_DISPLAY "输入配置文件路径" "$CHOSEN_CONFIG_PATH"
+    prompt_input CONFIG_DISPLAY "Enter the config file path" "$CHOSEN_CONFIG_PATH"
     CONFIG_PATH="$(expand_path "$CONFIG_DISPLAY")"
   fi
 fi
@@ -741,7 +741,7 @@ write_claude_code() {
       mv "$tmp" "$filepath"
     else
       rm -f "$tmp"
-      warn "现有 ${filepath} 不是合法 JSON，将覆盖写入"
+      warn "Existing ${filepath} is not valid JSON; it will be overwritten"
       write_fresh=true
     fi
   else
@@ -763,11 +763,11 @@ write_claude_code() {
 }
 EOF
   fi
-  success "已写入 ${filepath}"
+  success "Wrote ${filepath}"
   echo ""
-  info "启动方式:"
-  echo -e "  ${GREEN}claude${RESET}   ${DIM}# 直接启动，会从 settings.json 读取 env${RESET}"
-  echo -e "  ${DIM}或: claude --model ${MODEL_ID}${RESET}"
+  info "How to start:"
+  echo -e "  ${GREEN}claude${RESET}   ${DIM}# start directly; env is read from settings.json${RESET}"
+  echo -e "  ${DIM}or: claude --model ${MODEL_ID}${RESET}"
 }
 
 write_codebuddy() {
@@ -803,9 +803,9 @@ write_codebuddy() {
   else
     jq -n --argjson entry "$new_entry" '{ models: [$entry] }' > "$filepath"
   fi
-  success "已写入 ${filepath}"
+  success "Wrote ${filepath}"
   echo ""
-  info "启动方式: 在 CodeBuddy 对话框中选择模型 ${BOLD}proxy-memory-agent${RESET}"
+  info "How to start: select the model ${BOLD}proxy-memory-agent${RESET} in the CodeBuddy chat box"
 }
 
 write_codex() {
@@ -881,11 +881,11 @@ stream_idle_timeout_ms = 120000
 EOF
   fi
 
-  success "已写入 ${filepath}"
+  success "Wrote ${filepath}"
   echo ""
-  info "启动方式:"
+  info "How to start:"
   echo -e "  ${GREEN}codex${RESET}"
-  warn "⚠️  首次对话前必须切到 Plan 模式 (Shift+Tab)，选完 Team→Agent→Task 后再切回 Agent 模式"
+  warn "⚠️  Before the first conversation you must switch to Plan mode (Shift+Tab); after choosing Team→Agent→Task, switch back to Agent mode"
 }
 
 write_workbuddy() {
@@ -922,9 +922,9 @@ write_workbuddy() {
   else
     jq -n --argjson entry "$new_entry" '[$entry]' > "$filepath"
   fi
-  success "已写入 ${filepath}"
+  success "Wrote ${filepath}"
   echo ""
-  info "启动方式: 在 WorkBuddy 自定义模型列表中选择 ${BOLD}${MODEL_ID}${RESET}"
+  info "How to start: select ${BOLD}${MODEL_ID}${RESET} in the WorkBuddy custom model list"
 }
 
 write_dsh() {
@@ -943,15 +943,15 @@ write_dsh() {
   cat > "$settings_path" <<EOF
 # Generated by setup-proxy.sh at $(date '+%Y-%m-%d %H:%M:%S')
 llm-deepseek:
-  # dsh 从这个环境变量名里读 proxy user_key
+  # dsh reads the proxy user_key from this environment variable name
   apiKeyEnv: PROXY_USER_KEY
 
-  # ⚠️ 尾巴不要加 /v1 —— dsh 硬编码 \${baseURL}/chat/completions
+  # ⚠️ Do not append /v1 at the end -- dsh hardcodes \${baseURL}/chat/completions
   baseURL: ${base_url}
 
   model: ${MODEL_ID}
 
-  # thinking 模式
+  # thinking mode
   reasoningEffort: high
 EOF
 
@@ -964,13 +964,13 @@ EOF
   chmod 700 "$dsh_dir"
   chmod 600 "$credentials_path"
 
-  success "已写入 ${settings_path}"
-  success "已写入 ${credentials_path}"
-  info "权限已设置: chmod 700 ${dsh_dir}, chmod 600 ${credentials_path}"
+  success "Wrote ${settings_path}"
+  success "Wrote ${credentials_path}"
+  info "Permissions set: chmod 700 ${dsh_dir}, chmod 600 ${credentials_path}"
   echo ""
-  info "启动方式:"
-  echo -e "  ${GREEN}dsh${RESET}   ${DIM}# CLI 模式${RESET}"
-  echo -e "  ${GREEN}dsh web --port 3080${RESET}   ${DIM}# Web UI 模式${RESET}"
+  info "How to start:"
+  echo -e "  ${GREEN}dsh${RESET}   ${DIM}# CLI mode${RESET}"
+  echo -e "  ${GREEN}dsh web --port 3080${RESET}   ${DIM}# Web UI mode${RESET}"
 }
 
 write_hermes() {
@@ -994,12 +994,12 @@ model:
     x-conversation-id: "${CONVERSATION_ID}"
 EOF
 
-  success "已写入 ${filepath}"
+  success "Wrote ${filepath}"
   echo ""
-  warn "⚠️  注意事项:"
-  echo -e "  • x-conversation-id 标识当前会话，${BOLD}每次新对话需手动更换${RESET}"
-  echo -e "  • x-task-id 当前版本必填，无 Task 可填 'no-task'"
-  echo -e "  • 切换 Team/Agent/Task 需编辑配置文件"
+  warn "⚠️  Notes:"
+  echo -e "  • x-conversation-id identifies the current conversation; ${BOLD}change it manually for each new conversation${RESET}"
+  echo -e "  • x-task-id is required in the current version; use 'no-task' if there is no Task"
+  echo -e "  • Switching Team/Agent/Task requires editing the config file"
 }
 
 write_openclaw() {
@@ -1056,12 +1056,12 @@ write_openclaw() {
       '{ models: { mode: "merge", providers: { "memory-proxy": $provider } } }' \
       > "$filepath"
   fi
-  success "已写入 ${filepath}"
+  success "Wrote ${filepath}"
   echo ""
-  warn "⚠️  注意事项:"
-  echo -e "  • x-conversation-id 标识当前会话，${BOLD}每次新对话需手动更换${RESET}"
-  echo -e "  • x-task-id 当前版本必填，无 Task 可填 'no-task'"
-  echo -e "  • 在 OpenClaw 中选择 provider 为 ${BOLD}memory-proxy${RESET}，模型选 ${BOLD}${MODEL_ID}${RESET}"
+  warn "⚠️  Notes:"
+  echo -e "  • x-conversation-id identifies the current conversation; ${BOLD}change it manually for each new conversation${RESET}"
+  echo -e "  • x-task-id is required in the current version; use 'no-task' if there is no Task"
+  echo -e "  • In OpenClaw choose the provider ${BOLD}memory-proxy${RESET}, and the model ${BOLD}${MODEL_ID}${RESET}"
 }
 
 # ─── Execute Write ────────────────────────────────────────────────────────────
@@ -1077,7 +1077,7 @@ esac
 
 # ━━━ Summary ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo ""
-echo -e "${BOLD}${GREEN}═══ 配置完成 ═══${RESET}"
+echo -e "${BOLD}${GREEN}═══ Configuration complete ═══${RESET}"
 echo ""
 echo -e "  Agent:     ${BOLD}${CHOSEN_AGENT}${RESET}"
 echo -e "  Proxy:     ${PROXY_HOST}"
@@ -1097,27 +1097,27 @@ echo ""
 # Model switch reminder (per agent)
 case "$CHOSEN_AGENT" in
   claude-code)
-    warn "使用时直接运行 claude 即可，模型已通过 settings.json 指定为 ${MODEL_ID}"
+    warn "When using, just run claude; the model is already specified as ${MODEL_ID} via settings.json"
     ;;
   codebuddy)
-    warn "使用时需在 CodeBuddy 对话框中切换模型为 ${BOLD}proxy-memory-agent${RESET} (${MODEL_ID}) 才会走 Proxy"
+    warn "When using, switch the model in the CodeBuddy chat box to ${BOLD}proxy-memory-agent${RESET} (${MODEL_ID}) for requests to go through the Proxy"
     ;;
   codex)
-    warn "使用时直接运行 codex 即可，config.toml 已指定 model = ${MODEL_ID}"
+    warn "When using, just run codex; config.toml already specifies model = ${MODEL_ID}"
     ;;
   workbuddy)
-    warn "使用时需在 WorkBuddy 模型选择器中切换到自定义模型 ${BOLD}${MODEL_ID}${RESET} 才会走 Proxy"
+    warn "When using, switch to the custom model ${BOLD}${MODEL_ID}${RESET} in the WorkBuddy model selector for requests to go through the Proxy"
     ;;
   dsh)
-    warn "使用时直接运行 dsh 即可，settings.yaml 已指定模型"
+    warn "When using, just run dsh; settings.yaml already specifies the model"
     ;;
   hermes|openclaw)
-    warn "使用时确保客户端选择的模型/provider 指向 Proxy 配置（${MODEL_ID}）"
+    warn "When using, make sure the model/provider selected in the client points to the Proxy config (${MODEL_ID})"
     ;;
 esac
 echo ""
-info "首次使用时会弹出 Team→Agent→Task 选择 (${CHOSEN_AGENT} 支持交互式 Form 的情况下)"
-info "再次运行此脚本可配置其他 Agent"
+info "On first use a Team→Agent→Task selection will pop up (when ${CHOSEN_AGENT} supports interactive Forms)"
+info "Rerun this script to configure other Agents"
 
 # ━━━ Optional: Asset Import ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo ""
@@ -1125,14 +1125,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ASSET_IMPORT_SCRIPT="${SCRIPT_DIR}/asset-import.ts"
 
 if [[ -f "$ASSET_IMPORT_SCRIPT" ]] && ! $ARG_NONINTERACTIVE; then
-  header "资产导入 (可选)"
-  info "检测到资产导入脚本，可以将该 Agent 的本地 skill/对话历史导入到团队记忆中"
+  header "Asset import (optional)"
+  info "Asset import script detected; you can import this Agent's local skills/conversation history into team memory"
   echo ""
-  if confirm "是否导入该 Agent 的本地资产 (skill + 对话) 到团队记忆?" "n"; then
+  if confirm "Import this Agent's local assets (skill + conversations) into team memory?" "n"; then
     # Determine Panel URL for asset-import
     IMPORT_PANEL_URL="${PANEL_URL:-}"
     if [[ -z "$IMPORT_PANEL_URL" ]]; then
-      prompt_input IMPORT_PANEL_URL "面板后端地址 (Panel API)" "http://127.0.0.1:8125"
+      prompt_input IMPORT_PANEL_URL "Panel backend address (Panel API)" "http://127.0.0.1:8125"
     fi
 
     # Determine team-id and agent-id for asset-import (required params)
@@ -1141,19 +1141,19 @@ if [[ -f "$ASSET_IMPORT_SCRIPT" ]] && ! $ARG_NONINTERACTIVE; then
 
     if [[ -n "$TEAM_ID" && -n "$AGENT_ID" ]]; then
       # Hermes/OpenClaw path: already picked team/agent earlier
-      info "检测到之前已选择的 Team/Agent:"
+      info "Detected the previously selected Team/Agent:"
       echo -e "  Team ID:  ${BOLD}${TEAM_ID}${RESET}"
       echo -e "  Agent ID: ${BOLD}${AGENT_ID}${RESET}"
-      if confirm "使用上述 Team/Agent 进行资产导入?" "y"; then
+      if confirm "Use the Team/Agent above for asset import?" "y"; then
         IMPORT_TEAM_ID="$TEAM_ID"
         IMPORT_AGENT_ID="$AGENT_ID"
       fi
     fi
 
     if [[ -z "$IMPORT_TEAM_ID" ]]; then
-      info "资产导入需要指定目标 Team 和 Agent"
-      prompt_input IMPORT_TEAM_ID "Team ID (从面板获取)"
-      prompt_input IMPORT_AGENT_ID "Agent ID (从面板获取)"
+      info "Asset import requires a target Team and Agent"
+      prompt_input IMPORT_TEAM_ID "Team ID (get it from the panel)"
+      prompt_input IMPORT_AGENT_ID "Agent ID (get it from the panel)"
     fi
 
     # Check if tsx/npx is available
@@ -1167,12 +1167,12 @@ if [[ -f "$ASSET_IMPORT_SCRIPT" ]] && ! $ARG_NONINTERACTIVE; then
     IMPORT_ARGS=(--source "$CHOSEN_AGENT" --team-id "$IMPORT_TEAM_ID" --agent-id "$IMPORT_AGENT_ID")
 
     if [[ -z "$RUNNER" ]]; then
-      warn "未找到 tsx 或 npx，无法直接运行资产导入脚本"
-      info "请手动运行:"
+      warn "tsx or npx not found; cannot run the asset import script directly"
+      info "Please run manually:"
       echo -e "  ${GREEN}PANEL_URL=${IMPORT_PANEL_URL} TDAI_SERVICE_ID=${INSTANCE_ID} TDAI_USER_KEY=${USER_KEY} \\"
       echo -e "    tsx agents/asset-import.ts ${IMPORT_ARGS[*]}${RESET}"
     else
-      info "启动资产导入 (source=${CHOSEN_AGENT}, team=${IMPORT_TEAM_ID})..."
+      info "Starting asset import (source=${CHOSEN_AGENT}, team=${IMPORT_TEAM_ID})..."
       echo -e "${DIM}────────────────────────────────────────${RESET}"
       # Hand off to asset-import — it handles its own interactive flow from here
       PANEL_URL="$IMPORT_PANEL_URL" \
@@ -1180,7 +1180,7 @@ if [[ -f "$ASSET_IMPORT_SCRIPT" ]] && ! $ARG_NONINTERACTIVE; then
       TDAI_USER_KEY="$USER_KEY" \
         $RUNNER "$ASSET_IMPORT_SCRIPT" "${IMPORT_ARGS[@]}" || true
       echo -e "${DIM}────────────────────────────────────────${RESET}"
-      success "资产导入流程结束"
+      success "Asset import finished"
     fi
   fi
 fi

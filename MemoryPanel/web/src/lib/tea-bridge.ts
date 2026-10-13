@@ -1,15 +1,15 @@
 /**
- * Tea 组件桥接工具
+ * Tea component bridge utilities
  *
- * 提供便捷的方式在现有代码中使用 Tea 组件，
- * 逐步替换原生 HTML 元素和自定义实现。
+ * Provides a convenient way to use Tea components in existing code,
+ * gradually replacing native HTML elements and custom implementations.
  *
- * 使用方式:
+ * Usage:
  *   import { tea } from '@/lib/tea-bridge';
- *   tea.confirm({ message: '确认删除？' }).then(ok => { ... });
- *   tea.notify.success('操作成功');
- *   tea.notify.error('加载失败');  // 弹右上角通知卡片，需手动关闭，不会一闪而过
- *   tea.notify.error(err);  // 传入 Error / ApiError，自动提取 message + request_id
+ *   tea.confirm({ message: 'Confirm deletion?' }).then(ok => { ... });
+ *   tea.notify.success('Operation succeeded');
+ *   tea.notify.error('Failed to load');  // shows a top-right notification card that must be closed manually and won't flash away
+ *   tea.notify.error(err);  // pass an Error / ApiError; message + request_id are extracted automatically
  */
 
 import { getErrorMessage } from './error-message';
@@ -21,7 +21,7 @@ function t(key: string, opts?: Record<string, unknown>): string {
 }
 
 /**
- * 结构化错误通知入参 — 适合需要展示 title + detail + requestId 的场景。
+ * Structured error notification input — suited to cases that show title + detail + requestId.
  */
 interface StructuredErrorInput {
   title?: string;
@@ -30,8 +30,8 @@ interface StructuredErrorInput {
 }
 
 /**
- * 从 unknown 错误对象中尽力提取 request_id。
- * 支持 ApiError（name === 'ApiError'）、SkillApiError、KnowledgeApiError 等。
+ * Best-effort extraction of request_id from an unknown error object.
+ * Supports ApiError (name === 'ApiError'), SkillApiError, KnowledgeApiError, etc.
  */
 function extractRequestId(err: unknown): string | undefined {
   if (err && typeof err === 'object' && 'requestId' in err) {
@@ -47,7 +47,7 @@ function extractRequestId(err: unknown): string | undefined {
 
 export const tea = {
   /**
-   * 确认对话框 — 替代 confirm()
+   * Confirm dialog — replaces confirm()
    */
   confirm: async (opts: {
     message: string;
@@ -64,26 +64,26 @@ export const tea = {
   },
 
   /**
-   * 消息提示
+   * Message notifications
    *
-   * - success: 轻量 toast（一闪即过，不打断操作）
-   * - error:   右上角通知卡片（需手动关闭，确保用户看到错误信息）
-   * - warning:  右上角通知卡片（同 error，需手动关闭）
-   * - info:     右上角通知卡片
+   * - success: lightweight toast (disappears quickly, doesn't interrupt the operation)
+   * - error:   top-right notification card (must be closed manually so the user sees the error)
+   * - warning:  top-right notification card (same as error, must be closed manually)
+   * - info:     top-right notification card
    *
-   * 之前 error/warning 用 message.error（toast），3 秒自动消失，
-   * 用户经常看不到错误提示就消失了。改用 notification 后错误提示
-   * 会一直停留在右上角直到用户手动关闭，确保不会被遗漏。
+   * Previously error/warning used message.error (toast), which auto-dismissed after 3 seconds,
+   * so users often missed the error. With notification, the error
+   * stays in the top-right corner until the user closes it, so it won't be missed.
    *
-   * error 入参支持三种形式：
-   *   - string：直接作为 description
-   *   - Error / ApiError / SkillApiError / KnowledgeApiError：自动提取 message + request_id
-   *   - StructuredErrorInput { title?, detail?, requestId? }：结构化方式
+   * The error argument supports three forms:
+   *   - string: used directly as the description
+   *   - Error / ApiError / SkillApiError / KnowledgeApiError: message + request_id are extracted automatically
+   *   - StructuredErrorInput { title?, detail?, requestId? }: structured form
    */
   notify: {
     success: (msg: string) => message.success({ content: msg }),
     error: (msg: unknown) => {
-      // 结构化入参 { title?, detail?, requestId? }
+      // Structured input { title?, detail?, requestId? }
       if (msg && typeof msg === 'object' && !((msg as unknown) instanceof Error) && ('title' in msg || 'detail' in msg || 'requestId' in msg)) {
         const input = msg as StructuredErrorInput;
         const desc = input.requestId
@@ -97,7 +97,7 @@ export const tea = {
         });
         return;
       }
-      // Error / string / 其他 — 走 getErrorMessage 提取友好提示
+      // Error / string / other: use getErrorMessage to extract a friendly message
       const friendly = getErrorMessage(msg);
       const requestId = extractRequestId(msg);
       const desc = requestId
@@ -118,7 +118,7 @@ export const tea = {
   },
 
   /**
-   * 复杂通知（带自定义标题）
+   * Complex notification (with custom title)
    */
   notification: {
     success: (title: string, description?: string) =>
@@ -130,7 +130,7 @@ export const tea = {
   },
 
   /**
-   * 确认删除
+   * Confirm deletion
    */
   confirmDelete: (name: string, detail?: string) =>
     Modal.confirm({
@@ -142,13 +142,13 @@ export const tea = {
 };
 
 /**
- * 「确认后执行」帮助函数 —— 收敛各资产页大量重复的
- * `tea.confirm(...) → if (!ok) return → try/catch → tea.notify.error` 样板。
+ * "Execute after confirmation" helper -- consolidates the boilerplate repeated across asset pages:
+ * `tea.confirm(...) -> if (!ok) return -> try/catch -> tea.notify.error`.
  *
- * 用户确认后执行 action；action 抛错时默认走 tea.notify.error(err)
- * （可传 onError 自定义错误提示，如带 i18n 兜底文案）。
+ * Runs action after the user confirms; if the action throws, it defaults to tea.notify.error(err)
+ * (pass onError to customize the error message, e.g. with an i18n fallback).
  *
- * @returns 用户是否确认并成功执行（取消 / 执行失败均为 false）
+ * @returns whether the user confirmed and the action succeeded (false on cancel or failure)
  */
 export async function confirmThenRun(
   opts: {

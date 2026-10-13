@@ -2,10 +2,10 @@ import type { MetaEnvelope } from '../envelope.js';
 import type { MetaCallContext } from '../types.js';
 
 /**
- * 内核 /v3/analytics/* 查询面透明代理端口。
+ * Transparent proxy port for the kernel /v3/analytics/* query plane.
  *
- * 与 MetaKernelPort 同形，但内部按 action 选择 GET / POST：
- * config、spaces 内核声明为 GET，其余为 POST。
+ * Same shape as MetaKernelPort, but internally selects GET / POST by action:
+ * the kernel declares config and spaces as GET, and the rest as POST.
  */
 export interface AnalyticsKernelPort {
   invoke(

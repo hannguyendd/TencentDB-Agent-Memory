@@ -80,7 +80,7 @@ export function parseCodeBuddySystemPrompt(text: string): PromptModule[] {
     if (preamble.length > 0) {
       modules.push({
         id: "preamble",
-        name: "系统开场白",
+        name: "System preamble",
         tag: null,
         rawText: preamble,
         innerText: preamble,
@@ -93,7 +93,7 @@ export function parseCodeBuddySystemPrompt(text: string): PromptModule[] {
     // No known tags found — entire text is preamble (preserved exactly)
     modules.push({
       id: "preamble",
-      name: "系统开场白",
+      name: "System preamble",
       tag: null,
       rawText: text,
       innerText: text,
@@ -115,7 +115,7 @@ export function parseCodeBuddySystemPrompt(text: string): PromptModule[] {
       if (remainder.length > 0) {
         modules.push({
           id: `suffix-${index}`,
-          name: "系统结尾",
+          name: "System epilogue",
           tag: null,
           rawText: remainder,
           innerText: remainder,
@@ -132,7 +132,7 @@ export function parseCodeBuddySystemPrompt(text: string): PromptModule[] {
       if (betweenText.length > 0) {
         modules.push({
           id: `text-${index}`,
-          name: `中间文本段 ${index}`,
+          name: `Intermediate text segment ${index}`,
           tag: null,
           rawText: betweenText,
           innerText: betweenText,
@@ -155,7 +155,7 @@ export function parseCodeBuddySystemPrompt(text: string): PromptModule[] {
       if (remainder.length > 0) {
         modules.push({
           id: `suffix-${index}`,
-          name: "未闭合标签尾部",
+          name: "Unclosed tag tail",
           tag: null,
           rawText: remainder,
           innerText: remainder,

@@ -1,20 +1,20 @@
 /**
- * Codex CLI 客户端适配器。
+ * Codex CLI client adapter.
  *
- * 特化实现：
- *   - classifyRequest: 严格白名单判 aux（endpoint path + memgen header +
- *     已知 thread_source 值），未知一律 main（偏严不偏宽）
- *   - extractUserText: 从 codex body.input[] 提取最后一条 type=message &&
- *     role=user 的 content[].input_text 拼接
+ * Specialized implementation:
+ *   - classifyRequest: strict allowlist to detect aux (endpoint path + memgen header +
+ *     known thread_source values); anything unknown is main (strict rather than lenient)
+ *   - extractUserText: from codex body.input[], extract the last type=message &&
+ *     role=user item and concatenate its content[].input_text
  *
- * 详见 docs/2026-08-07-codex-integration-plan.md §1 / §9。
+ * See docs/2026-08-07-codex-integration-plan.md section 1 / section 9 for details.
  */
 
 import type { AgentAdapter, RequestKind } from "./types.js";
 
 // ── Aux detection constants ──────────────────────────────────────────────────
 
-/** 已知的 aux endpoint path suffix。源码 codex-rs/core/src/client.rs 常量。 */
+/** Known aux endpoint path suffixes. Constants from the source codex-rs/core/src/client.rs. */
 const CODEX_AUX_PATH_SUFFIXES = new Set([
   "/responses/compact",
   "/memories/trace_summarize",
@@ -22,12 +22,12 @@ const CODEX_AUX_PATH_SUFFIXES = new Set([
 ]);
 
 /**
- * 已知 codex 客户端 body.client_metadata.thread_source 的 aux 值。
+ * Known aux values of the codex client body.client_metadata.thread_source.
  *
- * - "memory_consolidation": 源码 ThreadSource::MemoryConsolidation
- * - "system": 抓包 §7.4 title-generation aux 实测
+ * - "memory_consolidation": source ThreadSource::MemoryConsolidation
+ * - "system": measured from title-generation aux in capture section 7.4
  *
- * 未知值一律当主对话（偏严）。
+ * Unknown values are always treated as the main conversation (strict).
  */
 const CODEX_AUX_THREAD_SOURCES = new Set([
   "memory_consolidation",
@@ -35,29 +35,29 @@ const CODEX_AUX_THREAD_SOURCES = new Set([
 ]);
 
 /**
- * 判定 codex 请求是否为 aux（辅助请求）。
+ * Determines whether a codex request is aux (auxiliary request).
  *
- * 三层信号按优先级：
- *   1. endpoint path suffix 白名单（最强，硬编码在 codex 源码）
- *   2. x-openai-memgen-request header（memory consolidation 独占）
- *   3. body.client_metadata.thread_source 白名单
+ * Three layers of signals, by priority:
+ *   1. endpoint path suffix allowlist (strongest, hardcoded in codex source)
+ *   2. x-openai-memgen-request header (exclusive to memory consolidation)
+ *   3. body.client_metadata.thread_source allowlist
  */
 function isCodexAuxiliary(
   path: string | undefined,
   headers: Record<string, string> | undefined,
   body: Record<string, unknown>,
 ): boolean {
-  // 信号 1：aux endpoint（path 白名单）
+  // Signal 1: aux endpoint (path allowlist)
   if (path) {
     for (const suffix of CODEX_AUX_PATH_SUFFIXES) {
       if (path.endsWith(suffix)) return true;
     }
   }
 
-  // 信号 2：x-openai-memgen-request: true
+  // Signal 2: x-openai-memgen-request: true
   if (headers?.["x-openai-memgen-request"] === "true") return true;
 
-  // 信号 3：body.client_metadata.thread_source 命中白名单
+  // Signal 3: body.client_metadata.thread_source hits the allowlist
   const meta = body.client_metadata as { thread_source?: string } | undefined;
   const ts = meta?.thread_source;
   if (typeof ts === "string" && CODEX_AUX_THREAD_SOURCES.has(ts)) return true;
@@ -68,20 +68,20 @@ function isCodexAuxiliary(
 // ── User text extraction ─────────────────────────────────────────────────────
 
 /**
- * 从 codex input[] 提取最后一条 type=message && role=user 的 content[].input_text。
+ * From codex input[], extract the content[].input_text of the last type=message && role=user item.
  *
- * codex input[] item 类型清单（抓包底稿 §7.2）：
+ * codex input[] item type list (capture draft section 7.2):
  *   - {type:"message", role, content:[{type:"input_text",text}]}
  *   - {type:"function_call", name, arguments}
  *   - {type:"function_call_output", output}
  *   - {type:"reasoning", encrypted_content}
  *
- * 只关心 type=message && role=user 的 content 里 type=input_text 段。
+ * Only cares about segments of type=input_text within the content of type=message && role=user.
  */
 function extractCodexUserText(input: unknown): string | null {
   if (!Array.isArray(input)) return null;
 
-  // 从后往前找最后一条 role=user 的 message
+  // Search backwards for the last message with role=user
   for (let i = input.length - 1; i >= 0; i--) {
     const item = input[i] as Record<string, unknown> | null | undefined;
     if (!item || typeof item !== "object") continue;

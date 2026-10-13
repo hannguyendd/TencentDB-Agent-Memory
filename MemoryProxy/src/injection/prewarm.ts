@@ -26,24 +26,24 @@ export interface PrewarmOptions {
   /** Total timeout for the whole prewarm pass, in ms. Defaults to 20000. */
   totalTimeoutMs?: number;
   /**
-   * 刷新场景专用:在 prewarm 前先 `clearBySession` 把该 session 现有缓存全清掉,
-   * 让本次 prewarm 的结果成为**唯一权威**。默认 `false`(保留首次 session_init 的
-   * 语义:cache miss 时 pipeline 走 execute() self-heal)。
+   * Dedicated to the refresh scenario: before prewarm, first `clearBySession` clears all existing cache of the session,
+   * so that this prewarm's result becomes the **sole authority**. Default `false` (keeps the first session_init
+   * semantics: on cache miss the pipeline takes execute() self-heal).
    *
-   * 为什么需要这个开关 —— 首次 session_init 与 mem:sync 刷新走同一个入口
-   * `prewarmFromConfig`,但语义不同:
-   *   - 首次:缓存本来是空的,prewarm 拿到 `[]`/error 就 skip 写入,pipeline 侧
-   *     get 回 null 时会走 execute() 现拉一次,并 self-heal 回写缓存 —— 语义闭环。
-   *   - 刷新:缓存里**已经有旧数据**了。prewarm 若某个 hook 拿到 `[]`(比如用户
-   *     刚解绑 wiki+codegraph)或超时/异常,`prewarmAll` 会 skip 写入,旧数据
-   *     原封不动留在 COS 上;下次请求 pipeline 从 COS 读回老快照继续注入,表现
-   *     就是"资产已经解绑但注入还带着"。
+   * Why this switch is needed -- the first session_init and the mem:sync refresh go through the same entry
+   * `prewarmFromConfig`, but with different semantics:
+   *   - First time: the cache is empty to begin with; if prewarm gets `[]`/error it skips the write, and when the pipeline side
+   *     gets null it takes execute() to fetch once on the spot and self-heals back into the cache -- a closed semantic loop.
+   *   - Refresh: the cache **already has old data**. If prewarm gets `[]` for some hook (e.g. the user
+   *     just unbound a wiki+codegraph) or times out/errors, `prewarmAll` skips the write, and the old data
+   *     stays untouched on COS; on the next request the pipeline reads the old snapshot back from COS and keeps injecting,
+   *     which shows up as "the asset is already unbound but the injection still carries it".
    *
-   * 开启 `clearBefore` 后语义变成"prewarm 拿到什么就是什么,拿不到就没有":
-   *   - hook A 有内容 → 覆写缓存(正常)。
-   *   - hook B 拿到 `[]` → 旧缓存被上面的 clear 清掉,不再命中(修 knowledge 那个 bug)。
-   *   - hook C prewarm 抛异常/超时 → 旧缓存同样被清掉,下次 pipeline 走 execute()
-   *     兜底 —— 一次网络抖动不会让老快照"无限续命"。
+   * After enabling `clearBefore` the semantics become "whatever prewarm gets is what there is; if it gets nothing there is nothing":
+   *   - hook A has content -> overwrite the cache (normal).
+   *   - hook B gets `[]` -> the old cache is cleared by the clear above and no longer hits (fixes that knowledge bug).
+   *   - hook C prewarm throws/times out -> the old cache is likewise cleared, and next time the pipeline falls back to execute()
+   *     -- a single network blip will not let the old snapshot "live forever".
    */
   clearBefore?: boolean;
 }
@@ -54,10 +54,10 @@ export interface PrewarmResult {
   durationMs: number;
 }
 
-// 8s → 20s（2026-07-11）：tdai-profile-memory-injector prewarm 需要读
-// self + 每个 imported chat_memory 对应 agent 的 L2 索引 + L3 persona
-// （走 COS）；当 imported agent 存在或 COS 慢时，8s 常常 timeout 导致
-// 整个 <tdai_profile_memory> 段落丢失。放宽到 20s 覆盖常态开发机场景。
+// 8s -> 20s (2026-07-11): the tdai-profile-memory-injector prewarm needs to read
+// self + the L2 index and L3 persona of the agent corresponding to each imported chat_memory
+// (via COS); when imported agents exist or COS is slow, 8s often times out, causing
+// the whole <tdai_profile_memory> section to be lost. Relaxed to 20s to cover the normal dev-machine scenario.
 const DEFAULT_TOTAL_TIMEOUT_MS = 20000;
 
 function shouldPrewarm(hook: InjectionHook): boolean {
@@ -114,15 +114,15 @@ export async function prewarmAll(
     return { cachedHookIds, skipped, durationMs: Date.now() - startedAt };
   }
 
-  // Refresh 场景:先清掉该 session 所有 hook 的现有缓存,让本次 prewarm 成为
-  // 唯一权威。见 `PrewarmOptions.clearBefore` 的注释里详细解释了为什么首次
-  // session_init 不需要这么做、而刷新必须这么做。
+  // Refresh scenario: first clear the existing cache of all hooks of this session, so this prewarm becomes the
+  // sole authority. See the comment on `PrewarmOptions.clearBefore` for a detailed explanation of why the first
+  // session_init does not need this while a refresh must do it.
   //
-  // 位置刻意放在 targets 非空 → 每个 hook 执行之前:如果注册表里根本没有
-  // 需要 prewarm 的 hook,清理也没意义(且可能误清别人在同 session 下写的东西)。
+  // The position is deliberately placed after targets is non-empty -> before each hook executes: if the registry has no
+  // hook that needs prewarm at all, clearing is pointless (and might wrongly clear things others wrote under the same session).
   //
-  // clearBySession 内部对底层错误 swallow(见 hookCacheRepo 各实现),不会
-  // 阻断后续 prewarm,符合 "prewarm 是 best-effort" 的整体语义。
+  // clearBySession swallows underlying errors internally (see the hookCacheRepo implementations), and will not
+  // block subsequent prewarm, consistent with the overall semantics that "prewarm is best-effort".
   if (opts.clearBefore) {
     try {
       await repo.clearBySession(input.spaceId ?? "", input.userId, input.agentSource, sessionId);

@@ -1,15 +1,15 @@
 /**
- * TaskImportDialog — 「导入 Task」对话框。
+ * TaskImportDialog -- "Import Task" dialog.
  *
- * 结构：
- *   1. 未认证时先弹**令牌小窗**（CredentialGate）；认证通过后主页面才出现。
- *   2. 主页面 = 筛选条（项目/类型/标题/处理人）→ 表格（选择/标题/状态）→ 分页 → 提交/取消。
+ * Structure:
+ *   1. When unauthenticated, a **token mini-dialog** (CredentialGate) pops up first; the main page appears only after authentication passes.
+ *   2. Main page = filter bar (project / type / title / assignee) -> table (select / title / status) -> pagination -> submit / cancel.
  *
- * 关键约定：
- *   - 令牌仅组件内存态，关闭即丢，不进 localStorage、不落库。
- *   - **跨页勾选保留**：Map<`${item_type}:${external_id}`, CandidateItem>。
- *     三类工作项 id 同形（19 位数字串），不加类型前缀会互相覆盖。
- *   - **批量失败隔离**：后端逐条处理，结果按 created / failed 分流。
+ * Key conventions:
+ *   - The token lives only in component memory, lost on close, never entering localStorage or being persisted.
+ *   - **Cross-page selection is preserved**: Map<`${item_type}:${external_id}`, CandidateItem>.
+ *     The three kinds of work items have ids of the same shape (19-digit strings); without a type prefix they would overwrite each other.
+ *   - **Batch failure isolation**: the backend processes item by item, and results are split into created / failed.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -47,22 +47,22 @@ const { autotip, selectable } = Table.addons;
 const DEFAULT_PAGE_SIZE = 10;
 
 /**
- * 可选页长。
+ * Selectable page sizes.
  *
- * 上限 100 是**服务端约束**，两处都卡这个值：
- *   - Core 入参校验 `limit: z.coerce.number().int().min(1).max(100)`；
- *   - TAPD provider 的 `clampLimit()` 也按 MAX_LIMIT=100 截断。
- * 再往上给只会被静默截断，让「每页 200 条」变成骗人的选项。
+ * The upper limit of 100 is a **server-side constraint**, enforced in both places:
+ *   - Core input validation `limit: z.coerce.number().int().min(1).max(100)`;
+ *   - the TAPD provider's `clampLimit()` also truncates at MAX_LIMIT=100.
+ * Going any higher would only be silently truncated, turning "200 per page" into a deceptive option.
  */
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 /**
- * 跨页勾选的 key：必须带类型前缀，因为三类工作项 id 同形。
+ * Key for cross-page selection: it must carry a type prefix, because the three kinds of work items have ids of the same shape.
  *
- * 若 external_id / item_type 缺失（后端字段命名与前端不一致时会发生），
- * `undefined:undefined` 会让**所有行共享同一个 key** —— 表现为「勾一个全勾」。
- * 因此在数据落地时就注入 rowKey：字段齐则用 `类型:id`，缺失则加数组下标兜底，
- * 保证任意两行 key 不同。
+ * If external_id / item_type is missing (happens when the backend field naming is inconsistent with the frontend),
+ * `undefined:undefined` would make **all rows share the same key** -- manifesting as "check one, all get checked".
+ * Therefore rowKey is injected when the data lands: when the fields are complete use `type:id`, when missing add the array index as a fallback,
+ * ensuring any two rows have different keys.
  */
 function withRowKey(items: CandidateItem[]): Row[] {
   return items.map((it, idx) => ({
@@ -71,14 +71,14 @@ function withRowKey(items: CandidateItem[]): Row[] {
   }));
 }
 
-/** 带稳定行标识的候选项。 */
+/** Candidate item carrying a stable row identifier. */
 type Row = CandidateItem & { rowKey: string };
 
 /**
- * 按 provider 声明的 auth scheme 构造待提交的令牌。
+ * Build the token to submit according to the provider's declared auth scheme.
  *
- * custom 方式的 header 名**必须来自后端下发的 AuthScheme.headerName** ——
- * 硬编码具体来源的 header 会让第二个 custom 来源发错 header（真实 bug）。
+ * The header name of the custom scheme **must come from the AuthScheme.headerName sent by the backend** --
+ * hard-coding a specific source's header would make a second custom source send the wrong header (a real bug).
  */
 function buildCredential(
   kind: 'bearer' | 'basic' | 'custom',
@@ -91,37 +91,37 @@ function buildCredential(
   return { kind, secret };
 }
 
-/** TAPD 令牌最小长度（太湖令牌与个人令牌都远长于此）。 */
+/** Minimum length of a TAPD token (both Taihu tokens and personal tokens are far longer than this). */
 const MIN_TOKEN_LEN = 20;
 
 /**
- * 前端预校验。
+ * Frontend pre-validation.
  *
- * 真实令牌不可能这么短，也不可能含省略号 —— 这两个特征说明用户把
- * **界面上的示例文本**当成了要填的内容（曾发生：直接填了示例字面量）。
- * 在提交前拦下，比让服务端返回空项目列表再排查要省事得多。
+ * A real token cannot be this short, nor contain an ellipsis -- these two traits indicate the user treated the
+ * **example text in the UI** as what to fill in (it has happened: the example literal was filled in directly).
+ * Blocking before submission is much easier than letting the server return an empty project list and then investigating.
  *
- * 校验只依赖「长度 / 省略号」这两个**与来源无关**的特征，
- * 不判断令牌前缀或格式 —— 那属于来源侧的认证细节。
+ * The validation relies only on the two **source-independent** traits of "length / ellipsis",
+ * and does not judge the token prefix or format -- that is the source side's authentication detail.
  */
 function validateToken(raw: string): string | null {
   const v = raw.trim();
   if (!v) return 'empty';
-  // 字符类内 `.` 本就是字面量，无需转义（转义会触发 no-useless-escape）。
+  // Inside a character class `.` is already a literal and needs no escaping (escaping would trigger no-useless-escape).
   if (/[….]{2,}|…/.test(v)) return 'placeholder';
   if (v.length < MIN_TOKEN_LEN) return 'tooShort';
   return null;
 }
 
 /**
- * 令牌收集小窗。
+ * Token collection mini-dialog.
  *
- * 「列项目」同时承担连通性验证：令牌无效会在此处报错，
- * 不单独设 verify 接口（少一个端点、少一次往返）。
+ * "List projects" also serves as connectivity validation: an invalid token errors out here,
+ * and no separate verify endpoint is set up (one fewer endpoint, one fewer round trip).
  */
 function CredentialGate(props: {
   provider: TaskSourceProvider;
-  /** 来源展示名（已本地化），用于弹窗标题。 */
+  /** Source display name (already localized), used for the dialog title. */
   sourceLabel: string;
   teamId: string;
   onAuthed: (credential: Credential, workspaces: TaskWorkspace[]) => void;
@@ -134,7 +134,7 @@ function CredentialGate(props: {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  /** 当前选中的认证方式（提示文案与申请页都随它变化）。 */
+  /** The currently selected auth method (both the hint text and the request page change with it). */
   const activeScheme = schemes.find((s) => s.kind === kind);
 
   async function submit() {
@@ -154,7 +154,7 @@ function CredentialGate(props: {
       );
       const res = await taskSourceApi.workspaces(props.teamId, props.provider.id, credential);
       const ws = res.workspaces ?? [];
-      // 令牌有效但账号下没有项目 —— 明确提示，避免误以为「面板没加载」。
+      // The token is valid but the account has no projects -- show a clear notice, to avoid the misconception that "the panel didn't load".
       if (!ws.length) {
         setError(t('taskImport.noWorkspaces'));
         return;
@@ -177,10 +177,10 @@ function CredentialGate(props: {
     >
       <Modal.Body>
         {error && <Alert type="error">{error}</Alert>}
-        {/* vertical 布局：控件区是块级，Input size="full" 才能撑满弹窗宽度
-            （tea 2.8.0 的 Space 是 inline-flex + align-items:center 且不透传 style，撑不开） */}
+        {/* vertical layout: the control area is block-level, so Input size="full" is needed to fill the dialog width
+            (tea 2.8.0's Space is inline-flex + align-items:center and doesn't pass through style, so it can't stretch) */}
         <Form layout="vertical" style={{ width: '100%' }}>
-          {/* 认证方式互斥单选：只有一种方式时不必让用户选 */}
+          {/* Auth methods as a mutually exclusive radio: no need to make the user choose when there is only one method */}
           {schemes.length > 1 && (
             <Form.Item>
               <Segment
@@ -191,10 +191,10 @@ function CredentialGate(props: {
             </Form.Item>
           )}
           {/*
-            令牌申请/查看指引：地址由部署配置下发（每个认证方式各一个）。
-            与 iWiki / 工蜂来源注册弹窗一样挂在 Form.Item 的 extra 上 —— 未配置则不渲染，
-            **不内置备用地址**（域名是部署信息，且写死会指向错误环境）。
-            外链走 ExternalLink（强制 _blank），rel 需显式传入防 tabnabbing。
+            Token request/view guide: the address is issued by deployment config (one per auth method).
+            Like the iWiki / Gongfeng source registration dialogs, it is attached to the Form.Item's extra -- not rendered when unconfigured,
+            **no built-in fallback address** (the domain is deployment information, and hard-coding would point at the wrong environment).
+            External links go through ExternalLink (forced _blank), and rel must be passed explicitly to prevent tabnabbing.
           */}
           <Form.Item
             extra={
@@ -228,46 +228,46 @@ function CredentialGate(props: {
 export default function TaskImportDialog(props: {
   teamId: string;
   providers: TaskSourceProvider[];
-  /** 当前要导入的来源 id（由「导入 Task」下拉框选中项传入）。 */
+  /** The source id to import now (passed in from the item selected in the "Import Task" dropdown). */
   providerId: string;
   onClose: () => void;
   onImported: () => void;
 }) {
   const { t } = useTranslation();
   const sourceLabel = useSourceLabel();
-  // 按 id 定位来源（不再是「取第一个」）：多源场景下选哪个就用哪个。
+  // Locate the source by id (no longer "take the first one"): in the multi-source case, whichever is chosen is used.
   const provider = props.providers.find((p) => p.id === props.providerId);
   const providerLabel = provider ? sourceLabel(provider.id) : '';
 
-  /** 认证态：非空即已通过令牌校验。 */
+  /** Auth state: non-null means the token validation has passed. */
   const [credential, setCredential] = useState<Credential | null>(null);
   const [workspaces, setWorkspaces] = useState<TaskWorkspace[]>([]);
 
-  // 筛选条件
+  // Filter conditions
   const [workspaceId, setWorkspaceId] = useState('');
   const [itemTypes, setItemTypes] = useState<string[]>([]);
   const [keyword, setKeyword] = useState('');
   /**
-   * 「处理人」默认填当前用户的 **username**。
+   * "Assignee" defaults to the current user's **username**.
    *
-   * 注意不是 user_id：`user_id` 形如 `usr-xxx`，而 TAPD 的处理人账号是
-   * `wlleiiwang` 这类 —— 填错会查到 0 条且不易察觉。
-   * 取不到 username（未登录等）时留空，由用户手填。
+   * Note it is not user_id: `user_id` looks like `usr-xxx`, while TAPD's assignee accounts are
+   * like `wlleiiwang` -- filling it wrong yields 0 results and is hard to notice.
+   * When username cannot be obtained (not logged in, etc.) leave it empty and let the user fill it in.
    */
   const [owner, setOwner] = useState(() => getPanelSession()?.user?.username ?? '');
 
   /**
-   * 该来源是否支持「待办」（由后端 capabilities 声明，非前端假设）。
-   * 不支持的来源不显示开关，也不下发 only_todo。
+   * Whether this source supports "To-do" (declared by the backend capabilities, not assumed by the frontend).
+   * Sources that don't support it show no toggle and don't send only_todo.
    */
   const supportsTodo = provider?.capabilities?.todo === true;
 
   /**
-   * 「待办」开关：支持该能力的来源默认开启。
+   * "To-do" toggle: on by default for sources that support the capability.
    *
-   * 勾选 → 走来源的待办接口（只看当前令牌用户的待办事项）；
-   * 不勾 → 走常规接口（可用标题 / 处理人筛选）。
-   * 待办接口不支持标题与处理人参数（传入会被服务端拒），故勾选时禁用这两个输入框。
+   * Checked -> use the source's to-do endpoint (only the current token user's to-do items);
+   * Unchecked -> use the regular endpoint (can filter by title / assignee).
+   * The to-do endpoint does not support title and assignee parameters (passing them gets rejected by the server), so these two inputs are disabled when checked.
    */
   const [onlyTodo, setOnlyTodo] = useState(supportsTodo);
 
@@ -286,18 +286,18 @@ export default function TaskImportDialog(props: {
   const overLimit = selectedList.length > maxBatch;
 
   /**
-   * 见过的所有行（跨页累积）。
+   * All rows seen (accumulated across pages).
    *
-   * selectable 插件的 onChange 只回传 **key 数组**，而提交需要整行数据
-   * （external_id / item_type / scope）。翻页后上一页的行已不在 `items` 里，
-   * 光靠当前页无法还原已勾选的旧行，故用 ref 累积一份 key → Row 的字典。
+   * The selectable plugin's onChange only passes back the **key array**, while submission needs the whole row data
+   * (external_id / item_type / scope). After paging, the previous page's rows are no longer in `items`,
+   * and the current page alone cannot restore the previously checked old rows, so a ref accumulates a key -> Row dictionary.
    */
   const seenRowsRef = useRef<Map<string, Row>>(new Map());
 
   const loadCandidates = useCallback(async () => {
     if (!provider || !credential) return;
-    // workspace_id 只对常规列表接口是强制入参；待办接口可选
-    // （不传 = 跨项目的全部待办），故待办模式下允许不选项目。
+    // workspace_id is a required input only for the regular list endpoint; optional for the to-do endpoint
+    // (not passing = all to-dos across projects), so selecting no project is allowed in to-do mode.
     if (!onlyTodo && !workspaceId) {
       setError(t('taskImport.needWorkspace'));
       return;
@@ -308,7 +308,7 @@ export default function TaskImportDialog(props: {
       const res = await taskSourceApi.candidates(props.teamId, provider.id, credential, {
         workspace_id: workspaceId || undefined,
         item_types: itemTypes.length ? itemTypes : undefined,
-        // 待办模式下这两个参数服务端不接受，直接不下发。
+        // The server does not accept these two parameters in to-do mode, so they are simply not sent.
         keyword: !onlyTodo && keyword.trim() ? keyword.trim() : undefined,
         owner: !onlyTodo && owner.trim() ? owner.trim() : undefined,
         page,
@@ -316,7 +316,7 @@ export default function TaskImportDialog(props: {
         only_todo: onlyTodo,
       });
       const rows = withRowKey(res.items ?? []);
-      // 先登记到「见过的行」，再交给表格 —— 保证 selectable 回传 key 时一定查得到行数据
+      // First register in "rows seen", then hand to the table -- ensuring the row data can always be found when selectable passes back keys
       for (const row of rows) seenRowsRef.current.set(row.rowKey, row);
       setItems(rows);
       setTotal(res.total ?? 0);
@@ -340,26 +340,26 @@ export default function TaskImportDialog(props: {
   ]);
 
   /**
-   * 自动查询的触发时机：**认证完成** + **翻页 / 改页长** + **切换待办开关**。
+   * Trigger timing of auto query: **authentication complete** + **page change / page size change** + **toggling the to-do switch**.
    *
-   * 其余筛选条件（项目 / 类型 / 标题 / 处理人）变化**不**自动发请求 ——
-   * TAPD 单次查询涉及多个类型接口 + 状态映射表，逐字符自动触发会打爆网关。
+   * Changes to the other filter conditions (project / type / title / assignee) do **not** automatically send requests --
+   * a single TAPD query involves multiple type endpoints + a status mapping table, and triggering character by character would overwhelm the gateway.
    *
-   * 待办开关是例外：它是「换一种数据源」而非「加一个过滤条件」，
-   * 且待办模式无可用筛选参数（标题/处理人被禁用），点「过滤」没有额外信息可给，
-   * 让用户再点一次纯属多余。切换即查询。
+   * The to-do toggle is an exception: it is "switching to a different data source" rather than "adding a filter condition",
+   * and to-do mode has no usable filter parameters (title/assignee are disabled), so clicking "Filter" gives no extra information,
+   * and making the user click again is pure redundancy. Toggling queries immediately.
    */
   useEffect(() => {
     if (!credential) return;
     void loadCandidates();
-    // loadCandidates 仅作稳定引用；触发时机由上方三处 + 「过滤」按钮控制。
-    // workspaceId / keyword / owner 故意不入依赖：切换它们不自动发请求，需点「过滤」。
+    // loadCandidates serves only as a stable reference; the trigger timing is controlled by the three above + the "Filter" button.
+    // workspaceId / keyword / owner are deliberately not in the dependencies: changing them does not automatically send a request, and "Filter" must be clicked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [credential, page, pageSize, onlyTodo]);
 
   /**
-   * 「过滤」按钮：筛选条件变化后回到第 1 页再查询。
-   * 若已停在第 1 页，需手动触发一次（useEffect 依赖未变不会重跑）。
+   * "Filter" button: after the filter conditions change, return to page 1 and then query.
+   * If already on page 1, it must be triggered manually once (the useEffect dependencies are unchanged so it won't re-run).
    */
   function applyFilter() {
     if (page === 1) void loadCandidates();
@@ -369,18 +369,18 @@ export default function TaskImportDialog(props: {
   function onAuthed(cred: Credential, ws: TaskWorkspace[]) {
     setCredential(cred);
     setWorkspaces(ws);
-    // 默认 **不选中具体项目**（=「所有项目」）：待办是默认开启的数据源，
-    // 而待办接口的 workspace_id 是可选的，不传即跨项目，覆盖面最大。
-    // 常规模式下项目必填，取消「待办」勾选时会自动回落到第一个项目（见复选框 onChange）。
+    // By default **no specific project is selected** (= "All projects"): to-do is the default-on data source,
+    // and the to-do endpoint's workspace_id is optional, so not passing it means across projects, with the widest coverage.
+    // In regular mode the project is required; unchecking "To-do" automatically falls back to the first project (see the checkbox onChange).
     setWorkspaceId('');
   }
 
   /**
-   * selectable 插件的勾选回调。
+   * The selectable plugin's selection callback.
    *
-   * 插件只认 key：回传的 `keys` 是「本页改动后的结果 + 其它页原有的 key」
-   * （CheckTree 内部基于传入 value 的全集增删，不认识的 key 原样保留），
-   * 所以跨页勾选天然不丢。这里按 key 重建 Map，行数据从 seenRowsRef 取。
+   * The plugin only recognizes keys: the returned `keys` is "this page's result after changes + the existing keys of other pages"
+   * (CheckTree adds/removes inside based on the full set of the passed value, and keeps unrecognized keys as they are),
+   * so cross-page selection is naturally not lost. Here the Map is rebuilt by key, and row data is taken from seenRowsRef.
    */
   function handleSelectChange(keys: string[]) {
     setSelected((prev) => {
@@ -425,7 +425,7 @@ export default function TaskImportDialog(props: {
 
   if (!provider) return null;
 
-  // 未认证：只显示令牌小窗。
+  // Unauthenticated: show only the token mini-dialog.
   if (!credential) {
     return (
       <CredentialGate
@@ -450,14 +450,14 @@ export default function TaskImportDialog(props: {
         {error && <Alert type="error">{error}</Alert>}
         {overLimit && <Alert type="warning">{t('taskImport.overLimit', { max: maxBatch })}</Alert>}
 
-        {/* 筛选条：inline 表单，项数多时自动折行（不用 Justify 分左右
-            —— 左侧 4 个条件会挤掉右列宽度，把「待办」文案压成竖排） */}
+        {/* Filter bar: inline form, wraps automatically when there are many items (Justify is not used to split left and right
+            -- the 4 conditions on the left would squeeze the right column's width and squash the "To-do" text into vertical layout) */}
         <Table.ActionPanel>
           <Form layout="inline">
             {/*
-              常规模式项目**必填**：stories_get / tasks_get / bugs_get 都强制要求
-              workspace_id，缺省会直接报「当前参数中缺少 workspace_id」。
-              待办模式下可选：不传即取当前用户跨项目的全部待办。
+              The project is **required** in regular mode: stories_get / tasks_get / bugs_get all require
+              workspace_id, and omitting it directly errors with "workspace_id is missing from the current parameters".
+              Optional in to-do mode: not passing it takes all of the current user's to-dos across projects.
             */}
             <Form.Item label={t('taskImport.workspace')}>
               <Select
@@ -508,7 +508,7 @@ export default function TaskImportDialog(props: {
               />
             </Form.Item>
 
-            {/* 待办开关：仅在来源声明支持时显示（capabilities.todo） */}
+            {/* To-do toggle: shown only when the source declares support (capabilities.todo) */}
             {supportsTodo && (
               <Form.Item>
                 <Checkbox
@@ -516,12 +516,12 @@ export default function TaskImportDialog(props: {
                   tooltip={t('taskImport.onlyTodoHint')}
                   onChange={(next) => {
                     setOnlyTodo(next);
-                    // 常规模式项目必填，而「所有项目」只在待办模式有意义 ——
-                    // 切回常规模式时若还停在空值，需回落到第一个项目，否则接口报缺 workspace_id。
+                    // Regular mode requires a project, while "All projects" only makes sense in to-do mode --
+                    // when switching back to regular mode, if still on an empty value, fall back to the first project, otherwise the endpoint reports missing workspace_id.
                     if (!next && !workspaceId && workspaces.length) {
                       setWorkspaceId(workspaces[0].id);
                     }
-                    // 数据源换了，上一批结果不再适用 —— 清空勾选避免混入旧模式的条目。
+                    // The data source changed and the previous results no longer apply -- clear the selection to avoid mixing in items from the old mode.
                     setSelected(new Map());
                     setPage(1);
                   }}
@@ -531,8 +531,8 @@ export default function TaskImportDialog(props: {
               </Form.Item>
             )}
 
-            {/* 显式触发入口：筛选条件变化不自动发请求，点击后才查询。
-                待办模式下项目可选（不选 = 跨项目），故不能按 workspaceId 禁用。 */}
+            {/* Explicit trigger entry: changes to filter conditions don't automatically send requests; the query runs only after clicking.
+                The project is optional in to-do mode (none selected = across projects), so it can't be disabled based on workspaceId. */}
             <Form.Item>
               <Button
                 type="primary"
@@ -545,7 +545,7 @@ export default function TaskImportDialog(props: {
           </Form>
         </Table.ActionPanel>
 
-        {/* 表格：勾选列由 selectable 插件注入（含表头全选、半选态、整行可点） */}
+        {/* Table: the selection column is injected by the selectable plugin (including header select-all, indeterminate state, whole row clickable) */}
         <Table<Row>
           records={items}
           recordKey={(r) => r.rowKey}
@@ -560,7 +560,7 @@ export default function TaskImportDialog(props: {
             },
           ]}
           addons={[
-            // 只接 isLoading：`error` 也承载提交失败，用它驱动表格的"加载失败"态会误报
+            // Only wire isLoading: `error` also carries submit failures, and using it to drive the table's "load failed" state would misreport
             autotip({ isLoading: loading }),
             selectable({
               value: selectedKeys,
@@ -570,8 +570,8 @@ export default function TaskImportDialog(props: {
           ]}
         />
 
-        {/* 服务端分页：页码与页长都受控，页长下拉即 limit。
-            tea 2.8.0 的 Pagination 无 disabled 属性，加载中在回调里挡住操作。 */}
+        {/* Server-side pagination: both page number and page size are controlled, and the page size dropdown is the limit.
+            tea 2.8.0's Pagination has no disabled prop, so operations are blocked in the callback while loading. */}
         <Pagination
           recordCount={total}
           pageIndex={page}
@@ -580,8 +580,8 @@ export default function TaskImportDialog(props: {
           stateText={t('taskImport.total', { count: total })}
           onPagingChange={({ pageIndex, pageSize: nextSize }) => {
             if (loading) return;
-            // 改页长时组件已把 pageIndex 重置为 1（isPagingReset 默认 true），
-            // 两个值一起下发即可，不必区分是翻页还是改页长。
+            // When the page size changes the component has already reset pageIndex to 1 (isPagingReset defaults to true),
+            // so sending both values down together suffices, with no need to distinguish page change from page size change.
             if (nextSize && nextSize !== pageSize) setPageSize(nextSize);
             if (pageIndex) setPage(pageIndex);
           }}

@@ -115,15 +115,15 @@ function profileStoragePrefixForScope(scope: string): string {
 
 function scopedStorage(storage: StorageAdapter | undefined, ctx?: ProfileIsolation): StorageAdapter | undefined {
   if (!storage) return undefined;
-  // rowfs 后端在 scopeProfileStorageView 内改走隔离重绑定（D12 ③），不套键前缀。
+  // The rowfs backend switches to isolated rebinding inside scopeProfileStorageView (D12 item 3), without a key prefix.
   return scopeProfileStorageView(storage, profileStoragePrefixForScope(buildIsolationScope(ctx)), ctx);
 }
 
 function scopedStorageForScope(storage: StorageAdapter | undefined, scope: string): StorageAdapter | undefined {
   if (!storage) return undefined;
   if (storage.type === "rowfs") {
-    // rowfs: 把 scope 绑进行查询；默认 scope ("global") 解不出维度，
-    // undefined = 全集视图（standalone 单租户语义）。
+    // rowfs: bind the scope into the row query; the default scope ("global") cannot resolve dimensions,
+    // undefined = full-set view (standalone single-tenant semantics).
     return scopeProfileStorageView(storage, "", parseProfileIsolationScope(scope));
   }
   if (scope === DEFAULT_PROFILE_SCOPE) return storage;
@@ -397,8 +397,8 @@ export function createL1Runner(opts: {
   /** StorageAdapter for file operations (COS/local). */
   storage?: StorageAdapter;
   /**
-   * 跨节点保护 checkpoint 读改写的分布式锁配置。
-   * service 模式下必须提供，否则同 instance 的多节点并发会丢失 L1 游标。
+   * Distributed lock config protecting the checkpoint read-modify-write across nodes.
+   * Must be provided in service mode; otherwise concurrent writes from multiple nodes of the same instance would lose the L1 cursor.
    */
   checkpointLock?: import("./checkpoint.js").CheckpointLockOptions;
 }): (params: { sessionKey: string }) => Promise<{
@@ -712,8 +712,8 @@ export function createL2Runner(opts: {
   /** StorageAdapter for file operations (COS/local). */
   storage?: StorageAdapter;
   /**
-   * 跨节点保护 checkpoint 读改写的分布式锁配置。
-   * service 模式下必须提供，否则同instance 的多节点并发会丢失计数器修复结果。
+   * Distributed lock config protecting the checkpoint read-modify-write across nodes.
+   * Must be provided in service mode; otherwise concurrent writes from multiple nodes of the same instance would lose the counter repair result.
    */
   checkpointLock?: import("./checkpoint.js").CheckpointLockOptions;
 }): L2Runner {
@@ -819,7 +819,7 @@ export function createL2Runner(opts: {
         instanceId,
         llmRunner,
         storage: groupStorage,
-        // langfuse: 透传身份四元组，UI 上可按 user/session 列过滤
+        // langfuse: pass through the four-part identity so the UI can filter by user/session column
         traceContext: { teamId: ctx.teamId, userId: ctx.userId, agentId: ctx.agentId, sessionId: ctx.sessionId },
       });
 
@@ -848,14 +848,14 @@ export function createL2Runner(opts: {
         continue;
       }
 
-      //⚠️ 这里**不能**用 `checkpoint.write({...postState})`：
+      //⚠️ **Must not** use `checkpoint.write({...postState})` here:
       //
-      // postState 是跨越了整个 L2 LLM 抽取（数秒~数十秒）的旧快照，而write()
-      // 是「整对象覆盖 + 只有进程内锁」。用它写回会把这期间其他节点合法推进的
-      // runner_states / pipeline_states 全部抹掉（L1 游标丢失 → 重复抽取）。
+      // postState is an old snapshot spanning the entire L2 LLM extraction (seconds to tens of seconds), and write()
+      // is a "whole-object overwrite + in-process lock only". Writing back with it would wipe out the
+      // runner_states / pipeline_states legitimately advanced by other nodes in the meantime (L1 cursor lost → repeated extraction).
       //
-      // 正确做法：走 repairMonotonicCounters()，在分布式锁保护的临界区内重读，
-      // 只对这两个标量做单调取大，绝不触碰其他字段。
+      // The correct approach: go through repairMonotonicCounters(), re-read inside the critical section protected by the distributed lock,
+      // and take the monotonic max for just these two scalars, never touching any other fields.
       const checkpoint = new CheckpointManager(groupDataDir, logger, groupStorage, checkpointLock);
       const repaired = await checkpoint.repairMonotonicCounters({
         scenes_processed: preScenesProcessed,
@@ -1016,8 +1016,8 @@ export function createL3Runner(opts: {
       }
 
       logger.info(`${TAG} [L3] Starting persona generation: ${reason} (scope=${scope})`);
-      // 反解 scope 拿回 teamId/userId/agentId/sessionId 给 langfuse trace 用。
-      // 默认 scope ("global") 解不出维度，按空 isolation 处理。
+      // Reverse-resolve the scope to get teamId/userId/agentId/sessionId back for the langfuse trace.
+      // The default scope ("global") cannot resolve dimensions; treat it as an empty isolation.
       const scopeIsolation = parseProfileIsolationScope(scope) ?? {};
       const l3StartMs = Date.now();
       const resolvedL3Prompt = l3Prompts.get(memoryPromptResolveKey({
@@ -1208,7 +1208,7 @@ export async function createPipeline(opts: PipelineFactoryOptions): Promise<Pipe
 }
 
 // ============================
-// V2: StateBackend-based pipeline factory (需求 #8)
+// V2: StateBackend-based pipeline factory (requirement #8)
 // ============================
 
 import type { IStateBackend } from "../core/state/types.js";

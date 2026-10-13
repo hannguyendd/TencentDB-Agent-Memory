@@ -1,35 +1,35 @@
 /**
- * 成员维度聚合 —— 面板侧按 user_id 归并调用明细。
+ * Member-dimension aggregation -- panel-side merge of call details by user_id.
  *
- * 为什么在面板侧做：内核未提供「按成员聚合」的展示接口
- * （`tool-calls/watermark` 虽然 GROUP BY user_id，但它的返回是给 recall 增量链路
- * 用的指纹结构，且不含端点/耗时，不适合展示），本期不改 Core。
+ * Why do it panel-side: the kernel provides no "aggregate by member" display endpoint
+ * (`tool-calls/watermark` does GROUP BY user_id, but its return is a fingerprint structure for the recall incremental pipeline,
+ * and lacks endpoint/latency, so it is unsuitable for display); Core is not changed in this iteration.
  *
- * ⚠️ **抽样口径**：数据来自 `tool-calls/list` 分页拉取，单页上限 200、最多
- * MAX_SAMPLE_PAGES 页。当 total 超出采样量时 truncated=true，UI 必须显式标注
- * 「基于最近 N / total 条」，不得当作全量口径。
+ * Warning: **sampled scope**: data is pulled by paging `tool-calls/list`, with a page limit of 200 and at most
+ * MAX_SAMPLE_PAGES pages. When total exceeds the sample size, truncated=true, and the UI must explicitly label
+ * "based on the latest N / total records"; it must not be treated as a full-volume scope.
  */
 import { classifyAsset, type AssetCategory } from './asset-category';
 import type { ToolCallRow } from '@/lib/api/analytics';
 
-/** 最多采样页数（200/页 → 上限 2000 条）。 */
+/** Maximum sampled pages (200/page -> up to 2000 records). */
 export const MAX_SAMPLE_PAGES = 10;
 
 export interface MemberStat {
   user_id: string;
-  /** 采样窗口内的调用数。 */
+  /** Number of calls within the sampling window. */
   calls: number;
-  /** 去重 session 数。 */
+  /** Number of distinct sessions. */
   sessions: number;
-  /** 该成员调用最多的资产类别。 */
+  /** The asset category this member called most. */
   topCategory: AssetCategory | null;
-  /** 各类别调用数。 */
+  /** Call count per category. */
   byCategory: Record<AssetCategory, number>;
-  /** 平均耗时（ms）。 */
+  /** Average latency (ms). */
   avgElapsedMs: number;
-  /** 失败数（upstream_status >= 400 或 reject_reason 非空）。 */
+  /** Failure count (upstream_status >= 400 or reject_reason non-empty). */
   errors: number;
-  /** 采样窗口内最近一次调用时间。 */
+  /** Time of the most recent call within the sampling window. */
   lastCallAt: string;
 }
 
@@ -38,20 +38,20 @@ function emptyByCategory(): Record<AssetCategory, number> {
 }
 
 /**
- * 空 user_id 的聚合桶标签。
+ * Aggregate bucket label for an empty user_id.
  *
- * ⚠️ 这**不是**真实 user_id，只是面板侧的占位分组：
- *   - 不可用于 user/list 名称解析（会白占一个 user_ids 配额且查不到）
- *   - 不可用于下钻（把它当 user_id 传给内核语义错误）
- * 调用方需显式识别并跳过，展示上用 i18n 的「未归属」。
+ * Warning: this is **not** a real user_id, only a panel-side placeholder group:
+ *   - cannot be used for user/list name resolution (it would waste a user_ids quota slot and not be found)
+ *   - cannot be used for drill-down (passing it to the kernel as a user_id is semantically wrong)
+ * Callers must explicitly recognize and skip it, and show the i18n "Unassigned" in the UI.
  */
 export const UNASSIGNED_USER = '(unassigned)';
 
 /**
- * 把调用明细按 user_id 聚合，按调用数降序返回。
+ * Aggregate call details by user_id, returned in descending order of call count.
  *
- * user_id 为空的行归入 `UNASSIGNED_USER` 桶：这类事件在 CH 中确实存在
- * （上报侧未带 user 上下文），静默丢弃会让合计数与 KPI 对不上。
+ * Rows with an empty user_id go into the `UNASSIGNED_USER` bucket: such events do exist in CH
+ * (the reporting side carried no user context), and silently dropping them would make the total disagree with the KPI.
  */
 export function aggregateByMember(rows: ToolCallRow[]): MemberStat[] {
   const map = new Map<
@@ -85,7 +85,7 @@ export function aggregateByMember(rows: ToolCallRow[]): MemberStat[] {
     const category = classifyAsset(row.executed_endpoint, row.bridge_source);
     entry.byCategory[category] += 1;
 
-    // elapsed_ms 为 0 多为未记录，不计入均值分母，避免把平均耗时稀释成 0
+    // elapsed_ms of 0 is mostly unrecorded; exclude it from the average's denominator, to avoid diluting the average latency to 0
     if (row.elapsed_ms > 0) {
       entry.elapsedSum += row.elapsed_ms;
       entry.elapsedCount += 1;

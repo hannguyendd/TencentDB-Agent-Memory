@@ -1,11 +1,11 @@
 /**
- * system_admin 对外可见性：列表/查询类接口默认隐藏，仅 bootstrap 密钥或本人可见。
+ * system_admin external visibility: hidden by default in list/query endpoints, visible only to the bootstrap key or the user themselves.
  */
 import type { UserEntity, UserPublic } from "../types.js";
 import type { V3AuthContext } from "../router/auth.js";
 
 export interface UserVisibilityOptions {
-  /** 团队级列表已限定成员集合时，团队 admin 可见其中 normal 用户。 */
+  /** When a team-level list is already restricted to a member set, team admins can see the normal users in it. */
   allowTeamPeers?: boolean;
 }
 
@@ -17,14 +17,14 @@ export function canManageUsers(ctx: V3AuthContext): boolean {
   return ctx.isSystemAdmin;
 }
 
-/** admin/system_admin 可读全部；普通用户仅可读自己；system_admin 账号对他人默认不可见。 */
+/** admin/system_admin can read everything; normal users can only read themselves; system_admin accounts are invisible to others by default. */
 export function canViewUser(
   user: UserEntity,
   ctx: V3AuthContext,
   options?: UserVisibilityOptions,
 ): boolean {
   if (isSystemAdminUser(user)) {
-    // 单实例仅一个 system_admin（设计不变量）；ctx.isSystemAdmin 分支在现网不可达，保留作防御。
+    // A single instance has only one system_admin (design invariant); the ctx.isSystemAdmin branch is unreachable in production and kept as a defense.
     return ctx.isAdmin || ctx.isSystemAdmin || ctx.userId === user.user_id;
   }
   if (ctx.isSystemAdmin) return true;
@@ -33,7 +33,7 @@ export function canViewUser(
   return ctx.userId === user.user_id;
 }
 
-/** v3.1 公开响应：user_id / user_type / username / created_at。 */
+/** v3.1 public response: user_id / user_type / username / created_at. */
 export function toPublicUser(user: UserEntity, ctx: V3AuthContext): UserPublic {
   const pub: UserPublic = {
     user_id: user.user_id,

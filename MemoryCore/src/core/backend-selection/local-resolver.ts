@@ -1,9 +1,9 @@
 /**
- * `LocalBackendResolver` (P8 / 完整实现设计 §5.3.1): resolve from process
+ * `LocalBackendResolver` (P8 / full implementation design §5.3.1): resolve from process
  * parameters/env — the resolver used for standalone deployments and as the
  * pre-Shark behavior of service deployments.
  *
- * Fallback semantics (定稿 2026-08-31):
+ * Fallback semantics (finalized 2026-08-31):
  * - no explicit override → per-deploy-mode default
  *   (standalone: sqlite+local; service: tcvdb+cos — byte-identical to today's
  *   behavior, N1);
@@ -74,7 +74,7 @@ export class LocalBackendResolver implements BackendResolver {
 
   private async resolveFs(): Promise<FsChoice> {
     // Env surface (FILE_STORE_MODE / FILE_STORE_OTHERS) → two-axis model
-    // (两轴模型定稿 §5 映射): local/cos are single-backend forms
+    // (two-axis model spec §5 mapping): local/cos are single-backend forms
     // (profile=files, the others leg serves every key); rowfs is the
     // composite form (profile=rows + an others leg).
     const mode: FsKind =

@@ -1,5 +1,5 @@
 /**
- * `validateResolution` (P7 / 完整实现设计 §5.1.1 + D8): reject illegal or
+ * `validateResolution` (P7 / full implementation design §5.1.1 + D8): reject illegal or
  * incomplete resolutions before the assembly layer builds any connection.
  *
  * Two failure classes, deliberately distinct:
@@ -41,7 +41,7 @@ export function validateResolution(resolution: BackendResolution): void {
     );
   }
 
-  // §5.1.1 + 两轴定稿（2026-09-02 收紧）: profile=rows maps files onto profile
+  // §5.1.1 + two-axis spec (tightened 2026-09-02): profile=rows maps files onto profile
   // rows, and mongodb is the only DB whose store implements the profile-row
   // methods — sqlite has no rows to map, tcvdb has not implemented them (the
   // assembly guard would fail-fast anyway). Reject both before assembly.

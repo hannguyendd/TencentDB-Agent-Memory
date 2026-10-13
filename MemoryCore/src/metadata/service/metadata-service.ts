@@ -1,15 +1,15 @@
 /**
- * MetadataService — 元数据业务编排层。
+ * MetadataService — metadata business orchestration layer.
  *
- * 对应设计文档 §2 / §7 / §10。在 IMetadataStore 之上叠加业务约束：
- *   - createAgent/createTask/createAsset 校验 team 存在
- *   - createTask linkAgents 校验 agent 同 team
- *   - setAgentFixedAssets 用 canBindAsset 校验 visibility
- *   - listAgentFixedAssetsWithDetail 聚合 agent + 详情 +（可选）visibility 过滤 + touchUsage
- *   - checkAssetPermission 懒加载 ACL（角色默认覆盖时不查表）
- *   - user_key 生成/刷新
+ * Corresponds to design doc §2 / §7 / §10. Layers business constraints on top of IMetadataStore:
+ *   - createAgent/createTask/createAsset verify the team exists
+ *   - createTask linkAgents verifies agents are in the same team
+ *   - setAgentFixedAssets uses canBindAsset to validate visibility
+ *   - listAgentFixedAssetsWithDetail aggregates agent + details + (optional) visibility filtering + touchUsage
+ *   - checkAssetPermission lazily loads ACLs (no table lookup when role defaults cover it)
+ *   - user_key generation/refresh
  *
- * 不感知具体后端（SQLite / MongoDB），保证存储可切换。
+ * Unaware of the concrete backend (SQLite / MongoDB), keeping storage swappable.
  */
 
 import { DuplicateUserKeyError, type IMetadataStore } from "../store/interface.js";
@@ -105,15 +105,15 @@ import { formatListResult, paginateArray, resolvePagination, wrapPaginated, DEFA
 import { generateId, ID_PREFIX } from "../utils/id-generator.js";
 import { buildChatMemoryAssetId, resolveChatMemoryAgentId } from "../utils/chat-memory-asset.js";
 
-// ── 默认 Agent / Team 常量 ──
+// ── Default Agent / Team constants ──
 
 const DEFAULT_TEAM_NAME = "default-team";
-const DEFAULT_TEAM_DESCRIPTION = "系统初始化时自动创建的默认团队，用于存放默认助手";
+const DEFAULT_TEAM_DESCRIPTION = "Default team created automatically at system initialization, used to hold the default assistant";
 
 const DEFAULT_AGENT_NAME = "default-agent";
-const DEFAULT_AGENT_DESCRIPTION = "默认助手，可处理通用开发任务与日常协作。";
+const DEFAULT_AGENT_DESCRIPTION = "Default assistant that can handle general development tasks and day-to-day collaboration.";
 
-// prompt 拼接格式与前端手动创建 Agent 完全一致：
+// The prompt concatenation format is exactly the same as when the frontend creates an Agent manually:
 // [card.rolePrompt, card.rulesPrompt].filter(Boolean).join('\n\n')
 const DEFAULT_AGENT_ROLE_PROMPT = "";
 const DEFAULT_AGENT_RULES_PROMPT = "";
@@ -121,9 +121,9 @@ const DEFAULT_AGENT_PROMPT = [DEFAULT_AGENT_ROLE_PROMPT, DEFAULT_AGENT_RULES_PRO
   .filter(Boolean)
   .join("\n\n");
 
-// metadata_json 存储拆分后的 role_prompt / rules_prompt，
-// 与前端 writeAgentUiMeta / readAgentUiMeta 的 "ui" namespace 格式一致，
-// 保证 Agent 详情页「角色定位 prompt」和「规则固定 prompt」分开显示。
+// metadata_json stores the split role_prompt / rules_prompt,
+// consistent with the "ui" namespace format of the frontend's writeAgentUiMeta / readAgentUiMeta,
+// so that the Agent detail page shows the "role prompt" and the "fixed rules prompt" separately.
 const DEFAULT_AGENT_METADATA_JSON = JSON.stringify({
   ui: {
     role_prompt: DEFAULT_AGENT_ROLE_PROMPT,
@@ -131,14 +131,14 @@ const DEFAULT_AGENT_METADATA_JSON = JSON.stringify({
   },
 });
 
-/** 业务校验错误，带可映射到 HTTP 状态的 code。 */
+/** Business validation error, carrying a code that can be mapped to an HTTP status. */
 export class MetadataError extends Error {
   constructor(
     public readonly code: string,
     message: string,
     /**
-     * 可选:结构化 detail,会带进 envelope response 供前端渲染
-     * (如 AGENTS_OVERLAP 的 conflict_groups 列表, DEFAULT_GROUP_IMMUTABLE_FIELDS 的 rejected_fields)。
+     * Optional: structured detail, carried into the envelope response for the frontend to render
+     * (e.g. the conflict_groups list of AGENTS_OVERLAP, the rejected_fields of DEFAULT_GROUP_IMMUTABLE_FIELDS).
      */
     public readonly detail?: Record<string, unknown>,
   ) {
@@ -148,10 +148,10 @@ export class MetadataError extends Error {
 }
 
 /**
- * 清空某个 (team, agent) 的 chat_memory 内容（L0/L1/L2/L3 + 向量 + 文件）。
+ * Clear the chat_memory content of a (team, agent) (L0/L1/L2/L3 + vectors + files).
  *
- * 由 gateway 装配处实现并注入（见 MetadataService.setChatMemoryContentCleaner），
- * 因为内容存放在 IMemoryStore / StorageAdapter，不在 metadata store 里。
+ * Implemented and injected at the gateway assembly point (see MetadataService.setChatMemoryContentCleaner),
+ * because the content lives in IMemoryStore / StorageAdapter, not in the metadata store.
  */
 export type ChatMemoryContentCleaner = (params: {
   teamId: string;
@@ -200,7 +200,7 @@ export interface ListWithDetailParams {
   touch_usage?: boolean;
   limit?: number;
   offset?: number;
-  /** 可选类型过滤：只返回列表中匹配的 asset_type；省略 / 空数组 = 不过滤。 */
+  /** Optional type filter: only return asset_types that match the list; omitted / empty array = no filtering. */
   asset_types?: Array<"skill" | "llm_wiki" | "code_graph" | "chat_memory">;
 }
 
@@ -228,10 +228,10 @@ export interface ListAccessibleAssetsParams {
   asset_type?: AssetType;
   agent_id?: string;
   /**
-   * 可选的 visibility 白名单，用于在权限判定后再做二次过滤。
-   * 例：`["team"]` = 只返回团队可见的（管控页"团队资产"tab 用）；
-   * 不传 = 返回所有可访问的（含自己的 private）。
-   * 目的：让前端从 HTTP 响应上就拿不到不需要的数据（安全 + 减小载荷）。
+   * Optional visibility allowlist, for secondary filtering after the permission decision.
+   * Example: `["team"]` = only return team-visible items (used by the control page's "Team assets" tab);
+   * omitted = return everything accessible (including one's own private).
+   * Purpose: so the frontend never receives unneeded data in the HTTP response (security + smaller payload).
    */
   visibility?: AssetEntity["visibility"] | AssetEntity["visibility"][];
   limit?: number;
@@ -256,28 +256,28 @@ export class MetadataService {
   private _configParams?: import("./config-param-service.js").IConfigParamService;
 
   /**
-   * 进程内 LRU 缓存：已确认（在 store 里存在的） chat_memory 资产 id 集合。
+   * In-process LRU cache: the set of chat_memory asset ids already confirmed (existing in the store).
    *
-   * 命中即可跳过 getAssetById + createAsset + addAgentFixedAsset 三次 DB 往返。
-   * 未命中就走完整 ensure 流程，成功后写入缓存。跨进程/多 pod 时各自维护自己
-   * 的 LRU —— 一致性由 store 主键约束保证。
+   * A hit lets us skip the three DB round trips of getAssetById + createAsset + addAgentFixedAsset.
+   * A miss goes through the full ensure flow and writes to the cache on success. Across processes/pods each maintains its own
+   * LRU -- consistency is guaranteed by the store primary key constraint.
    *
-   * 用 Map 的插入序 + 达到上限时淘汰最老项。达不到严格 LRU（不做 touch），
-   * 但对于这个"只写一次、后续都命中"的场景足够：一旦确认存在，条目要么持续
-   * 命中要么被更新的 team+agent 挤走再重新走一遍 DB —— 冷淘汰的代价只是一次
-   * 数据库查询。maxSize 由 CHAT_MEMORY_ENSURE_CACHE_SIZE 控制。
+   * Uses the Map's insertion order + evicts the oldest entry at the limit. It is not a strict LRU (no touch),
+   * but sufficient for this "write once, hit afterwards" scenario: once confirmed to exist, the entry either keeps
+   * hitting or gets pushed out by a newer team+agent and goes through the DB once more -- the cost of a cold eviction is just one
+   * database query. maxSize is controlled by CHAT_MEMORY_ENSURE_CACHE_SIZE.
    */
   private readonly ensuredChatMemoryAssets = new Map<string, true>();
   private static readonly CHAT_MEMORY_ENSURE_CACHE_SIZE = 4096;
 
   /**
-   * skill 资产登记的进程内 LRU：key = skill_id（即 asset_id）。
-   * 语义与 ensuredChatMemoryAssets 一致，短路 ensureSkillAsset 的重复 create+bind。
+   * In-process LRU for skill asset registration: key = skill_id (i.e. asset_id).
+   * Same semantics as ensuredChatMemoryAssets, short-circuiting repeated create+bind in ensureSkillAsset.
    */
   private readonly ensuredSkillAssets = new Map<string, true>();
   private static readonly SKILL_ENSURE_CACHE_SIZE = 4096;
 
-  /** 由 gateway 注入的 chat_memory 内容清理器；未注入时归档只删资产不清内容。 */
+  /** chat_memory content cleaner injected by the gateway; when not injected, archiving only deletes the asset and does not clear content. */
   private _chatMemoryContentCleaner?: ChatMemoryContentCleaner;
 
   constructor(
@@ -307,21 +307,21 @@ export class MetadataService {
   }
 
   /**
-   * 注入「chat_memory 内容清理器」。
+   * Inject the "chat_memory content cleaner".
    *
-   * 为什么用可选钩子而不是直接依赖 store：metadata 层只持有 IMetadataStore
-   * （元数据），拿不到 IMemoryStore / StorageAdapter（L0–L3 内容）。归档
-   * Agent 时要顺带删掉它的记忆内容，就需要由gateway 装配处把清理能力注入
-   * 进来 —— 与 setConfigParamService 同一模式，保持依赖方向不反转。
+   * Why an optional hook instead of depending on the store directly: the metadata layer only holds IMetadataStore
+   * (metadata) and cannot reach IMemoryStore / StorageAdapter (L0–L3 content). When archiving an
+   * Agent, its memory content must be deleted too, so the cleanup capability has to be injected from the gateway assembly point
+   * -- the same pattern as setConfigParamService, keeping the dependency direction from reversing.
    *
-   * 未注入时 archiveAgent 退化为原行为（只删资产，不清内容），因此
-   * 单测/ 迁移脚本等不装配该钩子的场景不受影响。
+   * When not injected, archiveAgent degrades to the original behavior (only deletes the asset, does not clear content), so
+   * scenarios that do not wire this hook, such as unit tests / migration scripts, are unaffected.
    */
   setChatMemoryContentCleaner(cleaner: ChatMemoryContentCleaner): void {
     this._chatMemoryContentCleaner = cleaner;
   }
 
-  /** memory 静态 key 仅用于 auth/verify body，不可作 Header 鉴权。 */
+  /** The static memory key is only for the auth/verify body and cannot be used for Header auth. */
   isConfiguredMemorySystemUserKey(userKey: string): boolean {
     return isMemorySystemUserKey(userKey, this.memorySystemUser);
   }
@@ -343,7 +343,7 @@ export class MetadataService {
     return out;
   }
 
-  /** internal：按实例分页列出用户（含 system_admin，不脱敏）。 */
+  /** internal: list users by instance with pagination (including system_admin, not sanitized). */
   async listUsersByInstance(
     instanceId: string,
     pagination: PaginationParams,
@@ -354,7 +354,7 @@ export class MetadataService {
     return formatListResult(page, pagination);
   }
 
-  /** 校验用户存在，否则抛 not_found。 */
+  /** Validate that the user exists, otherwise throw not_found. */
   private async requireUser(userId: string): Promise<UserEntity> {
     const user = await this.getUserById(userId);
     if (!user) throw new MetadataError("user_not_found", `user not found: ${userId}`);
@@ -392,7 +392,7 @@ export class MetadataService {
   }
 
   // ============================================================
-  // User（含 user_key 生成/刷新）
+  // User (including user_key generation/refresh)
   // ============================================================
   async initAdminUser(input: InitAdminInput): Promise<InitAdminResult> {
     if ((await this.store.countUsers()) > 0) {
@@ -402,13 +402,13 @@ export class MetadataService {
       throw new MetadataError("already_initialized", "system_admin already exists");
     }
 
-    // 核心操作：创建 admin 用户
+    // Core operation: create the admin user
     const created = await this.createUserWithType(
       { username: input.username, default_key_value: input.user_key },
       "system_admin",
     );
 
-    // 辅助操作：自动创建默认 Team 和 Agent（失败不阻塞核心流程）
+    // Auxiliary operation: automatically create the default Team and Agent (failure does not block the core flow)
     try {
       const team = await this.createTeam({
         name: DEFAULT_TEAM_NAME,
@@ -430,13 +430,13 @@ export class MetadataService {
         });
       } catch (err) {
         console.warn(
-          `[init-admin] 默认 Agent 创建失败，已跳过 (user=${created.user_id})`,
+          `[init-admin] Failed to create default Agent, skipped (user=${created.user_id})`,
           err instanceof Error ? err.message : err,
         );
       }
     } catch (err) {
       console.warn(
-        `[init-admin] 默认 Team 创建失败，已跳过 (user=${created.user_id})`,
+        `[init-admin] Failed to create default Team, skipped (user=${created.user_id})`,
         err instanceof Error ? err.message : err,
       );
     }
@@ -449,20 +449,20 @@ export class MetadataService {
   }
 
   /**
-   * 仅供 /v3/meta/user/create-with-key 使用：允许 system_admin 在建号时显式指定 user_key。
+   * Only for /v3/meta/user/create-with-key: lets system_admin explicitly specify user_key when creating an account.
    *
-   * 两层去重：
-   *   1. 前置 getUserByKey：正常路径快速失败，不进事务
-   *   2. store 层 UNIQUE 约束（DuplicateUserKeyError）：TOCTOU / 并发兜底
+   * Two layers of dedupe:
+   *   1. Pre-check getUserByKey: fail fast on the normal path, without entering a transaction
+   *   2. store-layer UNIQUE constraint (DuplicateUserKeyError): TOCTOU / concurrency backstop
    *
-   * router 层需先调 assertCanManageUsers 做鉴权。
+   * The router layer must first call assertCanManageUsers for authorization.
    */
   async createNormalUserWithKey(input: {
     username: string;
     user_key: string;
-    /** 外部认证建号时传（如 WOA 工号），用于下次登录判断是否初次。 */
+    /** Passed when creating an account via external auth (e.g. WOA employee ID), used to determine whether it is a first login next time. */
     external_id?: string;
-    /** 外部认证体系标识（如 woa）；与 external_id 同域，缺省回落 local。 */
+    /** External auth system identifier (e.g. woa); same domain as external_id, falling back to local by default. */
     auth_provider?: string;
     display_name?: string;
     email?: string;
@@ -491,13 +491,13 @@ export class MetadataService {
     }
   }
 
-  /** 未传 auth_provider / external_id 时补默认值（local / user_id）。 */
+  /** Fill in defaults when auth_provider / external_id are not passed (local / user_id). */
   private resolveCreateUserInput(
     input: CreateUserInput,
   ): CreateUserInput & { auth_provider: string; external_id: string } {
-    // 显式带 external_id = 外部认证建号：即使调用方省略 auth_provider，也要落
-    // 到外部域，与 find-by-external 的读取同域。
-    // 否则会"写进 local 域、按外部域查"，下次登录被误判为初次。
+    // Explicitly carrying external_id = external-auth account creation: even if the caller omits auth_provider, it must land
+    // in the external domain, the same domain read by find-by-external.
+    // Otherwise it would be "written into the local domain but queried in the external domain", and the next login would be misjudged as first.
     const externalId = input.external_id?.trim();
     const authProvider = input.auth_provider?.trim() || DEFAULT_AUTH_PROVIDER;
     if (externalId) {
@@ -548,13 +548,13 @@ export class MetadataService {
   }
 
   /**
-   * 外部认证（如 WOA）登录后判断是否初次：按 (auth_provider, external_id) 反查 user。
+   * After external auth (e.g. WOA) login, determine whether it is the first time: reverse look up the user by (auth_provider, external_id).
    *
-   * 复用 core 既有的 meta_users.external_id 字段（origin 引入，原为太湖 OAuth2 的
-   * sub/工号而设，语义与本需求一致），不新建关联表。
+   * Reuses core's existing meta_users.external_id field (introduced by origin, originally meant for Taihu OAuth2's
+   * sub/employee ID, with semantics consistent with this requirement), without creating a new association table.
    *
-   * 注意：未绑定外部身份的账号，其 external_id 由 resolveCreateUserInput 兜底填
-   * user_id（`usr-xxx`），与工号格式不同，因此不会误命中。
+   * Note: for accounts without a bound external identity, their external_id is filled by resolveCreateUserInput as the
+   * user_id (`usr-xxx`), which differs from the employee-ID format, so it will not be hit by mistake.
    */
   async findUserByExternalId(
     externalId: string,
@@ -565,13 +565,13 @@ export class MetadataService {
   }
 
   /**
-   * 把外部认证唯一标识绑定到**已有**账号（存量账号接入外部认证）。
+   * Bind the external auth unique identifier to an **existing** account (onboarding existing accounts to external auth).
    *
-   * 只写 external_id，**不改 auth_provider**——存量账号原本用 user_key 登录，
-   * 绑定后仍可用原 user_key 登录，外部认证只是新增一种入口。
+   * Only writes external_id, **does not change auth_provider** -- existing accounts originally log in with user_key,
+   * and after binding they can still log in with the original user_key; external auth is just an added entry point.
    *
-   * 冲突：该 external_id 已绑到**另一个** user 时抛错，避免一个外部身份对应多个账号。
-   * 幂等：重复绑定同一个 external_id 到同一 user 直接返回。
+   * Conflict: throws when the external_id is already bound to **another** user, to avoid one external identity mapping to multiple accounts.
+   * Idempotent: binding the same external_id to the same user again returns directly.
    */
   async bindExternalIdToUser(
     userId: string,
@@ -580,7 +580,7 @@ export class MetadataService {
     displayName?: string,
   ): Promise<UserEntity> {
     const provider = authProvider?.trim() || DEFAULT_AUTH_PROVIDER;
-    // 先确认目标账号存在，避免把外部身份绑到不存在的 user 上。
+    // First confirm the target account exists, to avoid binding an external identity to a nonexistent user.
     const user = await this.requireUser(userId);
 
     const existing = await this.store.getUserByExternalId(provider, externalId);
@@ -591,15 +591,15 @@ export class MetadataService {
       );
     }
 
-    // 绑定前先摘掉"未绑定占位 external_id"（= user_id）可能带来的误撞：
-    // 目标账号若正持有占位值，而待绑的 external_id 恰好等于它（极端场景），
-    // 上面的 existing 判定会被自己命中而提前返回，故统一走一次写入。
+    // Before binding, remove the possible false collision from the "unbound placeholder external_id" (= user_id):
+    // if the target account currently holds the placeholder value and the external_id to bind happens to equal it (an extreme scenario),
+    // the existing check above would hit itself and return early, so always go through one write.
     const patch: Partial<UserEntity> = {
       external_id: externalId,
       auth_provider: provider,
     };
-    // 展示名只在"有值且目标账号当前为空"时补写：
-    // 不覆盖人工改过的名字，也不把 IdP 的空值写进去把已有名字抹掉。
+    // The display name is only filled in when "it has a value and the target account's is currently empty":
+    // it does not overwrite a manually changed name, nor write the IdP's empty value over an existing name.
     const incomingName = displayName?.trim();
     if (incomingName && !user.display_name) patch.display_name = incomingName;
 
@@ -693,7 +693,7 @@ export class MetadataService {
     return Object.keys(filter).length ? filter : undefined;
   }
 
-  /** @deprecated 使用 listUsersForCaller */
+  /** @deprecated Use listUsersForCaller */
   async listUsersByTeamForCaller(
     teamId: string,
     ctx: V3AuthContext,
@@ -756,7 +756,7 @@ export class MetadataService {
     return { valid: true, user: toPublicUser(user, visibilityCtx) };
   }
 
-  /** 校验 user_key 并返回对应用户（无效返回 null）。 */
+  /** Validate the user_key and return the corresponding user (returns null if invalid). */
   async verifyAuth(userKey: string): Promise<UserEntity | null> {
     if (!userKey) return null;
     const configured = lookupMemorySystemUser(userKey, this.instanceId, this.memorySystemUser);
@@ -812,7 +812,7 @@ export class MetadataService {
     return this.toPublicUserKey(entity);
   }
 
-  /** 校验调用方有权访问该 key（本人、system_admin 或 bootstrap），返回脱敏详情。 */
+  /** Verify the caller has access to the key (themselves, system_admin or bootstrap), returning the sanitized detail. */
   async getUserKeyForCaller(
     keyId: string,
     callerUserId?: string,
@@ -908,8 +908,8 @@ export class MetadataService {
     const team = await this.getTeamById(input.team_id);
     if (!team) throw new MetadataError("team_not_found", `team not found: ${input.team_id}`);
     const reqRole = input.role ?? "member";
-    // owner 由 createTeam 固定为 admin；禁止经 add upsert 降级，否则会出现
-    // 「仍是 owner 但 role≠admin」——面板当 admin、team-member/add 却 403。
+    // owner is fixed as admin by createTeam; downgrading via add upsert is forbidden, otherwise
+    // "still the owner but role≠admin" would occur -- the panel treats them as admin while team-member/add returns 403.
     if (input.user_id === team.owner_user_id && reqRole !== "admin") {
       throw new MetadataError("permission_denied", "cannot demote team owner");
     }
@@ -921,7 +921,7 @@ export class MetadataService {
       );
     }
 
-    // 核心操作：将用户加入 Team
+    // Core operation: add the user to the Team
     const result = await this.store.addTeamMember({ ...input, role: reqRole });
 
     return result;
@@ -941,27 +941,27 @@ export class MetadataService {
   }
 
   // ============================================================
-  // Agent（校验 team 存在）
+  // Agent (verify team exists)
   // ============================================================
   async createAgent(input: CreateAgentInput): Promise<AgentEntity> {
     await this.assertTeamExists(input.team_id);
     const agent = await this.store.createAgent(input);
-    // 建 agent 的同一事务边界外，立即 mint 该 agent 的 chat_memory 资产 +
-    // 绑定到 fixed_assets。avoids Bug 2：首次对话触发时 asset 还不存在 →
-    // profile-memory-injector 首个 session prewarm 走 fallback 到 tools-only、
-    // 且 session_init 缓存策略下当 session 内永远读不到 L3。
+    // Outside the same transaction boundary that creates the agent, immediately mint the agent's chat_memory asset +
+    // bind it to fixed_assets. Avoids Bug 2: on the first conversation the asset does not exist yet →
+    // the first session prewarm of profile-memory-injector falls back to tools-only,
+    // and under the session_init cache policy L3 can never be read within that session.
     //
-    // 幂等：ensureChatMemoryAsset 内部对已存在 asset / 已存在 binding 走 no-op。
-    // 失败非致命：agent 已建成功，chat_memory 只是"更早准备好"，
-    // 即便这里失败，/conversation/add 那条链路依然会重试 ensure，故此处仅 log warn。
+    // Idempotent: ensureChatMemoryAsset internally no-ops on an existing asset / existing binding.
+    // Failure is non-fatal: the agent was created successfully and chat_memory is just "prepared earlier";
+    // even if it fails here, the /conversation/add path will retry ensure, so only log a warn here.
     try {
       await this.ensureChatMemoryAsset({
         team_id: agent.team_id,
         agent_id: agent.agent_id,
       });
     } catch (err) {
-      // 这里没有专用 warn logger（service 层只有 PermCheckLogger.debug），
-      // 用 console.warn 与 v2-router.handleConversationAdd 里同类 catch 保持一致。
+      // There is no dedicated warn logger here (the service layer only has PermCheckLogger.debug),
+      // use console.warn, consistent with the same kind of catch in v2-router.handleConversationAdd.
       console.warn(
         `[META] createAgent: ensureChatMemoryAsset failed (agent=${agent.agent_id} team=${agent.team_id}): ` +
         (err instanceof Error ? err.message : String(err)),
@@ -1006,20 +1006,20 @@ export class MetadataService {
   }
 
   /**
-   * 归档（软关闭）agent。
+   * Archive (soft close) an agent.
    *
-   * 顺序很关键 —— **先清内容，再删资产**：
+   * The order is critical -- **clear the content first, then delete the asset**:
    *   1. status → inactive
-   *   2.清空该 agent 的 chat_memory 内容（L0/L1/L2/L3 + 向量 + 文件）
-   *   3. 删除自身 chat_memory 资产记录（并级联清掉其它 agent 的借入绑定）
+   *   2. Clear the agent's chat_memory content (L0/L1/L2/L3 + vectors + files)
+   *   3. Delete its own chat_memory asset record (and cascade-clear the borrowed bindings of other agents)
    *
-   * 若把顺序颠倒（先删资产再清内容），资产记录一没，就再也无法从
-   * asset_id 定位到 (team, agent)，内容会变成**永久不可达的孤儿数据**
-   * 留在库里 —— 这正是本次修复的问题。
+   * If the order is reversed (delete the asset first, then clear the content), once the asset record is gone, (team, agent) can no longer be located from
+   * asset_id, and the content becomes **permanently unreachable orphan data**
+   * left in the database -- which is exactly the problem this fix addresses.
    *
-   * 内容清理失败时**中止归档**并向上抛：宁可让调用方重试，也不要留下
-   * "资产已删、内容还在"的不一致状态。未注入 cleaner 时（单测 / 迁移
-   * 脚本）跳过第 2 步，退化为原行为。
+   * When content cleanup fails, **abort the archive** and throw upward: better to let the caller retry than to leave
+   * the inconsistent state "asset deleted, content still there". When no cleaner is injected (unit tests / migration
+   * scripts), step 2 is skipped, degrading to the original behavior.
    */
   async archiveAgent(agentId: string): Promise<AgentEntity> {
     const existing = await this.getAgentById(agentId);
@@ -1039,7 +1039,7 @@ export class MetadataService {
   }
 
   // ============================================================
-  // Task（校验 team 存在 + linked agents 同 team）
+  // Task (verify team exists + linked agents in the same team)
   // ============================================================
   async createTask(input: CreateTaskInput): Promise<TaskEntity> {
     await this.assertTeamExists(input.team_id);
@@ -1089,7 +1089,7 @@ export class MetadataService {
     return formatListResult({ items, total: page.total }, pagination);
   }
 
-  /** 归档（软关闭）task：status → completed。 */
+  /** Archive (soft close) a task: status → completed. */
   async archiveTask(taskId: string): Promise<TaskEntity> {
     return this.updateTask(taskId, { status: "completed" });
   }
@@ -1162,7 +1162,7 @@ export class MetadataService {
   }
 
   // ============================================================
-  // Asset（仅主表）
+  // Asset (main table only)
   // ============================================================
   async createAsset(input: CreateAssetInput): Promise<AssetEntity> {
     await this.assertTeamExists(input.team_id);
@@ -1182,7 +1182,7 @@ export class MetadataService {
 
   async deleteAssets(assetIds: string[]): Promise<BatchDeleteResult> {
     const result = await this.store.deleteAssets(assetIds);
-    // 清 ensure 缓存，避免删后短路径误判「仍存在」
+    // Clear the ensure cache, to avoid the short path misjudging "still exists" after deletion
     for (const id of result.deleted_ids) {
       this.ensuredSkillAssets.delete(id);
       this.ensuredChatMemoryAssets.delete(id);
@@ -1201,11 +1201,11 @@ export class MetadataService {
   }
 
   /**
-   * asset/get 的调用者视角读（水平越权修复）：
-   *   - system_admin 豁免（管理面排障通道，与 user/list 的 isSystemAdmin 特判同风格）；
-   *   - owner 恒可读（含 archived，保持原管理视角行为）；
-   *   - 其余调用者走 checkAssetPermission（visibility → ACL）；
-   *   - 无权返回 null（路由层映射 404，不泄露资产存在性）。
+   * Caller-perspective read for asset/get (horizontal privilege escalation fix):
+   *   - system_admin exempt (admin-plane troubleshooting channel, same style as the isSystemAdmin special case of user/list);
+   *   - the owner can always read (including archived, preserving the original admin-view behavior);
+   *   - other callers go through checkAssetPermission (visibility → ACL);
+   *   - no access returns null (the route layer maps it to 404, without leaking asset existence).
    */
   async getAssetForCaller(assetId: string, ctx: V3AuthContext): Promise<AssetEntity | null> {
     const asset = await this.getAssetById(assetId);
@@ -1218,11 +1218,11 @@ export class MetadataService {
   }
 
   /**
-   * asset/list 的调用者视角读（水平越权修复）：
-   *   - system_admin：管理面全量（原 listAssetsByTeam 语义保留）；
-   *   - 团队成员：owner 资产恒可见，其余逐条 checkAssetPermission（与 list-accessible 同源判定）；
-   *   - 非团队成员 / 未解析调用者：空页（不报错，避免泄露 team 信息）。
-   * 权限过滤在分页前完成，保证 total 准确。
+   * Caller-perspective read for asset/list (horizontal privilege escalation fix):
+   *   - system_admin: the full admin-plane set (original listAssetsByTeam semantics preserved);
+   *   - team members: the owner's assets are always visible, the rest go item by item through checkAssetPermission (same decision source as list-accessible);
+   *   - non-team members / unresolved callers: empty page (no error, to avoid leaking team information).
+   * Permission filtering is done before pagination, ensuring total is accurate.
    */
   async listAssetsForCaller(
     params: { team_id: string } & AssetFilter & PaginationParams,
@@ -1274,8 +1274,8 @@ export class MetadataService {
   }
 
   /**
-   * 多 agent 固定资产分配汇总。缺失 agent / type 补 0；items 顺序与请求 agent_ids 一致。
-   * 可选 asset_id：只统计绑定了该资产的行（用于 bound_agent_count）。
+   * Fixed-asset allocation summary for multiple agents. Missing agent / type is filled with 0; items order matches the requested agent_ids.
+   * Optional asset_id: only count rows bound to that asset (used for bound_agent_count).
    */
   async summarizeAgentFixedAssetsByAgents(
     params: SummarizeAgentFixedAssetsParams,
@@ -1321,7 +1321,7 @@ export class MetadataService {
   }
 
   // ============================================================
-  // AgentFixedAsset（canBindAsset 校验 + 详情聚合）
+  // AgentFixedAsset (canBindAsset validation + detail aggregation)
   // ============================================================
   async setAgentFixedAssets(agentId: string, bindings: FixedAssetBindingInput[]): Promise<void> {
     const agent = await this.getAgentById(agentId);
@@ -1343,11 +1343,11 @@ export class MetadataService {
   }
 
   /**
-   * 追加一条 agent 绑定（保留已有绑定）。用于自动登记 chat_memory 资产等
-   * 增量场景；不同于 setAgentFixedAssets 的全量替换。
+   * Append one agent binding (keeping existing bindings). Used for incremental scenarios such as automatically registering chat_memory assets
+   * ; unlike the full replace of setAgentFixedAssets.
    *
-   * 校验：agent / asset 必须都在当前 instance；canBindAsset 必须通过。
-   * 幂等：store 层靠 (agent_id, asset_id) unique 约束，重复调用无副作用。
+   * Validation: agent / asset must both be in the current instance; canBindAsset must pass.
+   * Idempotent: the store layer relies on the (agent_id, asset_id) unique constraint; repeated calls have no side effects.
    */
   async addAgentFixedAsset(agentId: string, b: FixedAssetBindingInput): Promise<void> {
     const agent = await this.getAgentById(agentId);
@@ -1364,23 +1364,23 @@ export class MetadataService {
   }
 
   /**
-   * 幂等确保 (team, agent) 对应的 chat_memory 资产存在并已绑定到 agent。
+   * Idempotently ensure the chat_memory asset for (team, agent) exists and is bound to the agent.
    *
-   * 首次调用时会同步完成三件事（严格顺序）：
+   * On the first call it synchronously completes three things (strict order):
    *   1. createAsset({asset_type:'chat_memory', visibility:'private',
    *      owner_user_id: agent.owner_user_id})
    *   2. store.addAgentFixedAsset(agent, {asset_id, injection_mode:'summary'})
-   *   3. 写入进程内 LRU 缓存，后续同 (team, agent) 请求直接短路
+   *   3. Write to the in-process LRU cache; later requests for the same (team, agent) short-circuit directly
    *
-   * 幂等保证：
-   *   - asset_id = chat_memory-{team}-{agent} 是稳定确定的
-   *   - meta_assets.asset_id 是主键 → 并发 create 撞冲突后回读
-   *   - meta_agent_fixed_assets (agent_id, asset_id) 是 unique → 重复
-   *     addAgentFixedAsset 由 store 层吸收为 no-op
+   * Idempotency guarantees:
+   *   - asset_id = chat_memory-{team}-{agent} is stable and deterministic
+   *   - meta_assets.asset_id is the primary key → on a concurrent create conflict, read back
+   *   - meta_agent_fixed_assets (agent_id, asset_id) is unique → repeated
+   *     addAgentFixedAsset is absorbed into a no-op by the store layer
    *
-   * 失败策略：本方法**会抛错**（agent_not_found / team_mismatch / DB 故障）。
-   * 调用方（v2-router 里 handleConversationAdd）负责 catch + 只打 warn，
-   * 不阻塞主流程 conversation 写入。
+   * Failure policy: this method **throws** (agent_not_found / team_mismatch / DB failure).
+   * The caller (handleConversationAdd in v2-router) is responsible for catch + only logging a warn,
+   * without blocking the main conversation write flow.
    */
   async ensureChatMemoryAsset(params: {
     team_id: string;
@@ -1388,18 +1388,18 @@ export class MetadataService {
   }): Promise<AssetEntity> {
     const assetId = buildChatMemoryAssetId(params.team_id, params.agent_id);
 
-    // 1. 缓存短路：已确认存在直接返回轻量占位（如果调用方需要实体，才回 store）
-    //    实践中调用方并不消费返回值（fire-and-forget），命中缓存时不再查 store。
+    // 1. Cache short-circuit: already confirmed to exist, return a lightweight placeholder directly (only go back to the store if the caller needs the entity)
+    //    In practice callers do not consume the return value (fire-and-forget), so on a cache hit the store is not queried.
     if (this.ensuredChatMemoryAssets.has(assetId)) {
       const cached = await this.getAssetById(assetId);
       if (cached) return cached;
-      // 缓存脏了（被外部删除）—— 清掉重来
+      // The cache is stale (deleted externally) -- clear it and start over
       this.ensuredChatMemoryAssets.delete(assetId);
     }
 
-    // 2. 拿 agent，取 owner + team 用于 create + canBindAsset
-    //    先拉 agent 是为了在任何路径下都能校验 team_mismatch，同时后续 bind
-    //    要用到 owner_user_id 作 created_by。
+    // 2. Get the agent, take owner + team for create + canBindAsset
+    //    Fetching the agent first is so that team_mismatch can be validated on every path, and the subsequent bind
+    //    needs owner_user_id as created_by.
     const agent = await this.getAgentById(params.agent_id);
     if (!agent) {
       throw new MetadataError(
@@ -1415,8 +1415,8 @@ export class MetadataService {
       );
     }
 
-    // 3. 拿或建 asset：先看是否已在 store（冷启动 / 其他 pod 已建），否则新建。
-    //    createAsset 遇主键冲突 = 并发 race，回读兜底。
+    // 3. Get or create the asset: first check whether it is already in the store (cold start / already created by another pod), otherwise create it.
+    //    A primary key conflict on createAsset = a concurrent race, read back as a safety net.
     let asset = await this.getAssetById(assetId);
     if (!asset) {
       try {
@@ -1440,10 +1440,10 @@ export class MetadataService {
       }
     }
 
-    // 4. 无论 asset 是新建还是已存在，都要**幂等**补一次绑定。
-    //    上一次可能只完成 create、bind 阶段失败；bind 有 UNIQUE 约束，重复
-    //    调用无副作用。这里直接调 store 跳过 addAgentFixedAsset 的重复校验
-    //    —— 我们上面已经查过 agent / asset。
+    // 4. Whether the asset is newly created or already existed, **idempotently** add the binding once more.
+    //    The previous attempt may have completed only create and failed at the bind stage; bind has a UNIQUE constraint, so repeated
+    //    calls have no side effects. Here we call the store directly, skipping the repeated validation of addAgentFixedAsset
+    //    -- we already checked agent / asset above.
     await this.store.addAgentFixedAsset(params.agent_id, {
       asset_id: assetId,
       asset_type: "chat_memory",
@@ -1456,7 +1456,7 @@ export class MetadataService {
     return asset;
   }
 
-  /** LRU-ish 记录：达到上限时淘汰最早写入的条目。 */
+  /** LRU-ish bookkeeping: evict the earliest-written entry when the limit is reached. */
   private rememberEnsuredChatMemoryAsset(assetId: string): void {
     if (this.ensuredChatMemoryAssets.has(assetId)) return;
     if (this.ensuredChatMemoryAssets.size >= MetadataService.CHAT_MEMORY_ENSURE_CACHE_SIZE) {
@@ -1467,28 +1467,28 @@ export class MetadataService {
   }
 
   //  ============================================================
-  //  Skill Asset — 同款 ensure 模式
+  //  Skill Asset — same ensure pattern
   //  ============================================================
 
   /**
-   * 登记 skill 资产并绑定到 agent。与 ensureChatMemoryAsset 同款 5 步结构：
+   * Register a skill asset and bind it to the agent. Same 5-step structure as ensureChatMemoryAsset:
    *
-   *   1. LRU 短路（key = skill_id，即 asset_id）
-   *   2. 查 agent 取 owner + 校验 team
-   *   3. 幂等 createAsset（asset_id = skill_id）
-   *   4. 幂等 addAgentFixedAsset（injection_mode = reference）
-   *   5. 记入 LRU
+   *   1. LRU short-circuit (key = skill_id, i.e. asset_id)
+   *   2. Look up the agent to get owner + validate team
+   *   3. Idempotent createAsset (asset_id = skill_id)
+   *   4. Idempotent addAgentFixedAsset (injection_mode = reference)
+   *   5. Record into the LRU
    *
-   * 幂等保证：
-   *   - asset_id 即为外部 skill_id（core 层生成 skl-xxxx），稳定唯一
-   *   - meta_assets.asset_id 主键 → 并发 create 冲突时回读
-   *   - meta_agent_fixed_assets (agent_id, asset_id) UNIQUE → bind 幂等
+   * Idempotency guarantees:
+   *   - asset_id is the external skill_id (generated by the core layer as skl-xxxx), stable and unique
+   *   - meta_assets.asset_id primary key → read back on a concurrent create conflict
+   *   - meta_agent_fixed_assets (agent_id, asset_id) UNIQUE → bind is idempotent
    *
-   * 失败策略：
-   *   - v1 创建路径（onSkillCreated context）：抛出异常以中断 create，
-   *     避免 "skill 落库但前端看不到" 的不可自愈状态
-   *   - 读时自愈路径（onSkillAccessed context）：由调用方 try/catch，
-   *     不影响 skill 返回
+   * Failure policy:
+   *   - v1 creation path (onSkillCreated context): throw to abort create,
+   *     avoiding the non-self-healing state "skill is persisted but the frontend cannot see it"
+   *   - read-time self-healing path (onSkillAccessed context): the caller does try/catch,
+   *     without affecting the skill return
    */
   async ensureSkillAsset(params: {
     skill_id: string;
@@ -1496,16 +1496,16 @@ export class MetadataService {
     agent_id: string;
     name: string;
   }): Promise<AssetEntity> {
-    const assetId = params.skill_id; // skill_id === asset_id（约定）
+    const assetId = params.skill_id; // skill_id === asset_id (convention)
 
-    // 1. LRU 短路
+    // 1. LRU short-circuit
     if (this.ensuredSkillAssets.has(assetId)) {
       const cached = await this.getAssetById(assetId);
       if (cached) return cached;
       this.ensuredSkillAssets.delete(assetId);
     }
 
-    // 2. 拿 agent 取 owner + 校验 team
+    // 2. Get the agent to take the owner + validate team
     const agent = await this.getAgentById(params.agent_id);
     if (!agent) {
       throw new MetadataError(
@@ -1521,16 +1521,16 @@ export class MetadataService {
       );
     }
 
-    // 3. 幂等 createAsset
+    // 3. Idempotent createAsset
     //
-    // 默认 visibility = "private"（2026-07 变更）：
-    //   - 新建的 skill 默认只有 owner 和 team admin 能看到（严格私密）。
-    //   - 想让 team 内所有人可读 → 用户显式在管控页切成"共享"（asset/update visibility=team）。
-    //   - 想让特定 user/agent 可读 → 用 acl/grant + visibility=restricted。
+    // Default visibility = "private" (changed 2026-07):
+    //   - A newly created skill is by default visible only to the owner and team admins (strictly private).
+    //   - To let everyone in the team read it → the user explicitly switches it to "shared" on the control page (asset/update visibility=team).
+    //   - To let specific users/agents read it → use acl/grant + visibility=restricted.
     //
-    // 为什么不是 "team"：Skill 内容常包含内部知识、脚本、凭证注释等，
-    // "默认对整个 team 可见"对隐私敏感场景（例如个人调试用的 skill）不够安全。
-    // 私密 → 主动共享的心智更符合直觉。
+    // Why not "team": Skill content often contains internal knowledge, scripts, credential notes, etc.,
+    // and "visible to the whole team by default" is not safe enough for privacy-sensitive scenarios (e.g. a skill for personal debugging).
+    // The mental model of private → actively share is more intuitive.
     let asset = await this.getAssetById(assetId);
     if (!asset) {
       try {
@@ -1554,7 +1554,7 @@ export class MetadataService {
       }
     }
 
-    // 4. 幂等 addAgentFixedAsset
+    // 4. Idempotent addAgentFixedAsset
     await this.store.addAgentFixedAsset(params.agent_id, {
       asset_id: assetId,
       asset_type: "skill",
@@ -1567,7 +1567,7 @@ export class MetadataService {
     return asset;
   }
 
-  /** LRU-ish 记录：达到上限时淘汰最早写入的条目。 */
+  /** LRU-ish bookkeeping: evict the earliest-written entry when the limit is reached. */
   private rememberEnsuredSkillAsset(assetId: string): void {
     if (this.ensuredSkillAssets.has(assetId)) return;
     if (this.ensuredSkillAssets.size >= MetadataService.SKILL_ENSURE_CACHE_SIZE) {
@@ -1650,7 +1650,7 @@ export class MetadataService {
   }
 
   // ============================================================
-  // 权限判定（懒加载 ACL）
+  // Permission decision (lazily load ACL)
   // ============================================================
   async checkAssetPermission(params: CheckPermissionParams): Promise<PermCheckResult> {
     const userId = await resolveUserId(this, params);
@@ -1659,14 +1659,14 @@ export class MetadataService {
       return { allowed: false, reason: "asset_not_available" };
     }
 
-    // owner 短路，无需查成员/ACL
+    // owner short-circuit, no need to look up members/ACL
     if (asset.owner_user_id === userId) {
       return { allowed: true, reason: "owner" };
     }
 
     const membership = await this.store.getTeamMember(asset.team_id, userId);
 
-    // 先用空 ACL 跑一遍：命中角色默认即放行，无需查表
+    // First run with an empty ACL: a role-default hit is allowed directly, no table lookup needed
     const action = params.action;
     const fast = checkPermission({
       user: { user_id: userId },
@@ -1679,7 +1679,7 @@ export class MetadataService {
     });
     if (fast.allowed) return fast;
 
-    // 只有「通过了前置门但角色默认未覆盖」(no_permission) 才需懒加载 ACL 重判
+    // Only "passed the preconditions but not covered by role defaults" (no_permission) needs lazy ACL loading and re-decision
     if (fast.reason !== "no_permission") return fast;
     if (membership && roleDefaultCovers(membership.role, action)) return fast;
 
@@ -1695,13 +1695,13 @@ export class MetadataService {
     });
   }
 
-  /** 按用户过滤其有权限访问的资产列表（权限聚合后 offset 分页）。 */
+  /** Filter the asset list by the permissions the user has (offset pagination after permission aggregation). */
   async listAccessibleAssets(params: ListAccessibleAssetsParams): Promise<PaginatedResult<AssetEntity>> {
     const userId = await resolveUserId(this, params);
     const action = params.action ?? "read";
     const pagination = this.pag(params);
 
-    // visibility 白名单（服务端过滤，避免前端拿到不该看到的数据）
+    // visibility allowlist (server-side filtering, to avoid the frontend receiving data it should not see)
     const visFilter: Set<AssetEntity["visibility"]> | null = params.visibility
       ? new Set(Array.isArray(params.visibility) ? params.visibility : [params.visibility])
       : null;
@@ -1741,7 +1741,7 @@ export class MetadataService {
         for (const asset of page.items) {
           if (seen.has(asset.asset_id)) continue;
           if (FILTERED_STATUSES.includes(asset.status)) continue;
-          // visibility 白名单过滤（在权限判定前先剔除，节省 checkAssetPermission 开销）
+          // visibility allowlist filtering (remove before the permission decision, saving the cost of checkAssetPermission)
           if (visFilter && !visFilter.has(asset.visibility)) continue;
           const perm = await this.checkAssetPermission({
             user_id: userId,
@@ -1818,9 +1818,9 @@ export class MetadataService {
   }
 
   /**
-   * agent 固定资产写操作的权限：owner 本人，或该 agent 所属团队的 team admin。
-   * 用于冷启动「admin 代新用户挂载默认 Agent 资产」等场景（参照 asset 的
-   * assertCallerIsAssetOwnerOrTeamAdmin 先例，放通 team admin）。
+   * Permission for agent fixed-asset write operations: the owner themselves, or a team admin of the team the agent belongs to.
+   * Used for scenarios such as cold-start "admin mounts default Agent assets on behalf of a new user" (following the precedent of the asset
+   * assertCallerIsAssetOwnerOrTeamAdmin, letting team admins through).
    */
   private async assertCallerIsAgentOwnerOrTeamAdmin(ctx: V3AuthContext, agentId: string): Promise<AgentEntity> {
     const agent = await this.getAgentById(agentId);
@@ -1855,7 +1855,7 @@ export class MetadataService {
   }
 
   // ============================================================
-  // Caller-scoped mutations（L-12 / L-14）
+  // Caller-scoped mutations (L-12 / L-14)
   // ============================================================
   async createTeamForCaller(input: CreateTeamInput, ctx: V3AuthContext): Promise<TeamEntity> {
     this.assertCallerIsResourceOwner(ctx, input.owner_user_id);
@@ -1881,7 +1881,7 @@ export class MetadataService {
   async addTeamMemberForCaller(input: AddTeamMemberInput, ctx: V3AuthContext): Promise<TeamMemberEntity> {
     await this.assertCallerIsTeamAdmin(ctx, input.team_id);
     const callerId = this.requireCallerId(ctx);
-    // 「添加成员」不应用来改自己的角色；选自己 + role=member 会把 admin 降级。
+    // "Add member" should not be used to change one's own role; selecting oneself + role=member would downgrade the admin.
     if (input.user_id === callerId) {
       throw new MetadataError("permission_denied", "cannot add yourself as a team member");
     }
@@ -1924,7 +1924,7 @@ export class MetadataService {
   async createAgentForCaller(input: CreateAgentInput, ctx: V3AuthContext): Promise<AgentEntity> {
     await this.assertTeamExists(input.team_id);
     await this.requireActiveTeamMember(ctx, input.team_id);
-    // owner 本人，或该 team 的 team admin（admin 代新用户创建默认 Agent）
+    // The owner themselves, or a team admin of that team (admin creates the default Agent on behalf of a new user)
     const callerId = this.requireCallerId(ctx);
     if (input.owner_user_id !== callerId) {
       await this.assertCallerIsTeamAdmin(ctx, input.team_id);
@@ -1982,11 +1982,11 @@ export class MetadataService {
   }
 
   /**
-   * 外部来源导入门控：team 存在 + caller 是该 team 的 active member。
+   * External-source import gate: team exists + caller is an active member of that team.
    *
-   * 供 task-source 模块调用（import-service 无法访问本类的 private 门控）。
-   * 与 createTaskForCaller 的前两步同语义，只是把「resource owner」那步留给
-   * createTaskForCaller 自己（creator 恒为 caller）。
+   * Called by the task-source module (import-service cannot access this class's private gates).
+   * Same semantics as the first two steps of createTaskForCaller, only the "resource owner" step is left to
+   * createTaskForCaller itself (the creator is always the caller).
    */
   async assertExternalTaskImportAllowed(teamId: string, ctx: V3AuthContext): Promise<void> {
     await this.assertTeamExists(teamId);
@@ -2046,7 +2046,7 @@ export class MetadataService {
   }
 
   async deleteAssetsForCaller(assetIds: string[], ctx: V3AuthContext): Promise<BatchDeleteResult> {
-    // 已不存在的 id 跳过 owner 校验（与 store 层幂等成功对齐）；仍存在的须为 owner。
+    // Ids that no longer exist skip the owner check (aligned with the store layer's idempotent success); those that still exist must be owned.
     for (const assetId of assetIds) {
       const existing = await this.getAssetById(assetId);
       if (!existing) continue;
@@ -2061,24 +2061,24 @@ export class MetadataService {
   }
 
   /**
-   * 为 `/v3/chat-memory/clear` 做整批前置解析：把 asset_id 映射到 (team, agent)。
+   * Batch pre-resolution for `/v3/chat-memory/clear`: maps asset_id to (team, agent).
    *
-   * 语义（与需求「任一 memory_id 不合法时，整批拒绝」对齐）：
-   *   - 每个 id 必须存在且 asset_type === "chat_memory"；
-   *   - 必须能在该资产的 team 下定位到对应 agent；
-   *   - 任一条不满足直接抛 MetadataError，整批不执行。
+   * Semantics (aligned with the requirement "if any memory_id is invalid, reject the whole batch"):
+   *   - each id must exist and have asset_type === "chat_memory";
+   *   - the corresponding agent must be locatable under the asset's team;
+   *   - if any one fails, throw MetadataError directly and the whole batch is not executed.
    *
-   * **不做用户级 Owner 校验**：内核数据面的信任模型是 Bearer +
-   * x-tdai-service-id 即管理员级凭据（与 L0–L3 删除接口一致）。
-   * "仅资产 Owner 可操作"由面板后端在转发前完成。
+   * **No user-level Owner check**: the trust model of the kernel data plane is that Bearer +
+   * x-tdai-service-id is an admin-level credential (consistent with the L0–L3 delete endpoints).
+   * "Only the asset Owner can operate" is done by the panel backend before forwarding.
    *
-   * 只做校验与读取，**不修改任何资产字段** —— 清空只删内容不动资产。
+   * Only validates and reads, **does not modify any asset fields** -- clearing only deletes content and does not touch the asset.
    */
   async resolveChatMemoryTargets(
     assetIds: string[],
   ): Promise<Array<{ asset_id: string; team_id: string; agent_id: string }>> {
     const targets: Array<{ asset_id: string; team_id: string; agent_id: string }> = [];
-    // 同一 team 的 agent 列表在批量场景里会被反复用到，按 team 缓存一次。
+    // The agent list of the same team is reused repeatedly in batch scenarios, so cache it once per team.
     const agentIdsByTeam = new Map<string, string[]>();
 
     for (const assetId of assetIds) {
@@ -2112,8 +2112,8 @@ export class MetadataService {
   }
 
   /**
-   * 拉取一个 team 下全部 agent_id（分页遍历，单页上限 100）。
-   * 加硬上限防御异常大team 把内存打满。
+   * Fetch all agent_ids under a team (paginated traversal, up to 100 per page).
+   * A hard upper limit is added to prevent an abnormally large team from filling up memory.
    */
   private async listAllAgentIdsByTeam(teamId: string): Promise<string[]> {
     const PAGE = 100;
@@ -2161,52 +2161,52 @@ export class MetadataService {
     return this.listAclByAsset(assetId, pagination);
   }
 
-  // ── InstanceUpstreamConfig (v2 模型组) ─────────────────────────────────
+  // ── InstanceUpstreamConfig (v2 model group) ─────────────────────────────────
   //
-  // 对应设计文档 §6.B(groups/*) + §6.C(extraction/*) + §6.D(internal/list)。
-  // Service 层职责:
-  //   1. 应用层字段级校验(name 长度 / mode 合法性 / default 组不可改字段等)
-  //   2. store 抛的 InstanceUpstreamWriteConflictError 翻译为 MetadataError
-  //   3. Public/Internal 两条 list 路径:public 脱敏(api_key_masked),
-  //      Internal 明文(供 Proxy 转发)
-  //   4. 依赖调用方 (router 层) 提供 supported-agents 数组用于 seed 和 agents 校验;
-  //      service 本身不知道 yaml/config 存在
+  // Corresponds to design doc §6.B (groups/*) + §6.C (extraction/*) + §6.D (internal/list).
+  // Service layer responsibilities:
+  //   1. Application-layer field-level validation (name length / mode validity / immutable fields of the default group, etc.)
+  //   2. Translate the InstanceUpstreamWriteConflictError thrown by the store into MetadataError
+  //   3. Two list paths, Public/Internal: public is sanitized (api_key_masked),
+  //      Internal is plaintext (for Proxy forwarding)
+  //   4. Relies on the caller (router layer) to provide the supported-agents array for seed and agents validation;
+  //      the service itself does not know yaml/config exists
   //
-  // 校验矩阵(§5.3):
-  //   default: name 固定 / mode='official' / base_url/api_key/model_id/description 必空;
-  //            agents 可 0~N,允许 update
-  //   custom:  name 非空 ≤64;agents ≥1;mode ∈ {custom_unified,custom_passthrough};
-  //            base_url 非空;custom_unified 时 api_key 非空
-  //   extraction: agents=[];mode='custom_unified';base_url + api_key 都必填
+  // Validation matrix (§5.3):
+  //   default: name fixed / mode='official' / base_url/api_key/model_id/description must be empty;
+  //            agents may be 0~N, update allowed
+  //   custom:  name non-empty ≤64; agents ≥1; mode ∈ {custom_unified,custom_passthrough};
+  //            base_url non-empty; api_key non-empty when custom_unified
+  //   extraction: agents=[]; mode='custom_unified'; base_url + api_key both required
 
   private static readonly NAME_MAX_LEN = 64;
-  // 与 §5.3 "允许中英文数字空格及 _-.()" 对齐;禁 换行/引号/尖括号/斜杠
+  // Aligned with §5.3 "allow Chinese/English letters, digits, spaces and _-.()"; forbid newlines/quotes/angle brackets/slashes
   private static readonly NAME_INVALID_RE = /[\n\r"'<>\/\\]/;
 
   /**
-   * 幂等确保 default 已 seed。Router 层给纯只读接口(supported-agents / extraction/get)
-   * 用,不想让它们绕过 store 直接暴露 store 引用,就在 service 加一层薄转发。
+   * Idempotently ensure default has been seeded. Router layer uses it for purely read-only endpoints (supported-agents / extraction/get),
+   * and to avoid exposing the store reference by bypassing the store, a thin forwarding layer is added in the service.
    */
   async ensureDefaultSeeded(supportedAgents: SupportedAgent[]): Promise<void> {
     await this.store.ensureDefaultSeeded(supportedAgents);
   }
 
   /**
-   * 列出所有组(default + custom),供 Panel B1 用。
-   * seed 语义: supportedAgents 非空时,若表内无 default 自动 seed 一行。
+   * List all groups (default + custom), for Panel B1.
+   * Seed semantics: when supportedAgents is non-empty, if the table has no default, automatically seed one row.
    */
   async listInstanceUpstreamGroups(
     supportedAgents: SupportedAgent[],
   ): Promise<{ items: Record<string, unknown>[] }> {
     const rows = await this.store.listInstanceUpstreamGroups(undefined, supportedAgents);
-    // 只返 default + custom(extraction 走 C 类接口)
+    // Only return default + custom (extraction goes through the C-class endpoints)
     const filtered = rows.filter((r) => r.group_type !== "extraction");
     return { items: filtered.map((r) => this.toPublicGroup(r)) };
   }
 
   /**
-   * 内部 D 接口:Proxy 拉数据,api_key 明文,全部行(含 extraction)。
-   * 与 Panel 侧共用 seed 逻辑(店店层保证)。
+   * Internal D endpoint: Proxy pulls data, api_key in plaintext, all rows (including extraction).
+   * Shares the seed logic with the Panel side (guaranteed by the store layer).
    */
   async listInstanceUpstreamGroupsInternal(
     supportedAgents: SupportedAgent[],
@@ -2215,7 +2215,7 @@ export class MetadataService {
     return { items: rows };
   }
 
-  /** Panel B2: 新建 custom 组。 */
+  /** Panel B2: create a new custom group. */
   async createInstanceUpstreamCustomGroup(
     input: {
       name: string;
@@ -2238,9 +2238,9 @@ export class MetadataService {
     if (input.mode === "custom_unified" && !input.api_key?.trim()) {
       throw new MetadataError("MISSING_API_KEY", "api_key is required for custom_unified mode");
     }
-    // 存量实例首个请求可能不是 list 而是直接 create,兜底 seed default
-    // 防止 assertAgentsNotOverlap 见空表 → INSERT custom → 只有 1 行 custom
-    // 无 default → 后续 hermes 请求 AGENT_NOT_CONFIGURED (design §5.5 存量兜底)
+    // The first request of an existing instance may not be list but a direct create; safety-net seed default
+    // to prevent assertAgentsNotOverlap from seeing an empty table → INSERT custom → only 1 custom row
+    // with no default → subsequent hermes requests hit AGENT_NOT_CONFIGURED (design §5.5 existing-instance safety net)
     await this.store.ensureDefaultSeeded(supportedAgents);
     try {
       const row = await this.store.createInstanceUpstreamGroup({
@@ -2260,7 +2260,7 @@ export class MetadataService {
     }
   }
 
-  /** Panel B3: PATCH 更新组(default 或 custom)。 */
+  /** Panel B3: PATCH update a group (default or custom). */
   async updateInstanceUpstreamGroup(
     input: {
       group_id: string;
@@ -2281,7 +2281,7 @@ export class MetadataService {
       throw new MetadataError("USE_EXTRACTION_ENDPOINT", "use /extraction/update for extraction row");
     }
 
-    // default 组的 immutable 字段守卫
+    // Guard for immutable fields of the default group
     if (input.group_type === "default") {
       const rejected: string[] = [];
       if (input.name !== undefined) rejected.push("name");
@@ -2299,7 +2299,7 @@ export class MetadataService {
       }
     }
 
-    // custom 组字段校验(仅在传入时才校验)
+    // Validation of custom group fields (only validate when passed in)
     if (input.group_type === "custom") {
       if (input.name !== undefined) this.assertGroupName(input.name);
       if (input.agents !== undefined) this.assertAgents(input.agents, supportedAgents, "custom");
@@ -2309,7 +2309,7 @@ export class MetadataService {
       }
     }
 
-    // 存量兜底 seed (同 create 分支说明)
+    // Existing-instance safety-net seed (same as the create branch note)
     await this.store.ensureDefaultSeeded(supportedAgents);
     try {
       const row = await this.store.updateInstanceUpstreamGroup({
@@ -2331,7 +2331,7 @@ export class MetadataService {
     }
   }
 
-  /** Panel B4: 切换 enabled 字段。 */
+  /** Panel B4: toggle the enabled field. */
   async toggleInstanceUpstreamGroup(
     input: {
       group_id: string;
@@ -2340,25 +2340,25 @@ export class MetadataService {
     },
     supportedAgents: SupportedAgent[],
   ): Promise<Record<string, unknown>> {
-    // 存量兜底 seed (同 create 分支说明)
+    // Existing-instance safety-net seed (same as the create branch note)
     await this.store.ensureDefaultSeeded(supportedAgents);
     try {
       const row = await this.store.toggleInstanceUpstreamGroup(input);
       return { group_id: row.group_id, enabled: row.enabled, updated_at: row.updated_at };
     } catch (e) {
       const err = this.translateUpstreamConflict(e);
-      // extraction 用 C4 toggle,B4 拿到 extraction 的 group_id 是走错通道
+      // extraction uses C4 toggle; B4 receiving an extraction group_id means the wrong channel was taken
       if (err.code === "group_not_found") throw err;
       throw err;
     }
   }
 
-  /** Panel B5: 物理删除 custom 组。 */
+  /** Panel B5: physically delete a custom group. */
   async deleteInstanceUpstreamGroup(
     input: { group_id: string },
     supportedAgents: SupportedAgent[],
   ): Promise<{ deleted: boolean; released_agents: string[] }> {
-    // 存量兜底 seed (同 create 分支说明)
+    // Existing-instance safety-net seed (same as the create branch note)
     await this.store.ensureDefaultSeeded(supportedAgents);
     const existing = await this.store.getInstanceUpstreamGroup(input.group_id);
     if (!existing) {
@@ -2380,14 +2380,14 @@ export class MetadataService {
     return { deleted: ok, released_agents: existing.agents };
   }
 
-  // ── C 类:extraction 行 ─────────────────────────────────────────────
+  // ── Class C: extraction row ─────────────────────────────────────────────
 
   async getInstanceUpstreamExtraction(
     supportedAgents: SupportedAgent[],
   ): Promise<Record<string, unknown>> {
-    // 只读也 seed:用户如果直接调 extraction/get 看到 default 未配置会误以为
-    // 实例真的没 default,去手动"配 default"就绕了 official 默认模型的语义。
-    // 每个实例都是自带 default 的,只是懒配置。查 = 保证有 default 存在。
+    // Seed even on read-only: if the user directly calls extraction/get and sees that default is not configured, they would mistakenly think
+    // the instance really has no default, and manually "configuring default" would bypass the semantics of the official default model.
+    // Every instance comes with a default, just lazily configured. Reading = ensuring a default exists.
     await this.store.ensureDefaultSeeded(supportedAgents);
     const rows = await this.store.listInstanceUpstreamGroups({ group_type: "extraction" });
     const ext = rows[0];
@@ -2419,7 +2419,7 @@ export class MetadataService {
     if (!input.api_key?.trim()) {
       throw new MetadataError("MISSING_API_KEY", "api_key is required for extraction");
     }
-    // 存量兜底 seed:Panel 首个请求可能直接 extraction/create,不走 list/groups
+    // Existing-instance safety-net seed: the Panel's first request may be a direct extraction/create, not going through list/groups
     await this.store.ensureDefaultSeeded(supportedAgents);
     try {
       const row = await this.store.createInstanceUpstreamGroup({
@@ -2458,7 +2458,7 @@ export class MetadataService {
     supportedAgents: SupportedAgent[],
   ): Promise<Record<string, unknown>> {
     if (input.api_key !== undefined && input.api_key.trim() === "") {
-      // extraction 必须有 key,清空要走 delete
+      // extraction must have a key; clearing must go through delete
       throw new MetadataError(
         "MISSING_API_KEY",
         "api_key cannot be cleared via update; use /extraction/delete instead",
@@ -2468,7 +2468,7 @@ export class MetadataService {
       throw new MetadataError("MISSING_BASE_URL", "base_url must be non-empty");
     }
 
-    // 存量兜底 seed
+    // Existing-instance safety-net seed
     await this.store.ensureDefaultSeeded(supportedAgents);
     const rows = await this.store.listInstanceUpstreamGroups({ group_type: "extraction" });
     const ext = rows[0];
@@ -2502,7 +2502,7 @@ export class MetadataService {
     },
     supportedAgents: SupportedAgent[],
   ): Promise<Record<string, unknown>> {
-    // 存量兜底 seed
+    // Existing-instance safety-net seed
     await this.store.ensureDefaultSeeded(supportedAgents);
     const rows = await this.store.listInstanceUpstreamGroups({ group_type: "extraction" });
     const ext = rows[0];
@@ -2527,16 +2527,16 @@ export class MetadataService {
   async deleteInstanceUpstreamExtraction(
     supportedAgents: SupportedAgent[],
   ): Promise<{ deleted: boolean }> {
-    // 存量兜底 seed
+    // Existing-instance safety-net seed
     await this.store.ensureDefaultSeeded(supportedAgents);
     const rows = await this.store.listInstanceUpstreamGroups({ group_type: "extraction" });
     const ext = rows[0];
-    if (!ext) return { deleted: true }; // 幂等:不存在也返 true
+    if (!ext) return { deleted: true }; // idempotent: returns true even when absent
     const ok = await this.store.deleteInstanceUpstreamGroup({ group_id: ext.group_id });
     return { deleted: ok };
   }
 
-  // ── 内部工具 ─────────────────────────────────────────────
+  // ── Internal utilities ─────────────────────────────────────────────
 
   private assertGroupName(name: string): void {
     const trimmed = (name ?? "").trim();
@@ -2561,7 +2561,7 @@ export class MetadataService {
     if (groupType === "custom" && agents.length === 0) {
       throw new MetadataError("INVALID_AGENTS", "custom group must have at least 1 agent");
     }
-    if (supported.length === 0) return; // 无 supported 列表时跳过枚举校验(仅 boot-time 极端情况)
+    if (supported.length === 0) return; // skip the enumeration check when there is no supported list (only an extreme boot-time case)
     const supportedSet = new Set(supported.map((a) => a.agent_source));
     const unknown = agents.filter((a) => !supportedSet.has(a));
     if (unknown.length > 0) {
@@ -2639,7 +2639,7 @@ export class MetadataService {
       return new MetadataError(mapped, e.message, e.detail);
     }
     if (e instanceof MetadataError) return e;
-    // 未知错误:包装抛出
+    // Unknown error: wrap and throw
     return new MetadataError("internal_error", e instanceof Error ? e.message : String(e));
   }
 }

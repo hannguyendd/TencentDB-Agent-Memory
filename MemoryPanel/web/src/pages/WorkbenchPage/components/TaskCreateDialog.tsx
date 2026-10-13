@@ -1,16 +1,16 @@
 /**
- * TaskCreateDialog — 「新建 Task」弹窗。
+ * TaskCreateDialog -- "Create Task" dialog.
  *
- * 必填字段（前端校验）：
- *   - title         任务标题
- *   - description   任务描述
+ * Required fields (frontend validation):
+ *   - title         task title
+ *   - description   task description
  *
- * 关于 team 归属：
- *   不再让用户在 dialog 里选 team。team 由右上角全局 TeamSwitcher 决定，
- *   这里只 readonly 展示「将创建到 team：name (team_id)」，避免出现「右上角是 A
- *   但弹窗里默认选了 B、用户没注意一切就走偏」的两套上下文不一致问题。
+ * About team ownership:
+ *   Users no longer choose a team in the dialog. The team is determined by the global TeamSwitcher at the top right,
+ *   and here only a readonly "Will be created in team: name (team_id)" is shown, avoiding the inconsistent two-context problem of "the top right says A
+ *   but the dialog defaults to B, the user doesn't notice, and everything goes astray".
  *
- * 不再在创建时选 Agent — 关联 Agent 放到 task 创建之后再做。
+ * The Agent is no longer chosen at creation -- associating an Agent is done after the task is created.
  */
 
 import { useState } from 'react';
@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { Alert, Tag, Input, Button, Form, Modal } from 'tea-component';
 import '../styles/task-create-dialog.css';
 
-/** 来源**大类**（新建恒为 manual）；导入来源的具体系统读 metadata_json.external.provider。 */
+/** Source **category** (always manual for newly created); the specific system of an imported source is read from metadata_json.external.provider. */
 export type TaskSourceType = 'manual' | 'external' | 'other';
 
 export interface TaskDraft {

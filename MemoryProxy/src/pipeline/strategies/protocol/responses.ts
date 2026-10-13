@@ -1,12 +1,12 @@
 /**
- * OpenAI Responses ProtocolStrategy — codex + workbuddy 共用 (Phase 2)。
+ * OpenAI Responses ProtocolStrategy — shared by codex + workbuddy (Phase 2).
  *
- * 老代码入口: codexHandler.ts::handleCodexEndpoint + workbuddyHandler.ts::handleWorkbuddyEndpoint。
+ * Legacy entry points: codexHandler.ts::handleCodexEndpoint + workbuddyHandler.ts::handleWorkbuddyEndpoint.
  *
- * Phase 2 只填纯函数骨架, Phase 4 补:
- *   - buildUpstreamBody (含 codex/wb 各自的 synthetic body 合成)
- *   - createStreamTap (tee() + coroutine, parseResponsesSseStream 增量版)
- *   - buildMemResponse (SSE form response 或 text)
+ * Phase 2 only fills in the pure-function skeleton; Phase 4 adds:
+ *   - buildUpstreamBody (including the synthetic body composition of codex/wb respectively)
+ *   - createStreamTap (tee() + coroutine, incremental version of parseResponsesSseStream)
+ *   - buildMemResponse (SSE form response or text)
  */
 
 import type {
@@ -23,7 +23,7 @@ export const responsesProtocol: ProtocolStrategy = {
   name: "responses",
 
   extractMessages(body): unknown[] {
-    // Responses API: body.input 而非 body.messages
+    // Responses API: body.input rather than body.messages
     return Array.isArray(body.input) ? body.input as unknown[] : [];
   },
 
@@ -32,11 +32,11 @@ export const responsesProtocol: ProtocolStrategy = {
   },
 
   applySessionContext(body, block): void {
-    // Responses 协议: session context 合成到 body.input[0] (synthetic input item)
-    // 详见 common/codex-injection.ts / common/workbuddy-injection.ts。
-    // Phase 4 走 injection/pipeline 时统一; 这里 stub 不改 body。
+    // Responses protocol: session context is synthesized into body.input[0] (synthetic input item)
+    // see common/codex-injection.ts / common/workbuddy-injection.ts.
+    // Unified when Phase 4 goes through injection/pipeline; this stub does not modify the body.
     if (!block) return;
-    // 保留 body 引用不变 (契约: 不引入 stub 副作用)
+    // keep the body reference unchanged (contract: no stub side effects)
   },
 
   applyInjection(_body, _block): void {},
@@ -49,7 +49,7 @@ export const responsesProtocol: ProtocolStrategy = {
   },
 
   buildUpstreamHeaders(_clientHeaders, _effectiveKey, _target, _sessionKey): Record<string, string> {
-    // Phase 4: SKIP_REQUEST_HEADERS_WITH_INTERNAL + Bearer (Responses 沿用 openai auth)
+    // Phase 4: SKIP_REQUEST_HEADERS_WITH_INTERNAL + Bearer (Responses keeps using openai auth)
     return {};
   },
 
@@ -61,7 +61,7 @@ export const responsesProtocol: ProtocolStrategy = {
   },
 
   parseNonStreamResponse(text): NonStreamParseResult {
-    // Responses 通常是 stream, 但也支持非 stream (response 对象)
+    // Responses is usually a stream, but non-stream (response object) is also supported
     try {
       const respJson = JSON.parse(text) as Record<string, unknown>;
       const usage = (respJson.usage && typeof respJson.usage === "object")
@@ -89,7 +89,7 @@ export const responsesProtocol: ProtocolStrategy = {
       const upstreamRequestId = typeof respJson.id === "string" ? respJson.id : undefined;
       return { usage, assistantText, upstreamRequestId };
     } catch {
-      // 上游返 SSE 兜底
+      // upstream returned SSE fallback
       const parsed = parseResponsesSseStream(text);
       return {
         usage: parsed.usage ?? undefined,

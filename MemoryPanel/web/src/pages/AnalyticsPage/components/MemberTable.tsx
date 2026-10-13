@@ -1,12 +1,12 @@
 /**
- * MemberTable — 成员维度调用统计表。
+ * MemberTable -- per-member call statistics table.
  *
- * ⚠️ 抽样口径：数据由面板侧对 `tool-calls/list` 分页采样后聚合（内核无按成员
- * 聚合的展示接口，本期不改 Core）。当 truncated=true 时表头会明示
- * 「基于最近 N / total 条」，避免被误读为全量。
+ * Warning: sampled scope. Data is aggregated panel-side after paging through `tool-calls/list` samples (the kernel has no
+ * per-member aggregation endpoint for display, and Core is not changed in this iteration). When truncated=true the header explicitly says
+ * "based on the latest N / total records" so it is not misread as full-volume.
  *
- * 成员列以两行展示：主行用户名（`user/list` 批量解析，解析失败/内部账号被过滤
- * 时展示「未识别用户」占位），副行固定展示原始 user_id，便于识别与复制。
+ * The member column shows two lines: the main line is the username (batch-resolved via `user/list`; when resolution fails or the internal account is filtered out,
+ * an "Unrecognized user" placeholder is shown), and the sub line always shows the raw user_id for easy identification and copying.
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, Table, Text, Tooltip } from 'tea-component';
@@ -19,7 +19,7 @@ import { fmtInt } from '../utils/formatters';
 
 const { autotip } = Table.addons;
 
-/** 成员维度资产使用次数展示顺序（other 归到最后）。 */
+/** Display order of per-member asset usage counts (other goes last). */
 const ASSET_COLUMN_ORDER: readonly AssetCategory[] = ['memory', 'skill', 'wiki', 'codegraph', 'other'];
 
 export function MemberTable({
@@ -47,12 +47,12 @@ export function MemberTable({
       header: t('analytics.member.col.user'),
       width: 200,
       render: (r: MemberStat) => {
-        // 未归属桶不是真实用户：直接展示占位文案，不做名称解析
+        // The unattributed bucket is not a real user: show the placeholder text directly, no name resolution
         if (r.user_id === UNASSIGNED_USER) {
           return <Text theme="label">{t('analytics.member.unassigned')}</Text>;
         }
-        // 未解析时主行渲染「未识别用户」（不再把裸 user_id 当可读名），
-        // 副行统一展示 user_id，保持整列两行版式一致。
+        // When unresolved, the main line renders "Unrecognized user" (a bare user_id is no longer treated as a readable name),
+        // and the sub line always shows user_id, keeping the two-line layout consistent across the column.
         return (
           <div className="_an-user-cell">
             <UserName userId={r.user_id} displayName={resolveUserName(r.user_id)} />
@@ -82,11 +82,11 @@ export function MemberTable({
       header: t('analytics.member.col.topCategory'),
       width: 260,
       render: (r: MemberStat) => {
-        // 该成员使用过的资产类别（按固定顺序取前几类）——补全「分别使用次数」，
-        // 不再只显示单一 top 类别徽章。
+        // Asset categories this member has used (first few in fixed order) -- fills in "usage count per category",
+        // rather than showing only a single top-category badge.
         const used = ASSET_COLUMN_ORDER.filter((c) => r.byCategory[c] > 0);
         if (used.length === 0) return '—';
-        // Tooltip 用逐行 ReactNode（纯文本 \n 在 HTML 中不换行）
+        // Tooltip uses per-line ReactNodes (a plain-text \n does not break lines in HTML)
         const tip = (
           <div>
             {used.map((c) => (
@@ -141,7 +141,7 @@ export function MemberTable({
       header: t('analytics.member.col.op'),
       width: 90,
       render: (r: MemberStat) =>
-        // 未归属桶无法作为 user_id 过滤条件，不提供下钻入口
+        // The unattributed bucket cannot be used as a user_id filter, so no drill-down entry is provided
         r.user_id === UNASSIGNED_USER ? (
           '—'
         ) : (

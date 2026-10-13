@@ -1,24 +1,24 @@
 /**
- * SkillOversizeStrategy — 超大兜底切分。
+ * SkillOversizeStrategy — oversize fallback splitting.
  *
- * 对应设计文档 `2026-07-15-skill-trigger-in-core-design.md` §8。
+ * Corresponds to design doc `2026-07-15-skill-trigger-in-core-design.md` §8.
  *
- * 触发条件：
- *   压缩路径下，压缩后本次 messages + data-current 现有内容仍 > chunkMax。
+ * Trigger condition:
+ *   On the compression path, after compression this batch of messages + the existing data-current content is still > chunkMax.
  *
- * 策略：
- *   从头累加到 headKeepBytes 边界（按 message 边界切分，保证 JSONL 有效）
- *   从尾累加到 tailKeepBytes 边界
- *   中间省略的所有 message → 替换为一条 role=system 的 placeholder 消息
+ * Strategy:
+ *   Accumulate from the head up to the headKeepBytes boundary (split at message boundaries to keep the JSONL valid)
+ *   Accumulate from the tail up to the tailKeepBytes boundary
+ *   All messages omitted in the middle → replaced with a single role=system placeholder message
  *
- * 极端情况：单条 message 就超过 head/tail budget → 允许头/尾各装 1 条
- * （保证至少有 head + tail 消息）。
+ * Extreme case: a single message exceeds the head/tail budget → allow the head/tail to hold 1 message each
+ * (guaranteeing at least head + tail messages).
  */
 
 export interface OversizeMessage {
   role: string;
   content: string;
-  // 允许透传其它字段
+  // allow passthrough of other fields
   [key: string]: unknown;
   metadata?: Record<string, unknown>;
 }
@@ -27,7 +27,7 @@ export interface OversizeOptions {
   chunkMaxBytes: number;
   headKeepBytes: number;
   tailKeepBytes: number;
-  /** placeholder 内容模板；`{n}` 替换成省略数，`{bytes}` 替换成省略字节数。 */
+  /** Placeholder content template; `{n}` is replaced with the omitted count, `{bytes}` with the omitted byte count. */
   placeholderTemplate: string;
 }
 
@@ -35,17 +35,17 @@ export const DEFAULT_OVERSIZE_OPTIONS: OversizeOptions = {
   chunkMaxBytes: 81_920, // 80KB
   headKeepBytes: 20_480, // 20KB
   tailKeepBytes: 20_480, // 20KB
-  placeholderTemplate: "[中间 {n} 条消息 / {bytes} 字节内容过长已省略]",
+  placeholderTemplate: "[{n} messages / {bytes} bytes in the middle omitted as too long]",
 };
 
 export interface OversizeResult {
-  /** 处理后的消息序列 */
+  /** The processed message sequence */
   messages: OversizeMessage[];
-  /** 是否触发了截断（false 表示直接 passthrough） */
+  /** Whether truncation was triggered (false means direct passthrough) */
   truncated: boolean;
-  /** 被省略的 message 条数 */
+  /** Number of messages omitted */
   omittedMessageCount: number;
-  /** 被省略的字节数 */
+  /** Number of bytes omitted */
   omittedBytes: number;
 }
 
@@ -74,13 +74,13 @@ export function applyOversizeStrategy(
     return { messages: [...messages], truncated: false, omittedMessageCount: 0, omittedBytes: 0 };
   }
 
-  // 从头累加
+  // accumulate from the head
   const headMsgs: OversizeMessage[] = [];
   let headBytes = 0;
   let headEnd = 0; // exclusive
   for (let i = 0; i < messages.length; i++) {
     const b = messageBytes(messages[i]!);
-    // 允许头至少装 1 条（极端 single message > headKeep 的兜底）
+    // allow the head to hold at least 1 message (fallback for the extreme case of a single message > headKeep)
     if (headMsgs.length > 0 && headBytes + b > opts.headKeepBytes) break;
     headMsgs.push(messages[i]!);
     headBytes += b;
@@ -88,7 +88,7 @@ export function applyOversizeStrategy(
     if (headBytes >= opts.headKeepBytes) break;
   }
 
-  // 从尾累加（不要吃回头部区域）
+  // accumulate from the tail (do not eat back into the head region)
   const tailMsgs: OversizeMessage[] = [];
   let tailBytes = 0;
   let tailStart = messages.length; // inclusive
@@ -101,12 +101,12 @@ export function applyOversizeStrategy(
     if (tailBytes >= opts.tailKeepBytes) break;
   }
 
-  // 头尾之间的省略段
+  // the omitted segment between head and tail
   const omittedSlice = messages.slice(headEnd, tailStart);
   const omittedMessageCount = omittedSlice.length;
   const omittedBytes = totalBytes(omittedSlice);
 
-  // 极端场景：头尾覆盖全部（omitted=0）→ 视为 passthrough
+  // extreme scenario: head and tail cover everything (omitted=0) → treat as passthrough
   if (omittedMessageCount === 0) {
     return {
       messages: [...messages],

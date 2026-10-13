@@ -18,9 +18,9 @@ type Fetcher = typeof fetch;
 const TAG = "[core-knowledge-client]";
 
 /**
- * TTL cache（2026-08-20）：kernel 偶发 timeout（现网 33% 命中率），会阻塞 prewarm。
- * 加 30s in-memory cache + stale-if-error 兜底：cache miss 后 fetch 失败时返回
- * 上次成功结果，避免 injection 空。env TDAI_KNOWLEDGE_CACHE_TTL_MS 可覆盖；0 关闭。
+ * TTL cache (2026-08-20): the kernel occasionally times out (33% hit rate in production), which blocks prewarm.
+ * Add a 30s in-memory cache + stale-if-error fallback: when a fetch fails after a cache miss, return
+ * the last successful result to avoid an empty injection. The env TDAI_KNOWLEDGE_CACHE_TTL_MS can override it; 0 disables.
  */
 const DEFAULT_CACHE_TTL_MS = 30_000;
 
@@ -76,7 +76,7 @@ export class CoreKnowledgeClient {
   private readonly defaultTimeoutMs: number;
   private readonly fetcher: Fetcher;
 
-  // TTL cache + stale-if-error 兜底表
+  // TTL cache + stale-if-error fallback table
   private readonly cache = new Map<string, CacheEntry<unknown>>();
   private readonly lastGood = new Map<string, unknown>();
   private readonly cacheTtlMs: number;
@@ -94,12 +94,12 @@ export class CoreKnowledgeClient {
   }
 
   /**
-   * TTL cache + stale-if-error 包装。
-   *  - hit（未过期）→ 直接返回 cached
-   *  - miss/expired → 调 doFetch，成功写入 cache + lastGood
-   *  - doFetch 抛异常或返回 null/undefined → 若 lastGood 存在则返回它并 warn
-   *  - cacheTtlMs === 0 → 直通
-   * doFetch 语义：成功返回值（可以是空数组），失败返回 null 或抛异常。
+   * TTL cache + stale-if-error wrapper.
+   *  - hit (not expired) → return cached directly
+   *  - miss/expired → call doFetch; on success write cache + lastGood
+   *  - doFetch throws or returns null/undefined → if lastGood exists, return it and warn
+   *  - cacheTtlMs === 0 → pass straight through
+   * doFetch semantics: on success return a value (may be an empty array); on failure return null or throw.
    */
   private async _cachedFetch<T>(cacheKey: string, doFetch: () => Promise<T | null>): Promise<T | null> {
     if (this.cacheTtlMs === 0) return doFetch();
@@ -203,10 +203,10 @@ export class CoreKnowledgeClient {
   }
 
   /**
-   * 按 knowledge_id 批量联查明细（Proxy per-agent 路径）。
-   * 服务鉴权（bearer + service-id），无需 user-key。空 ids → []。
+   * Batch join-query details by knowledge_id (Proxy per-agent path).
+   * Service authentication (bearer + service-id), no user-key needed. Empty ids → [].
    *
-   * @param opts.serviceId Per-call override；带 spaceId 的调用方必须传。
+   * @param opts.serviceId Per-call override; callers carrying a spaceId must pass it.
    */
   async listKnowledgeByIds(
     teamId: string,
@@ -226,8 +226,8 @@ export class CoreKnowledgeClient {
         {},
         opts.serviceId,
       );
-      // env=null 表示 HTTP/decode 失败 → 传播 null 让 _cachedFetch 走 stale 逻辑；
-      // env.data.items 为 [] 是"合法空结果"（正常缓存）。
+      // env=null means HTTP/decode failure → propagate null so _cachedFetch takes the stale logic;
+      // env.data.items being [] is a "legitimate empty result" (cached normally).
       if (!env) return null;
       return env.data?.items ?? [];
     });
@@ -235,11 +235,11 @@ export class CoreKnowledgeClient {
   }
 
   /**
-   * 取某 agent 被绑定的 knowledge asset_id（= knowledge_id）集合。
-   * 走内核 meta `/v3/meta/agent-fixed-asset/list-with-detail`（ForCaller，需 user-key）。
-   * 过滤 asset_type ∈ {llm_wiki, code_graph}。失败/无 user-key → []。
+   * Get the set of knowledge asset_ids (= knowledge_id) bound to an agent.
+   * Goes through the kernel meta `/v3/meta/agent-fixed-asset/list-with-detail` (ForCaller, needs user-key).
+   * Filters asset_type ∈ {llm_wiki, code_graph}. On failure / no user-key → [].
    *
-   * @param opts.serviceId Per-call override；带 spaceId 的调用方必须传。
+   * @param opts.serviceId Per-call override; callers carrying a spaceId must pass it.
    */
   async listAgentKnowledgeIds(
     agentId: string,
@@ -249,15 +249,15 @@ export class CoreKnowledgeClient {
     if (!agentId || !userKey) return [];
 
     const effectiveServiceId = opts.serviceId || this.serviceId;
-    // userKey 不入 key —— 同 agent 的 fixed-asset 绑定是 agent 级视图。
+    // userKey is not part of the key — the fixed-asset binding of the same agent is an agent-level view.
     const cacheKey = `listAgentIds:${agentId}:${effectiveServiceId}`;
 
     const result = await this._cachedFetch<string[]>(cacheKey, async () => {
       const env = await this._post<{ items?: Array<{ asset_id: string; asset_type: string; status?: string }> }>(
         `${this.endpoint}/v3/meta/agent-fixed-asset/list-with-detail`,
-        // asset_types 服务端过滤 —— 无关类型（skill / chat_memory）不再占分页额度，
-        // 避免 wiki/code_graph 被 skill 挤出默认 limit=20 后拿不到。
-        // 依赖 core commit da04d194 (feat/meta asset_types filter)。
+        // asset_types is filtered server-side — irrelevant types (skill / chat_memory) no longer take up pagination quota,
+        // preventing wiki/code_graph from being pushed past the default limit=20 by skills and then not being found.
+        // Depends on core commit da04d194 (feat/meta asset_types filter).
         { agent_id: agentId, apply_visibility_filter: true, touch_usage: false, asset_types: ["llm_wiki", "code_graph"] },
         { "x-tdai-user-key": userKey },
         opts.serviceId,

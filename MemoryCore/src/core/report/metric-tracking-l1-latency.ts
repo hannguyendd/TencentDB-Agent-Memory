@@ -1,16 +1,16 @@
 /**
- * L1 Latency Metric Reporter — L1 提取阶段延迟指标上报。
+ * L1 Latency Metric Reporter — reports L1 extraction-phase latency metrics.
  *
- * 在 L1 提取完成后非侵入式上报以下指标到 Kafka：
- *   - l1_extraction_latency_ms : L1 提取端到端总耗时（毫秒）
- *   - l1_dedup_latency_ms     : 去重阶段耗时（毫秒）
+ * After L1 extraction completes, non-intrusively reports the following metrics to Kafka:
+ *   - l1_extraction_latency_ms : total end-to-end L1 extraction time (ms)
+ *   - l1_dedup_latency_ms     : dedup phase time (ms)
  *
- * 设计原则（与 metric-tracking-recall 完全同构）：
- *   1. 提取完成后，try-catch 做上报（静默失败）
- *   2. 无论上报成功失败，不影响提取结果
- *   3. 提取失败（hasError=true）时不上报
- *   4. 无 instanceId 时不上报
- *   5. dedupLatencyMs 为 null 表示未走去重路径，不上报 dedup 指标
+ * Design principles (fully isomorphic with metric-tracking-recall):
+ *   1. After extraction completes, report inside try-catch (silent failure)
+ *   2. Whether reporting succeeds or fails, the extraction result is unaffected
+ *   3. Do not report when extraction fails (hasError=true)
+ *   4. Do not report when there is no instanceId
+ *   5. dedupLatencyMs being null means the dedup path was not taken; do not report the dedup metric
  */
 
 import { metricProducer } from "./kafka-metric-producer.js";
@@ -20,13 +20,13 @@ import { metricProducer } from "./kafka-metric-producer.js";
 // ============================
 
 export interface L1LatencyMetricInput {
-  /** 实例 ID（Kafka key） */
+  /** Instance ID (Kafka key) */
   instanceId: string;
-  /** L1 提取端到端总耗时（毫秒） */
+  /** Total end-to-end L1 extraction time (ms) */
   extractionLatencyMs: number;
-  /** 去重阶段耗时（毫秒）。null 表示未走去重路径 */
+  /** Dedup phase time (ms). null means the dedup path was not taken */
   dedupLatencyMs: number | null;
-  /** 是否提取失败 */
+  /** Whether extraction failed */
   hasError: boolean;
 }
 
@@ -35,19 +35,19 @@ export interface L1LatencyMetricInput {
 // ============================
 
 /**
- * 上报 L1 提取阶段延迟指标到 Kafka。
+ * Reports L1 extraction-phase latency metrics to Kafka.
  *
- * 静默安全：任何异常都 try-catch 吞掉，绝不向外抛。
+ * Silent-safe: any exception is swallowed by try-catch and never thrown outward.
  */
 export function reportL1LatencyMetrics(input: L1LatencyMetricInput): void {
   try {
-    // Guard: 失败时不上报
+    // Guard: do not report on failure
     if (input.hasError) return;
 
-    // Guard: 无 instanceId 不上报
+    // Guard: do not report without instanceId
     if (!input.instanceId) return;
 
-    // 1. 上报 l1_extraction_latency_ms
+    // 1. report l1_extraction_latency_ms
     try {
       metricProducer.send({
         metric: "l1_extraction_latency_ms",
@@ -56,10 +56,10 @@ export function reportL1LatencyMetrics(input: L1LatencyMetricInput): void {
         source: "core",
       });
     } catch {
-      // 静默失败
+      // silent failure
     }
 
-    // 2. 上报 l1_dedup_latency_ms（仅走了去重路径时）
+    // 2. report l1_dedup_latency_ms (only when the dedup path was taken)
     if (input.dedupLatencyMs !== null) {
       try {
         metricProducer.send({
@@ -69,10 +69,10 @@ export function reportL1LatencyMetrics(input: L1LatencyMetricInput): void {
           source: "core",
         });
       } catch {
-        // 静默失败
+        // silent failure
       }
     }
   } catch {
-    // 最外层 catch — 绝不向外抛
+    // outermost catch — never throw outward
   }
 }

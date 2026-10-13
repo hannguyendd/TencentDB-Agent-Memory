@@ -286,8 +286,8 @@ to forge a fake tool_use SSE:
   "questions": [
     {
       "id": "asset_confirm",       // ← required by dsh, echoed in answer
-      "question": "本次对话是否要关联团队资产?",
-      "header": "关联资产",
+      "question": "Link team assets to this conversation?",
+      "header": "Link assets",
       "options": [
         { "label": "是，关联团队资产", "description": "..." },
         { "label": "否，本次不关联",   "description": "..." }

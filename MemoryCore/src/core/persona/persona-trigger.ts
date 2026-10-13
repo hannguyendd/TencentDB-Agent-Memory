@@ -41,7 +41,7 @@ export class PersonaTrigger {
     if (cp.request_persona_update) {
       const result: TriggerResult = {
         should: true,
-        reason: `主动请求: ${cp.persona_update_reason || "Agent 请求更新"}`,
+        reason: `Explicit request: ${cp.persona_update_reason || "Agent requested update"}`,
       };
       this.logger?.debug?.(`${TAG} Trigger P1 (explicit request): ${result.reason}`);
       return result;
@@ -57,7 +57,7 @@ export class PersonaTrigger {
       !hasGeneratedPersona &&
       hasSceneFiles
     ) {
-      const result: TriggerResult = { should: true, reason: "首次冷启动：首次提取完成且有场景文件" };
+      const result: TriggerResult = { should: true, reason: "First cold start: first extraction completed and scene files exist" };
       this.logger?.debug?.(`${TAG} Trigger P2 (cold start): scenes_processed=${cp.scenes_processed}, total_processed=${cp.total_processed}`);
       return result;
     }
@@ -69,14 +69,14 @@ export class PersonaTrigger {
       hasSceneFiles &&
       !hasPersonaBody
     ) {
-      const result: TriggerResult = { should: true, reason: "恢复：persona.md 正文丢失或为空，需要重新生成" };
+      const result: TriggerResult = { should: true, reason: "Recovery: persona.md body is missing or empty; regeneration required" };
       this.logger?.debug?.(`${TAG} Trigger P2.5 (recovery): last_persona_time=${cp.last_persona_time || "(empty)"}, persona body missing`);
       return result;
     }
 
     // Priority 3: First scene block extraction
     if (cp.scenes_processed === 1 && cp.memories_since_last_persona > 0) {
-      const result: TriggerResult = { should: true, reason: "首次 Scene Block 提取完成" };
+      const result: TriggerResult = { should: true, reason: "First Scene Block extraction completed" };
       this.logger?.debug?.(`${TAG} Trigger P3 (first scene): scenes_processed=${cp.scenes_processed}`);
       return result;
     }
@@ -85,7 +85,7 @@ export class PersonaTrigger {
     if (cp.memories_since_last_persona >= this.interval) {
       const result: TriggerResult = {
         should: true,
-        reason: `达到阈值: ${cp.memories_since_last_persona} >= ${this.interval}`,
+        reason: `Threshold reached: ${cp.memories_since_last_persona} >= ${this.interval}`,
       };
       this.logger?.debug?.(`${TAG} Trigger P4 (threshold): ${result.reason}`);
       return result;

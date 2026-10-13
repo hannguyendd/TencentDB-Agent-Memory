@@ -44,7 +44,7 @@ console.log("  fastEstimateTokens vs tiktoken cl100k_base");
 console.log("══════════════════════════════════════════════════════════════════\n");
 
 const header = [
-  "文本".padEnd(18), "chars".padStart(8), "tiktoken".padStart(9),
+  "Text".padEnd(18), "chars".padStart(8), "tiktoken".padStart(9),
   "estimate".padStart(9), "error".padStart(7), "tk_ms".padStart(7), "est_ms".padStart(7), "speedup".padStart(8),
 ];
 console.log(header.join(" │ "));
@@ -84,6 +84,6 @@ console.log([
   `${(totalTkMs / totalEstMs).toFixed(0)}x`.padStart(8),
 ].join(" │ "));
 
-console.log(`\n  精度: 平均误差 ${totalErr}%`);
-console.log(`  速度: tiktoken ${totalTkMs.toFixed(0)}ms vs estimate ${totalEstMs.toFixed(0)}ms (${(totalTkMs / totalEstMs).toFixed(0)}x faster)`);
+console.log(`\n  Accuracy: average error ${totalErr}%`);
+console.log(`  Speed: tiktoken ${totalTkMs.toFixed(0)}ms vs estimate ${totalEstMs.toFixed(0)}ms (${(totalTkMs / totalEstMs).toFixed(0)}x faster)`);
 console.log();

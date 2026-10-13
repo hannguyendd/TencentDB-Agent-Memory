@@ -1,5 +1,5 @@
 /**
- * MetadataService / IMetadataStore 的 Proxy trace 包装。
+ * Proxy trace wrapper for MetadataService / IMetadataStore.
  */
 import type { MetadataService } from "../metadata/service/metadata-service.js";
 import type { IMetadataStore } from "../metadata/store/interface.js";

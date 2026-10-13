@@ -1,44 +1,44 @@
 /**
- * deepseek-harness (dsh) 客户端适配器。
+ * deepseek-harness (dsh) client adapter.
  *
- * 抓包实证(2026-08-14,mitmproxy 6 条真实包,详见
+ * Capture evidence (2026-08-14, 6 real packets via mitmproxy; see
  * `docs/dsh-recon/2026-08-14-dsh-capture-analysis.md`):
  *
- *   - 协议:**标准 OpenAI Chat Completions**(`POST /chat/completions` + SSE),
- *     跟 codebuddy 同族;body/messages shape 100% 兼容(role:system/user/assistant/tool,
- *     tool_calls[] on assistant,单独 role=tool 消息带 tool_call_id)
- *   - 客户端指纹(强):`user-agent: deepseek-harness/*`(dsh attribution 不可关)
- *     + `x-deepseek-harness-user-id`(匿名 UUID 恒定) + `x-deepseek-harness-session-id`
- *     (session-<uuid>) + `x-deepseek-harness-compact:1`(仅 compaction 请求带)
- *   - session_id **只在 header**,body 不带 fallback 字段(跟 codex 的 client_metadata
- *     不同);proxy 侧 sid 提取 100% 依赖 header
- *   - assistant 回带 `reasoning_content`(dsh 特色,仅 tool_calls 轮回带),
- *     proxy 透传即可,不影响 messages parser
+ *   - Protocol: **standard OpenAI Chat Completions** (`POST /chat/completions` + SSE),
+ *     same family as codebuddy; body/messages shape 100% compatible (role:system/user/assistant/tool,
+ *     tool_calls[] on assistant, separate role=tool messages carrying tool_call_id)
+ *   - Client fingerprint (strong): `user-agent: deepseek-harness/*` (dsh attribution cannot be disabled)
+ *     + `x-deepseek-harness-user-id` (anonymous UUID, constant) + `x-deepseek-harness-session-id`
+ *     (session-<uuid>) + `x-deepseek-harness-compact:1` (only on compaction requests)
+ *   - session_id is **only in the header**; the body has no fallback field (unlike codex's client_metadata);
+ *     the proxy's sid extraction depends 100% on the header
+ *   - assistant echoes back `reasoning_content` (a dsh trait, only on tool_calls turns),
+ *     the proxy just passes it through; it does not affect the messages parser
  *
- * # 三类请求的区分(main / title / compaction)
+ * # Distinguishing the three request types (main / title / compaction)
  *
- * dsh 主对话 / compaction / session-title 全部共用同一 `x-deepseek-harness-session-id`,
- * **仅 compaction 有独立 header**(compact:1),title 没有 —— 靠 body 特征区分:
+ * dsh main conversation / compaction / session-title all share the same `x-deepseek-harness-session-id`,
+ * **only compaction has a dedicated header** (compact:1), title has none -- distinguished by body traits:
  *
- * | 类别 | header 信号 | body 特征 |
+ * | Category | header signal | body traits |
  * |---|---|---|
  * | compaction | `x-deepseek-harness-compact: 1` | — |
- * | title-gen | 无 | tools 缺 + thinking.disabled + max_tokens<=128 + system 以 "Create a concise title..." 开头 |
- * | main | 无 | 其它 |
+ * | title-gen | none | tools missing + thinking.disabled + max_tokens<=128 + system starts with "Create a concise title..." |
+ * | main | none | other |
  *
- * classifyRequest 优先级:**compact header > title body-shape > main**;
- * title 判据必须**三合一都满足**才当 aux(单一特征易误判)。
+ * classifyRequest priority: **compact header > title body-shape > main**;
+ * the title criteria must **all three be satisfied** to count as aux (a single trait is easy to misjudge).
  *
- * # 两个适配点
- *   - `classifyRequest`: 三重信号判(compact / title / main)
- *   - `extractUserText`: content 是 str 直接返回(dsh messages.content 从不用 blocks)
+ * # Two adaptation points
+ *   - `classifyRequest`: three-signal decision (compact / title / main)
+ *   - `extractUserText`: if content is a str, return it directly (dsh messages.content never uses blocks)
  *
- * # 不同于 CB 的地方
- *   - dsh 主对话在 body.messages 里塞 4 条 role=user:真实用户输入 +
- *     `<system-reminder>` 工作区指令 + `runtime context` 快照 + `<available_skills>` 列表
- *     —— proxy 侧提取最后一条 user 的 str content 时,取"从后往前第一条"就够;
- *     实际用户输入通常在 messages[1](第一条 user)
- *   - dsh 用户输入本身**不带 CB/workbuddy 那种 `<user_query>` wrapper**,直接透传
+ * # Differences from CB
+ *   - dsh main conversation puts 4 role=user messages in body.messages: real user input +
+ *     `<system-reminder>` workspace instructions + `runtime context` snapshot + `<available_skills>` list
+ *     -- when the proxy extracts the str content of the last user message, taking the "first one from the back" suffices;
+ *     the actual user input is usually in messages[1] (the first user message)
+ *   - dsh user input itself **has no `<user_query>` wrapper like CB/workbuddy**, passed through directly
  */
 
 import type { AgentAdapter, RequestKind } from "./types.js";
@@ -47,44 +47,44 @@ import { extractLastUserText } from "../common/user-text-extractor.js";
 // ── Title-gen body-shape detection ───────────────────────────────────────────
 
 /**
- * dsh session-title-llm 请求的 system prompt 固定前缀。
- * 来源:`packages/session/session-title-llm/src/index.ts:252-260` +
- * 抓包 `fixtures/121918-*-9d056d.req.json` 实证。
+ * Fixed prefix of the system prompt of the dsh session-title-llm request.
+ * Source: `packages/session/session-title-llm/src/index.ts:252-260` +
+ * evidence from capture `fixtures/121918-*-9d056d.req.json`.
  *
- * dsh 侧 prompt 完整开头:
+ * Full opening of the dsh-side prompt:
  *   "Create a concise title for an AI coding-assistant session from the supplied human messages."
  *
- * 只取前缀做匹配,避免上游 prompt 微调(punctuation / 换行)后判据失效。
+ * Match on the prefix only, so the criterion does not break when upstream tweaks the prompt (punctuation / newlines).
  */
 const DSH_TITLE_SYSTEM_PROMPT_PREFIX =
   "Create a concise title for an AI coding-assistant session";
 
 /**
- * dsh title-gen 请求的 max_tokens 上限。抓包实证 `max_tokens=64`;
- * 留 128 一点富余,避免上游微调后跟着漂。
+ * Max_tokens cap for dsh title-gen requests. Capture shows `max_tokens=64`;
+ * leave 128 as some slack, so it doesn't drift after upstream tweaks.
  */
 const DSH_TITLE_MAX_TOKENS_CEIL = 128;
 
 /**
- * 判定 dsh 请求是否为 title-gen(body 特征三合一)。
+ * Determine whether a dsh request is title-gen (three body traits combined).
  *
- * 全部条件必须满足才当 aux。任一条不满足即返 false(避免误判 main)。
+ * All conditions must be met to count as aux. If any one fails, return false (avoids misjudging main).
  */
 function isDshTitleGen(body: Record<string, unknown>): boolean {
-  // 条件 1: tools 缺失或空数组(主对话恒 25+ 个)
+  // Condition 1: tools missing or an empty array (main conversation always has 25+)
   const tools = body.tools;
   const hasTools = Array.isArray(tools) && tools.length > 0;
   if (hasTools) return false;
 
-  // 条件 2: thinking.type === "disabled"
+  // Condition 2: thinking.type === "disabled"
   const thinking = body.thinking as { type?: string } | undefined;
   if (thinking?.type !== "disabled") return false;
 
-  // 条件 3: max_tokens <= 128
+  // Condition 3: max_tokens <= 128
   const maxTokens = body.max_tokens;
   if (typeof maxTokens !== "number" || maxTokens > DSH_TITLE_MAX_TOKENS_CEIL) return false;
 
-  // 条件 4: 首条 system 消息 content 以 title prompt 前缀开头
+  // Condition 4: first system message content starts with the title prompt prefix
   const messages = body.messages;
   if (!Array.isArray(messages) || messages.length === 0) return false;
   const first = messages[0] as { role?: string; content?: unknown } | undefined;
@@ -97,14 +97,14 @@ function isDshTitleGen(body: Record<string, unknown>): boolean {
 // ── User text extraction ─────────────────────────────────────────────────────
 
 /**
- * dsh 两种协议下 user content 的形态:
+ * User content shapes under the two dsh protocols:
  *   - v0.1.x(OpenAI Chat): `content: string`
  *   - v0.2+ (Anthropic Messages): `content: [{type:"text", text:"..."}, ...]`
  *
- * 复用 `extractLastUserText`(和 CC 同款):string 直接返回;array 从后往前扫第一个
- * `type==="text"` block —— 兼具老 dsh string 姿势和新 dsh anthropic block 姿势,
- * 并顺带跳过 `<system-reminder>` 元数据只取最后一段真实用户话(dsh v0.2 Web UI
- * 会像 CC 一样在 user content 里塞多段环境元数据 block)。
+ * Reuses `extractLastUserText` (same as CC): a string is returned directly; for an array, scan from the back for the first
+ * `type==="text"` block -- covering both the old dsh string style and the new dsh anthropic block style,
+ * and incidentally skipping `<system-reminder>` metadata to take only the last real user utterance (dsh v0.2 Web UI
+ * stuffs several environment-metadata blocks into user content just like CC).
  */
 function extractDshUserText(content: unknown): string | null {
   return extractLastUserText(content);
@@ -120,15 +120,15 @@ export const dshAdapter: AgentAdapter = {
     _path?: string,
     headers?: Record<string, string>,
   ): RequestKind {
-    // 信号 1(最强): compact header —— dsh source 硬编码在
-    // `packages/llm/llm-deepseek/src/adapter.ts:290-293`,只在
-    // `purpose:'compaction'` 时才塞,无歧义
+    // Signal 1 (strongest): compact header -- hardcoded in the dsh source at
+    // `packages/llm/llm-deepseek/src/adapter.ts:290-293`, only included when
+    // `purpose:'compaction'`, unambiguous
     if (headers?.["x-deepseek-harness-compact"] === "1") return "auxiliary";
 
-    // 信号 2: title-gen body 特征三合一(见 isDshTitleGen)
+    // Signal 2: title-gen body traits combined (see isDshTitleGen)
     if (isDshTitleGen(body)) return "auxiliary";
 
-    // 其它一律 main
+    // Everything else is main
     return "main";
   },
 

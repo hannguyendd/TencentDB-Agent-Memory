@@ -1,11 +1,11 @@
 /**
- * CreditCalculator — 基于 token 用量和模型系数计算 Credit 消耗
+ * CreditCalculator — computes Credit consumption from token usage and model coefficients
  *
- * 规则 (锚点: MiniMax M2.7):
+ * Rules (anchor: MiniMax M2.7):
  * - Input:  1.0 Credit / 1k tokens
  * - Cache:  0.2 Credit / 1k tokens
  * - Output: 4.0 Credit / 1k tokens
- * - 模型系数: M2.7=1.0, 旗舰型=15.0, 极速型=0.8
+ * - Model coefficients: M2.7=1.0, flagship=15.0, high-speed=0.8
  */
 
 export interface TokenUsage {
@@ -20,15 +20,15 @@ export interface CreditRates {
   outputRate: number;  // Credit per 1k output tokens (default: 4.0)
 }
 
-/** 模型系数表 (可通过配置扩展) */
+/** Model coefficient table (extensible via configuration) */
 const DEFAULT_MODEL_MULTIPLIERS: Record<string, number> = {
   "minimax-m2.7": 1.0,
   "MiniMax-M1": 1.0,
-  // 旗舰型
+  // flagship
   "gpt-4o": 15.0,
   "gpt-5": 15.0,
   "claude-4.5-sonnet": 15.0,
-  // 极速型
+  // high-speed
   "deepseek-v3.2": 0.8,
   "deepseek-v3": 0.8,
 };
@@ -55,8 +55,8 @@ export class CreditCalculator {
   }
 
   /**
-   * 计算单次 LLM 调用的 Credit 消耗
-   * @returns 消耗的 Credit 数 (原始浮点数，与监控侧保持严格一致)
+   * Compute the Credit consumption of a single LLM call
+   * @returns Credits consumed (raw float, kept strictly consistent with the monitoring side)
    */
   calculate(usage: TokenUsage, model: string): number {
     const multiplier = this.modelMultipliers[model] ?? this.defaultMultiplier;
@@ -70,7 +70,7 @@ export class CreditCalculator {
     return total;
   }
 
-  /** 获取模型系数 */
+  /** Get the model coefficient */
   getMultiplier(model: string): number {
     return this.modelMultipliers[model] ?? this.defaultMultiplier;
   }

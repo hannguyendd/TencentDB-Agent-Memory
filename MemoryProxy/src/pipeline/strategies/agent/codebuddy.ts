@@ -1,6 +1,6 @@
 /**
- * CodeBuddy AgentStrategy (Phase 3)。
- * 走 openai-chat protocol, 恒 main, 弹 5-step form。
+ * CodeBuddy AgentStrategy (Phase 3).
+ * Uses the openai-chat protocol, always main, shows the 5-step form.
  */
 
 import { codebuddyAdapter } from "../../../agent-adapters/codebuddy.js";

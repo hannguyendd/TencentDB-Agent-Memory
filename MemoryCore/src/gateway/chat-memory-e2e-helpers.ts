@@ -1,9 +1,9 @@
 /**
- * E2E 共享装置：真实 TdaiGateway + SQLite 落盘，用于 chat-memory clear /
- * L0-L1 批量删除的端到端验证。
+ * E2E shared fixtures: a real TdaiGateway + SQLite on disk, used for end-to-end verification of chat-memory clear /
+ * L0-L1 bulk delete.
  *
- * 与 v3-meta.e2e.test.ts 同款做法（真实 HTTP 往返，不 mock store），
- * 抽出来供多个 *.e2e.test.ts 复用。
+ * Same approach as v3-meta.e2e.test.ts (real HTTP round trips, no mocked store),
+ * extracted for reuse by multiple *.e2e.test.ts files.
  */
 import { expect } from "vitest";
 import http from "node:http";
@@ -27,7 +27,7 @@ export interface E2EContext {
 
 let ctx: E2EContext | undefined;
 
-/** 起一个独立实例（独立端口 + 临时数据目录）。 */
+/** Start an independent instance (separate port + temporary data directory). */
 export async function startE2EGateway(tag: string): Promise<E2EContext> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `tdai-${tag}-e2e-`));
   process.env.TDAI_METADATA_SQLITE_BASE_DIR = path.join(tmpDir, "metadata");
@@ -87,7 +87,7 @@ export async function post<T = unknown>(
   });
 }
 
-// ── user / team / agent 装置 ──
+// ── user / team / agent fixtures ──
 
 let adminKey: string | undefined;
 
@@ -107,12 +107,12 @@ export interface Fixture {
   userKey: string;
   teamId: string;
   agentId: string;
-  /** chat_memory 资产 id，即需求里的 memory_id。 */
+  /** chat_memory asset id, i.e. the memory_id in the requirements. */
   memoryId: string;
   sessionId: string;
 }
 
-/** 建一套 user/team/agent，并写入 L0 消息触发 chat_memory 资产自动登记。 */
+/** Create a set of user/team/agent and write L0 messages to trigger the automatic registration of the chat_memory asset. */
 export async function makeFixture(tag: string, messageCount = 3): Promise<Fixture> {
   const key = await seedAdminOnce();
   const u = await post<{ user_id: string; default_user_key: string }>(
@@ -180,7 +180,7 @@ export async function addMessages(
   return r.body.data!.accepted_ids;
 }
 
-/** 统计该 session的 L0 条数。 */
+/** Count the L0 entries of this session. */
 export async function countL0(f: Fixture, sessionId = f.sessionId): Promise<number> {
   const r = await post<{ total: number }>(
     "/v3/conversation/count",
@@ -192,10 +192,10 @@ export async function countL0(f: Fixture, sessionId = f.sessionId): Promise<numb
 }
 
 /**
- * 列出该 agent 的 L0 消息 id。
+ * List the L0 message ids of this agent.
  *
- * /v3 严格 isolation 要求请求带 session_id（三元组必填），所以这里必须
- * 逐 session 查询后合并 —— 不能省略 session_id 期望"跨 session 聚合"。
+ * /v3 strict isolation requires requests to carry session_id (the triple is mandatory), so here we must
+ * query session by session and merge -- session_id cannot be omitted in the hope of "cross-session aggregation".
  */
 export async function queryL0Ids(f: Fixture, sessionIds: string[] = [f.sessionId]): Promise<string[]> {
   const ids: string[] = [];

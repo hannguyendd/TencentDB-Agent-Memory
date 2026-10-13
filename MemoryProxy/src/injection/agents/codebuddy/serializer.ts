@@ -63,7 +63,7 @@ export function insertBeforeTag(
     if (mod.tag === tag && !inserted) {
       result.push({
         id: `injected-before-${tag}`,
-        name: `注入内容(${tag}之前)`,
+        name: `Injected content (before ${tag})`,
         tag: null,
         rawText: text,
         innerText: text,
@@ -95,7 +95,7 @@ export function insertAfterTag(
     if (mod.tag === tag && !inserted) {
       result.push({
         id: `injected-after-${tag}`,
-        name: `注入内容(${tag}之后)`,
+        name: `Injected content (after ${tag})`,
         tag: null,
         rawText: text,
         innerText: text,

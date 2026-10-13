@@ -1,11 +1,11 @@
 /**
- * overview.ts — 生成 wiki/overview.md 全局综述页（llm-wiki synthesis 思想，OQ-9）。
+ * overview.ts — generates the wiki/overview.md global overview page (llm-wiki synthesis idea, OQ-9).
  *
- * 在一批源全部摄取完成后调用一次：把当前 wiki 的所有页（标题 + 描述）喂给 LLM，
- * 让它写一篇把各实体/概念串成叙事的全局综述，帮助人类与 LLM 快速建立整体认知。
+ * Called once after a batch of sources has been fully ingested: feeds all current wiki pages (title + description) to the LLM,
+ * and has it write a global overview that weaves entities/concepts into a narrative, helping humans and LLMs quickly build an overall picture.
  *
- * overview.md 带 frontmatter（type: overview），正文鼓励用 [[wikilink]] 指向各页。
- * 失败不影响摄取主流程（调用方 try/catch）。
+ * overview.md carries frontmatter (type: overview); the body is encouraged to use [[wikilink]] to point to pages.
+ * Failures do not affect the main ingest flow (caller wraps in try/catch).
  */
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -16,7 +16,7 @@ import { createLogger } from "../../../logger.js";
 
 const log = createLogger("wiki-overview");
 
-/** 结构性文件不纳入综述输入，也不被综述覆盖。 */
+/** Structural files are excluded from the overview input and are not overwritten by it. */
 const STRUCTURAL = new Set(["index.md", "schema.md", "purpose.md", "log.md", "overview.md"]);
 
 interface PageBrief {
@@ -79,15 +79,15 @@ Requirements:
 - Output only the overview body (markdown) — no frontmatter, no FILE blocks, no extra commentary.`;
 
 /**
- * 生成/更新 wiki/overview.md。页太少（<2）时跳过（综述意义不大）。
+ * Generate/update wiki/overview.md. Skipped when there are too few pages (<2) since an overview adds little.
  *
- * @returns 是否写入了 overview。
+ * @returns whether the overview was written.
  */
 export async function generateOverview(projectPath: string, llm: LlmClient): Promise<boolean> {
   const wikiDir = join(projectPath, "wiki");
   const briefs = collectBriefs(wikiDir);
   if (briefs.length < 2) {
-    log.debug("页面太少，跳过 overview 生成", { pages: briefs.length });
+    log.debug("Too few pages; skipping overview generation", { pages: briefs.length });
     return false;
   }
 

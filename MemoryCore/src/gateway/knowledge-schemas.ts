@@ -50,7 +50,7 @@ export const knowledgeBatchDeleteRequestSchema = z.object({
 export const knowledgeListRequestSchema = z.object({
   team_id: z.string().min(1),
   type: knowledgeTypeSchema.optional(),
-  // Proxy 按 id 批量联查明细（agent 绑定解出 asset_ids 后取渲染字段）。
+  // Proxy batch-joins details by id (after the agent binding resolves asset_ids, it fetches the render fields).
   knowledge_ids: z.array(z.string().min(1)).max(200).optional(),
   pagination: z.object({
     limit: z.number().int().min(1).max(1000).optional(),

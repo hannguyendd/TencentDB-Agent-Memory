@@ -1,9 +1,9 @@
 /**
- * CredentialStore —— 资源级凭据存取。
+ * CredentialStore — resource-level credential storage.
  *
- * 主键：(service_id, resource_type, resource_id)。凭据挂在资源上，与用户解耦。
- * 存储：`cred_secret` 用 base64（非加密），使用时在内存解码，明文永不出 KS。
- * 保密性由文件权限 + 接口不回吐 + 明文不进日志承担，见 §4.1.3。
+ * Primary key: (service_id, resource_type, resource_id). Credentials attach to resources, decoupled from users.
+ * Storage: `cred_secret` uses base64 (not encryption), decoded in memory at use time; plaintext never leaves KS.
+ * Confidentiality is provided by file permissions + the API never echoing + plaintext never in logs, see §4.1.3.
  */
 
 import { and, eq } from "drizzle-orm";
@@ -31,7 +31,7 @@ export interface CredentialStoreOptions {
 export function createCredentialStore(opts: CredentialStoreOptions): ICredentialStore {
   const { db } = opts;
 
-  /** 组一个 where 三元组（复用度高）。 */
+  /** Build a where triple (highly reusable). */
   const whereRef = (ref: ResourceRef) =>
     and(
       eq(knowledgeSourceCredential.serviceId, ref.serviceId),
@@ -64,7 +64,7 @@ export function createCredentialStore(opts: CredentialStoreOptions): ICredential
         .get();
       if (!row) return null;
 
-      // decode 失败 → null（当作未配置），不抛异常。避免损坏内容被当有效令牌用去 clone。
+      // decode failure → null (treated as not configured), does not throw. Avoids corrupted content being used as a valid token to clone.
       const secret = decodeSecret(row.credSecret);
       if (secret === null) {
         log.warn("credential secret malformed, treating as missing", {
@@ -137,7 +137,7 @@ export function createCredentialStore(opts: CredentialStoreOptions): ICredential
         })
         .run();
 
-      // 日志绝不带 secret / cred_secret；仅记归属。
+      // Logs never carry secret / cred_secret; only record ownership.
       log.info("credential saved", {
         resourceType: ref.type,
         resourceId: ref.resourceId,

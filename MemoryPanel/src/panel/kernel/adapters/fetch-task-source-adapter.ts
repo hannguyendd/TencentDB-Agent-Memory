@@ -1,13 +1,13 @@
 /**
- * Task 外部来源内核适配器。
+ * Kernel adapter for Task external sources.
  *
- * 为什么不是复用 FetchMetaKernelAdapter：
- *   它固定拼 `/v3/meta/${action}` 前缀，而 task-source 是独立的 `/v3/task-source/${action}`
- *   路由族（业务不在 meta 域内）。因此这里是一条独立但同构的转发路径：
- *   同样的信封协议、同样的实例头与 user_key 鉴权，只差路径前缀。
+ * Why not reuse FetchMetaKernelAdapter:
+ *   It hardcodes the `/v3/meta/${action}` prefix, while task-source is a separate `/v3/task-source/${action}`
+ *   route family (the business is not in the meta domain). So this is a separate but isomorphic forwarding path:
+ *   same envelope protocol, same instance headers and user_key authentication, differing only in the path prefix.
  *
- * 令牌注入：调用方通过 ctx.extraHeaders 传入，适配器不感知其语义，
- * 也不做任何持久化 —— 令牌只在这条内网链路上传递一次。
+ * Token injection: the caller passes it via ctx.extraHeaders; the adapter is unaware of its semantics
+ * and does no persistence either -- the token is passed only once over this internal-network link.
  */
 
 import type { KernelHttpPort } from '../ports/kernel-http-port.js';

@@ -1,14 +1,14 @@
 /**
- * API 调用审计中间件 — await next() 后采集请求信息写入 ClickHouse。
+ * API call audit middleware -- after await next(), collects request info and writes it to ClickHouse.
  *
- * 仅对经过 validatePanelMetaHeaders 的请求（有 panelMeta）生效；
- * 静态资源、/health 等不经过 API 路由的请求自然被跳过。
+ * Only applies to requests that passed validatePanelMetaHeaders (have panelMeta);
+ * requests that do not go through API routes, such as static assets and /health, are naturally skipped.
  *
- * ## user_id 埋点策略（三级兜底）
- *   1. route handler 里 `c.set('resolvedUserId', ...)` → 优先用
- *   2. 中间件级 `userIdResolver.get(userKey, ctx)` → cache 命中即拿
- *   3. 都没有 → 空串。miss 会 fire-and-forget 触发 auth/verify，
- *      下条同 user_key 的请求就能拿到
+ * ## user_id instrumentation strategy (three-level fallback)
+ *   1. `c.set('resolvedUserId', ...)` in the route handler -> used first
+ *   2. middleware-level `userIdResolver.get(userKey, ctx)` -> taken on cache hit
+ *   3. neither -> empty string. A miss fires auth/verify fire-and-forget,
+ *      so the next request with the same user_key can get it
  */
 import { createMiddleware } from 'hono/factory';
 import type { PanelApiCallTelemetry } from '../../infra/api-call-telemetry.js';
@@ -17,13 +17,13 @@ import type { PanelUserIdResolver } from '../../infra/user-id-resolver.js';
 
 declare module 'hono' {
   interface ContextVariableMap {
-    /** 路由 handler 中 resolveCallerUserId 成功后 set，审计中间件优先读取。 */
+    /** Set after resolveCallerUserId succeeds in a route handler; the audit middleware reads it first. */
     resolvedUserId?: string;
   }
 }
 
 /**
- * 注册到 api 子 app：`api.use('*', apiCallTelemetryMiddleware(deps.apiCallTelemetry, deps.userIdResolver))`
+ * Registered on the api sub-app: `api.use('*', apiCallTelemetryMiddleware(deps.apiCallTelemetry, deps.userIdResolver))`
  */
 export function apiCallTelemetryMiddleware(
   telemetry: PanelApiCallTelemetry,
@@ -33,11 +33,11 @@ export function apiCallTelemetryMiddleware(
     const start = Date.now();
     await next();
 
-    // 只记录经过了 validatePanelMetaHeaders 的请求
+    // Only record requests that passed validatePanelMetaHeaders
     const panelMeta = c.get('panelMeta');
     if (!panelMeta) return;
 
-    // 三级兜底 user_id: route 显式 set > resolver cache > 空
+    // Three-level fallback for user_id: explicit route set > resolver cache > empty
     let userId = c.get('resolvedUserId') ?? '';
     if (!userId && panelMeta.userKey) {
       userId = userIdResolver.get(panelMeta.userKey, {

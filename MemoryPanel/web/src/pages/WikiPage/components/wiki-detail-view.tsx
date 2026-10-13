@@ -1,6 +1,6 @@
 /**
- * WikiDetailView —— Wiki 详情视图（概览 / 图谱 / 页面 / 搜索 四个 Tab + 添加文档 Modal）。
- * 全部数据与回调来自 useWikiSources 的返回对象，组件只做渲染。
+ * WikiDetailView -- Wiki detail view (Overview / Graph / Pages / Search four Tabs + add-document Modal).
+ * All data and callbacks come from the object returned by useWikiSources; the component only renders.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +30,7 @@ import type { WikiSourcesStore } from '../hooks/useWikiSources';
 
 export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
   const { t } = useTranslation();
-  // 设计 2026-09-21：合并后的单一导入入口（原「添加」+「Ingest」）
+  // Design 2026-09-21: the merged single import entry (formerly "Add" + "Ingest")
   const [showImportModal, setShowImportModal] = useState(false);
   const {
     sources,
@@ -75,7 +75,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
     handleBatchUpload,
     fileInputRef,
     openAddDocExternal,
-    // 外部来源（iWiki 等）导入
+    // External source (iWiki etc.) import
     sourceProviders,
     formSourceType,
     setFormSourceType,
@@ -100,16 +100,16 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
 
   const source = sources.find((s) => s.wiki_id === selectedWikiId);
   const wikiName = source?.name ?? '';
-  // 进度卡片只在「加工中」显示；完成后（ready）自动收起，与合并改动前的行为一致
-  // （终态由标题栏的状态徽章 + 页数体现，不需要再挂一个进度卡片）。
-  // failed 例外：出错原因必须显式告知用户，因此保留卡片直到用户点「清除」。
+  // The progress card shows only while "processing"; once finished (ready) it collapses automatically, same as the behavior before the merge change
+  // (the terminal state is reflected by the title bar's status badge + page count, so no progress card needs to remain).
+  // Exception for failed: the error reason must be explicitly shown to the user, so the card is kept until the user clicks "Clear".
   const showIngestCard =
     !ingestCardCleared &&
     displayIngestState.wiki === wikiName &&
     (displayIngestState.active || displayIngestState.status === 'failed');
   const isIngestingNow = displayIngestState.active;
 
-  // 选中 Wiki 已不存在（被删除或刷新失败）时给出可返回的空态，避免死胡同
+  // When the selected Wiki no longer exists (deleted or refresh failed), give an empty state that can be returned from, avoiding a dead end
   if (!source) {
     return (
       <Card>
@@ -138,36 +138,36 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
             <div className="_wiki-detail-header-info">
               <BooksIcon size={20} />
               <span className="_wiki-detail-title">{wikiName}</span>
-              {/* 状态徽章与进度卡片同源：都用 displayIngestState（已屏蔽"上一个
-                  任务留下的终态"），保证徽章与卡片永远一致，不会一个显示就绪、
-                  另一个显示加工中。 */}
+              {/* The status badge and progress card share the same source: both use displayIngestState (which masks "the terminal
+                  state left over from the previous task"), ensuring the badge and card are always consistent, never one showing ready while
+                  the other shows processing. */}
               {displayIngestState.status && (
                 <WikiStatusBadge status={displayIngestState.status} />
               )}
             </div>
             <div className="_wiki-detail-header-actions">
-              {/* 设计 2026-09-21：「添加」+「Ingest」合并为单一入口。 */}
+              {/* Design 2026-09-21: "Add" + "Ingest" merged into a single entry. */}
               <Button
                 type="primary"
                 onClick={() => {
-                  // 打开即初始化 external 流程：回填来源地址、查凭据、已配置则直接拉树
+                  // On open, initialize the external flow: backfill the source address, check credentials, and if already configured fetch the tree directly
                   if (source?.source_type && !showImportModal) {
                     void openAddDocExternal(source);
                   }
                   setShowImportModal(true);
                 }}
-                // 设计 2026-09-21 §3.3：合并入口允许"抽取中再次导入"——由 KS 的
-                // onBusy:'replace' 原子完成"取消旧任务 + 排队新任务"，UI 不禁用按钮。
-                // 之前基于 isCurrentWikiIngesting 的 disabled 与 replace 语义矛盾，
-                // 会阻断用户「换个文件再来一次」的合法流程。
+                // Design 2026-09-21 section 3.3: the merged entry allows "import again while extracting" -- KS's
+                // onBusy:'replace' atomically does "cancel the old task + queue the new one", and the UI does not disable the button.
+                // The previous disabled based on isCurrentWikiIngesting contradicted the replace semantics,
+                // and would block the legitimate flow of "switch to another file and try again".
               >
                 <AttachIcon size={14} /> {t('wiki.detail.import')}
               </Button>
             </div>
           </div>
           <div className="_detail-meta-row">
-            {/* 抽取进行中时不显示页数：replace 语义下旧页数尚未被新任务重建，
-                展示"0 页"或旧计数都会误导用户；等 ready 后由 fetchDetail 刷新。 */}
+            {/* Do not show the page count while extraction is in progress: under replace semantics the old page count has not yet been rebuilt by the new task,
+                and showing "0 pages" or the old count would mislead users; fetchDetail refreshes it once ready. */}
             {!isIngestingNow && (
               <span>{t('wiki.detail.pages', { count: pages.length })}</span>
             )}
@@ -478,10 +478,10 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
 
       {/* Add Doc Modal */}
       {store.showAddDoc && (() => {
-        // iWiki 等外部来源的 wiki：只显示"从外部拉取"，不显示"上传文件 / Markdown"两 tab。
-        // 否则（手工上传的 wiki）维持原两 tab；来源来自 wiki_detail.source_type（null=手工）。
+        // For wikis from external sources such as iWiki: show only "Fetch from external", and not the "Upload file / Markdown" two tabs.
+        // Otherwise (manually uploaded wiki) keep the original two tabs; the source comes from wiki_detail.source_type (null = manual).
         const isExternal = !!source?.source_type;
-        // 打开时若为外部来源，强制切到 external tab，并预拉来源列表。
+        // On open, if it is an external source, force-switch to the external tab and prefetch the source list.
         const modalTabId: 'file' | 'markdown' | 'external' = isExternal
           ? 'external'
           : (store.addDocTab === 'external' ? 'file' : store.addDocTab);
@@ -506,7 +506,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
               onActive={(tab) => {
                 const id = tab.id as 'file' | 'markdown' | 'external';
                 store.setAddDocTab(id);
-                // 首次切到「外部来源」时预拉来源列表
+                // On first switching to "External source", prefetch the source list
                 if (id === 'external' && sourceProviders.length === 0) void loadWikiProviders();
               }}
             >
@@ -643,7 +643,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
               </TabPanel>
               <TabPanel id="external">
                 <div className="_wiki-detail-external-panel" style={{ paddingTop: 8 }}>
-                  {/* 来源选择 */}
+                  {/* Source selection */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ marginBottom: 4 }}>{t('wiki.register.source')}</div>
                     <Select
@@ -651,7 +651,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                       value={formSourceType}
                       onChange={(v) => {
                         setFormSourceType(v);
-                        // 切换来源清空已填凭据与已拉取的树
+                        // Switching source clears the entered credentials and the fetched tree
                         setSelectedPageIds([]);
                       }}
                       options={[
@@ -665,7 +665,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                     />
                   </div>
 
-                  {/* 凭据字段（按 form_fields 动态渲染）—— 已存凭据时不再要求重填 */}
+                  {/* Credential fields (rendered dynamically per form_fields) -- no need to re-enter when credentials are already stored */}
                   {formSourceType && !credConfigured && (
                     <>
                       <Alert type="info">{t('wiki.register.credHint')}</Alert>
@@ -707,7 +707,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                     </>
                   )}
 
-                  {/* 来源地址 */}
+                  {/* Source address */}
                   {formSourceType && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ marginBottom: 4 }}>{t('wiki.register.sourceUrl')}</div>
@@ -723,7 +723,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                     </div>
                   )}
 
-                  {/* 遍历策略：决定从来源地址出发如何发现文档 */}
+                  {/* Traversal strategy: decides how documents are discovered starting from the source address */}
                   {formSourceType && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ marginBottom: 4 }}>{t('wiki.register.crawlMode')}</div>
@@ -744,7 +744,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                     </div>
                   )}
 
-                  {/* 拉取按钮：未存凭据 → 先存再拉（存凭据是拉树的前提） */}
+                  {/* Fetch button: credentials not stored -> store first then fetch (storing credentials is a prerequisite for fetching the tree) */}
                   {formSourceType && (
                     <Button
                       type="primary"
@@ -767,7 +767,7 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
                     </Button>
                   )}
 
-                  {/* 文档树勾选（按 parentId 还原层级，目录可折叠/快捷全选） */}
+                  {/* Document tree checking (restores hierarchy by parentId; directories are collapsible / support quick select-all) */}
                   {treeResult && (
                     <div>
                       <WikiSourcePageTree
@@ -807,8 +807,8 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
               multiple
               className="_wiki-detail-hidden-input"
               onChange={(e) => {
-                // accept 属性只是浏览器建议，用户可在选择器切换"所有文件"绕过，
-                // 这里做二次校验，与拖拽入口一致，避免二进制文件被读成乱码上传。
+                // The accept attribute is only a browser suggestion; users can bypass it by switching to "All files" in the picker,
+                // so a second validation is done here, consistent with the drag-and-drop entry, to avoid binary files being read as garbled text and uploaded.
                 const all = Array.from(e.target.files ?? []);
                 const allowed = all.filter((f) => WIKI_ALLOWED_FILE_RE.test(f.name));
                 const rejected = all.length - allowed.length;
@@ -826,13 +826,13 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
         );
       })()}
 
-      {/* 设计 2026-09-21：合并后的单一导入入口（替代原「添加」+「Ingest」两按钮） */}
+      {/* Design 2026-09-21: the merged single import entry (replaces the former "Add" + "Ingest" two buttons) */}
       <ImportAndIngestModal
         visible={showImportModal}
         sourceType={source?.source_type}
-        // Modal 的 submitting 仅用于展示按钮 loading 与阻止重复点击；由于我们
-        // 在 onSubmit 里 fire-and-forget 立即关闭 Modal（进度接管在页面顶部），
-        // Modal 存在期间没有"提交尚未返回"的窗口，恒为 false 即可。
+        // The Modal's submitting is only used to show the button loading and block repeated clicks; since we
+        // fire-and-forget and close the Modal immediately in onSubmit (progress is taken over at the top of the page),
+        // there is no "submission not yet returned" window while the Modal exists, so a constant false is fine.
         submitting={false}
         external={{
           sourceProviders,
@@ -861,9 +861,9 @@ export function WikiDetailView({ store }: { store: WikiSourcesStore }) {
         }}
         onClose={() => setShowImportModal(false)}
         onSubmit={(payload) => {
-          // 设计 2026-09-21 §2.2：提交后立即关闭 Modal，进度由页面顶部进度条接管。
-          // submitAddAndIngest 内部已完成错误 toast / 进度回调 / 刷新，无需在此 await
-          // 整个抽取流程（否则 Modal 会一直转到 ingest 结束）。
+          // Design 2026-09-21 section 2.2: close the Modal immediately after submission, and the progress bar at the top of the page takes over progress.
+          // submitAddAndIngest has already completed the error toast / progress callback / refresh internally, so there is no need to await here
+          // the whole extraction flow (otherwise the Modal would keep spinning until ingest ends).
           void store.submitAddAndIngest({ wikiId: selectedWikiId, ...payload });
           setShowImportModal(false);
         }}

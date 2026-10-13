@@ -1,11 +1,11 @@
 /**
- * Trace 埋点门面 — 事件即 Span + 传统 Start/End
+ * Trace instrumentation facade — event-as-Span + traditional Start/End
  *
- * 使用方式：
+ * Usage:
  *
  *   import { trace } from "./core/report/trace.js";
  *
- *   // 事件即 Span（一行搞定，最常用）
+ *   // event-as-Span (one line, the most common)
  *   trace.report("l1_extraction", {
  *     sessionKey,
  *     memoriesExtracted: extracted.length,
@@ -14,40 +14,40 @@
  *     error: null,
  *   });
  *
- *   // 传统 Start/End（跨服务调用链场景）
+ *   // traditional Start/End (cross-service call chain scenario)
  *   const span = trace.start("memory.recall");
- *   // ... 业务逻辑 ...
+ *   // ... business logic ...
  *   span.end();
  *
- * 本模块为门面层，内部委托给 ITraceBackend（通过全局单例获取）。
- * 公开 API 签名保持不变，调用方无需修改。
+ * This module is a facade layer that internally delegates to ITraceBackend (obtained via the global singleton).
+ * The public API signature is unchanged; callers need no modification.
  */
 
 import { getObservabilityBackend } from "./factory.js";
 import type { TraceAttrs, ISpan } from "./types.js";
 
-// 从 @opentelemetry/api 重导出 Span 类型（仅类型，不影响运行时）
+// re-export the Span type from @opentelemetry/api (type only, does not affect runtime)
 export type { Span } from "@opentelemetry/api";
 
 export type { TraceAttrs } from "./types.js";
 
 /**
- * 上报一个业务事件（事件即 Span）。
+ * Report a business event (event-as-Span).
  *
- * 内部创建一个 Span，将 attrs 中的每个字段设为 Span Attribute，
- * 根据 "success" 字段设置 Span Status，然后立即 End。
+ * Internally creates a Span, sets each field in attrs as a Span Attribute,
+ * sets the Span Status based on the "success" field, then Ends it immediately.
  */
 function report(event: string, attrs: TraceAttrs = {}): void {
   try {
     getObservabilityBackend().trace.report(event, attrs);
   } catch {
-    // 静默失败，不阻塞业务
+    // silent failure; does not block the business
   }
 }
 
 /**
- * 创建一个传统的 Span（用于跨服务调用链场景）。
- * 调用方需要手动 span.end()。
+ * Create a traditional Span (for cross-service call chain scenarios).
+ * The caller must call span.end() manually.
  */
 function start(spanName: string, kind?: number): ISpan {
   try {
@@ -58,7 +58,7 @@ function start(spanName: string, kind?: number): ISpan {
 }
 
 /**
- * 创建一个 SERVER 类型的 Span。
+ * Create a SERVER-type Span.
  */
 function startServer(spanName: string): ISpan {
   try {
@@ -69,7 +69,7 @@ function startServer(spanName: string): ISpan {
 }
 
 /**
- * 创建一个 CLIENT 类型的 Span。
+ * Create a CLIENT-type Span.
  */
 function startClient(spanName: string): ISpan {
   try {
@@ -79,7 +79,7 @@ function startClient(spanName: string): ISpan {
   }
 }
 
-/** Noop Span — 后端不可用时的安全替代 */
+/** Noop Span — a safe substitute when the backend is unavailable */
 const noopSpan: ISpan = {
   end() {},
   setAttribute() { return this; },

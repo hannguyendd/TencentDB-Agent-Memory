@@ -1,8 +1,8 @@
 # ============================================================
-# TDAI Gateway — Standalone 单机版配置
+# TDAI Gateway -- Standalone single-node config
 # ============================================================
-# 适用场景: 本地开发 / Hermes sidecar / 单 Agent 单机部署
-# 特点: 零外部依赖 (不需要 Redis/Shark), 进程内状态管理
+# Use case: local development / Hermes sidecar / single-Agent single-node deployment
+# Features: zero external dependencies (no Redis/Shark needed), in-process state management
 # ============================================================
 
 deployMode: standalone
@@ -15,21 +15,21 @@ server:
 data:
   baseDir: "~/.memory-tencentdb/memory-tdai"
 
-# ── LLM (必填) ──
+# -- LLM (required) --
 llm:
   baseUrl: "https://api.openai.com/v1"
-  apiKey: "${TDAI_LLM_API_KEY}"    # 通过环境变量注入
+  apiKey: "${TDAI_LLM_API_KEY}"    # injected via environment variable
   model: "gpt-4o"
   maxTokens: 4096
   timeoutMs: 120000
 
 # ── v2 InstanceUpstream:supported-agents ──
-# 事实源在 Proxy `MemoryProxy/src/supported-agents.ts`;此处为 Core 侧副本,
-# 用于 §6.A supported-agents 接口 + seed default 组的 agents 全集。
-# 详见 docs/design/2026-08-25-instance-upstream-config.md §6.A。
+# Source of truth is the Proxy `MemoryProxy/src/supported-agents.ts`; this is the Core-side copy,
+# used for the §6.A supported-agents interface + the full agent set of the seed default group.
+# See docs/design/2026-08-25-instance-upstream-config.md §6.A.
 #
-# 缺失/空数组 → Core 侧 seed 逻辑不触发 → Panel 打开是空表列 → Proxy 走 "零行 fallback"
-# (行为等同 v1,全走全局 upstream + alias),保证配置漏配不阻塞业务。
+# Missing/empty array -> Core-side seed logic does not trigger -> Panel opens with an empty table -> Proxy takes the "zero-row fallback"
+# (behavior equals v1, everything goes through the global upstream + alias), ensuring a missing config does not block business.
 upstream:
   supportedAgents:
     - agent_source: claude-code
@@ -53,8 +53,8 @@ upstream:
     - agent_source: pi
       protocol: openai-chat
       display_name: Pi
-    # ── header-only 客户端(hermes / openclaw):走 anthropic /v1/messages,
-    #    通过 x-team-id / x-agent-id / x-task-id 请求头预选身份 ──
+    # -- header-only clients (hermes / openclaw): use anthropic /v1/messages,
+    #    identity preselected via the x-team-id / x-agent-id / x-task-id request headers --
     - agent_source: hermes
       protocol: anthropic
       display_name: Hermes
@@ -62,7 +62,7 @@ upstream:
       protocol: anthropic
       display_name: OpenClaw
 
-# ── Memory 引擎配置 ──
+# -- Memory engine config --
 memory:
 
   capture:
@@ -92,12 +92,12 @@ memory:
     strategy: "hybrid"
     timeoutMs: 5000
 
-  # ── 存储后端 ──
-  # sqlite: 本地 SQLite (默认, 零配置)
-  # tcvdb:  腾讯云向量数据库 (需填 tcvdb 配置)
+  # -- Storage backend --
+  # sqlite: local SQLite (default, zero config)
+  # tcvdb:  Tencent Cloud Vector Database (requires tcvdb config)
   storeBackend: "sqlite"
 
-  # 如需使用 TCVDB, 取消注释并填写:
+  # To use TCVDB, uncomment and fill in:
   # storeBackend: "tcvdb"
   # tcvdb:
   #   url: "http://10.0.1.1:80"
@@ -108,8 +108,8 @@ memory:
   #   timeout: 10000
 
   embedding:
-    provider: "none"               # 默认关闭向量搜索, 仅用 BM25
-    # 开启向量搜索示例:
+    provider: "none"               # vector search off by default, BM25 only
+    # Example for enabling vector search:
     # provider: "openai"
     # baseUrl: "https://api.openai.com/v1"
     # apiKey: "${TDAI_LLM_API_KEY}"
@@ -120,17 +120,17 @@ memory:
     enabled: true
     language: "zh"
 
-# ── Skill 模块（可选，默认关闭）──
-# Skill 是额外能力的加入，不影响上面的 Memory 引擎。
-# 启用后 skill 数据存储在 {baseDir}/skills/ 目录下。
-# 也可通过环境变量 TDAI_SKILL_ENABLED=true 启用。
+# -- Skill module (optional, off by default) --
+# Skill is an added capability and does not affect the Memory engine above.
+# When enabled, skill data is stored under the {baseDir}/skills/ directory.
+# Can also be enabled via the environment variable TDAI_SKILL_ENABLED=true.
 # skill:
 #   enabled: true
 #   routing:
 #     mode: "bm25"
-#     searchTopK: 20        # listing 接口最多注入多少条 skill（name+description）
+#     searchTopK: 20        # max number of skills (name+description) injected by the listing interface
 #   extraction:
-#     enabled: true         # 需要 llm 配置有效
+#     enabled: true         # requires a valid llm config
 #     maxIterations: 16
 #   resources:
 #     maxResourceSizeBytes: 5000000

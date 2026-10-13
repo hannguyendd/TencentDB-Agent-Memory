@@ -1,6 +1,6 @@
 /**
- * Default (unknown) AgentStrategy (Phase 3)。
- * 保守兜底: 走 openai-chat, 弹 form, 所有 stage 开。
+ * Default (unknown) AgentStrategy (Phase 3).
+ * Conservative fallback: uses openai-chat, shows the form, all stages enabled.
  */
 
 import { defaultAdapter } from "../../../agent-adapters/default.js";

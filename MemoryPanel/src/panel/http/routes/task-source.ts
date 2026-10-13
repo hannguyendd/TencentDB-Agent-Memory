@@ -1,11 +1,11 @@
 /**
- * /api/v1/task/source/* —— Task 外部来源（导入 Task）。
+ * /api/v1/task/source/* -- Task external sources (Import Task).
  *
- * Panel 职责边界（对应设计文档 §5.1 / §5.3）：
- *   - **薄转发**：业务全在 Core（/v3/task-source/*），Panel 不持有业务逻辑。
- *   - **令牌透传**：用户在 UI 上填入的令牌（太湖统一认证令牌 / TAPD 个人令牌）
- *     随请求体 `credential` 字段提交，Panel 原样转发给 Core。
- *     Panel **不落库、不缓存、不写日志**；请求结束即不再持有。
+ * Panel responsibility boundary (corresponding to design doc §5.1 / §5.3):
+ *   - **Thin forwarding**: all business logic is in Core (/v3/task-source/*); Panel holds no business logic.
+ *   - **Token pass-through**: the token the user enters in the UI (Taihu unified auth token / TAPD personal token)
+ *     is submitted in the request body `credential` field, and Panel forwards it to Core as-is.
+ *     Panel **does not persist, cache, or log it**; it is no longer held once the request ends.
  */
 
 import type { Context, Hono } from 'hono';
@@ -25,7 +25,7 @@ function buildCtx(c: Context): MetaCallContext {
   };
 }
 
-/** 用户提交的令牌形状。只做最小校验，不加工、不落盘。 */
+/** Shape of the token submitted by the user. Only minimal validation; no processing, no persistence. */
 interface CredentialBody {
   kind: 'bearer' | 'basic' | 'custom';
   secret: string;
@@ -45,8 +45,8 @@ function isCredential(v: unknown): v is CredentialBody {
 
 export function registerTaskSourceRoutes(api: Hono, deps: PanelDeps): void {
   /**
-   * providers 不需要令牌（只是列出已启用来源与认证方式），
-   * 前端据此渲染令牌输入框。
+   * providers does not need a token (it only lists enabled sources and auth methods),
+   * and the frontend renders the token input box accordingly.
    */
   api.post('/task/source/providers', validatePanelMetaHeaders(deps), async (c: Context) => {
     const body = await c.req.json<Record<string, unknown>>().catch((): Record<string, unknown> => ({}));
@@ -55,9 +55,9 @@ export function registerTaskSourceRoutes(api: Hono, deps: PanelDeps): void {
   });
 
   /**
-   * 需要令牌的转发（workspaces / candidates / import）。
+   * Forwarding that requires a token (workspaces / candidates / import).
    *
-   * 令牌由用户在 UI 填入，随请求体提交；缺失 → 400，不带着空令牌去调 Core。
+   * The token is entered by the user in the UI and submitted in the request body; missing -> 400, and we do not call Core with an empty token.
    */
   const withCredential = (action: string) =>
     api.post(`/task/source/${action}`, validatePanelMetaHeaders(deps), async (c: Context) => {

@@ -7,7 +7,7 @@
  * The Agent provides a full relative key (e.g. "scene_blocks/work/2026Q1.md"
  * or "persona.md"), and the tool returns the file content as text.
  *
- * Path convention (方案 B — 通用文件接口):
+ * Path convention (option B — generic file interface):
  *   - v2 API /scenario/* and /persona/* are semantic interfaces that auto-add
  *     StoragePaths prefixes (e.g. "scene_blocks/"). Users pass short paths.
  *   - This tool is a generic file interface. Users pass the FULL relative key

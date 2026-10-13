@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * mock-core.mjs —— 最小内核桩，用来测 Proxy 的 instance-upstream 4 态解析。
+ * mock-core.mjs -- minimal core stub used to test the Proxy's instance-upstream 4-state resolution.
  *
- * 提供:
- *   POST /v3/meta/auth/verify              → valid=true
- *   POST /v3/internal/meta/instance-upstream/list → 按 MOCK_MODE 返回不同 rows
+ * Provides:
+ *   POST /v3/meta/auth/verify              -> valid=true
+ *   POST /v3/internal/meta/instance-upstream/list -> returns different rows depending on MOCK_MODE
  *
  * MOCK_MODE:
- *   blocked-default   → default 组 enabled=false（覆盖 pi）→ 期望 400 UPSTREAM_DISABLED
- *   blocked-custom    → custom 组 enabled=false（覆盖 codebuddy）→ 期望 400 UPSTREAM_DISABLED
- *   unmanaged         → 只声明部分 agent，其余落 unmanaged → 期望 400 AGENT_NOT_CONFIGURED
+ *   blocked-default   -> default group enabled=false (covers pi) -> expect 400 UPSTREAM_DISABLED
+ *   blocked-custom    -> custom group enabled=false (covers codebuddy) -> expect 400 UPSTREAM_DISABLED
+ *   unmanaged         -> declares only some agents, the rest fall to unmanaged -> expect 400 AGENT_NOT_CONFIGURED
  *
- * 用法: MOCK_MODE=blocked-default node mock-core.mjs
+ * Usage: MOCK_MODE=blocked-default node mock-core.mjs
  */
 import http from "node:http";
 
@@ -44,7 +44,7 @@ function rowsFor(mode) {
     ];
   }
   if (mode === "unmanaged") {
-    // default 组只声明 dsh —— 其他 agent 全部落 unmanaged
+    // The default group declares only dsh -- all other agents fall to unmanaged
     return [{
       id: 1, group_id: "dflt-mock", group_type: "default", name: "mock-default",
       agents: ["dsh"], enabled: true, mode: "official",

@@ -1,11 +1,11 @@
 /**
- * UsageKpiRow — 成本视角核心指标（请求数 / token / credit / 缓存命中 / 节省）。
+ * UsageKpiRow -- core cost-view metrics (requests / tokens / credit / cache hits / savings).
  *
- * 复用 MetricsBoard 承载「数值 + 单位 + 补充行」，与使用行为侧 KpiRow 视觉一致。
- * token 量级常达千万，用 fmtCompact 紧凑显示，完整数值放 infos 行。
+ * Reuses MetricsBoard for "value + unit + supplementary rows", visually consistent with the usage-behavior KpiRow.
+ * Token counts often reach tens of millions, so fmtCompact is used for compact display, with full values in the infos rows.
  *
- * `cache_hit_rate` 为 null 时表示无 prompt token、无法计算（不是 0%），
- * fmtPctValue 会显示占位符 —— 不要改成 `?? 0`。
+ * `cache_hit_rate` being null means there are no prompt tokens and it cannot be computed (not 0%),
+ * fmtPctValue shows a placeholder -- do not change this to `?? 0`.
  */
 import { useTranslation } from 'react-i18next';
 import { MetricsBoard } from 'tea-component';

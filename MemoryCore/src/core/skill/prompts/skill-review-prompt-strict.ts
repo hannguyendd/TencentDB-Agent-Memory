@@ -1,27 +1,27 @@
 /**
  * Skill Review Agent prompt — STRICT variant.
  *
- * 场景:冷启动 / 批量导入(agents/setup-proxy.sh → asset-import.ts 灌入历史
- * 会话时)。日常实时抽取仍走 SKILL_REVIEW_PROMPT (v2 宽松版)。
+ * Scenario: cold start / bulk import (when agents/setup-proxy.sh → asset-import.ts feeds in historical
+ * sessions). Everyday real-time extraction still uses SKILL_REVIEW_PROMPT (the v2 lenient version).
  *
- * 与 v2 的哲学差异(v2 = 2026-08-10 引入的当前生产版本):
- *   v2 优化"召回":任何 SOP / Background / Preference 都可写,默认 "When in
- *   doubt, capture"。适合实时抽取(单会话一次,写多写少影响小)。
+ * Philosophical differences from v2 (v2 = the current production version introduced 2026-08-10):
+ *   v2 optimizes for "recall": any SOP / Background / Preference may be written, default "When in
+ *   doubt, capture". Suited for real-time extraction (one pass per session; writing more or less has little impact).
  *
- *   本 STRICT 版恢复 v1 (2026-07-28 之前) 的三道硬 gate,专治冷启动场景:
- *   一次灌入几十~几百个 session,v2 会抽出成百上千低价值 skill 淹没高价值
- *   SOP。STRICT 只捕获 executable capability + 4-维度 ≥72 分,把 Background
- *   / Preference / 单次调试全部拒之门外,默认 "When in doubt, silence"。
+ *   This STRICT version restores v1's (before 2026-07-28) three hard gates, specifically for the cold-start scenario:
+ *   dozens to hundreds of sessions are fed in at once, and v2 would extract hundreds or thousands of low-value skills drowning the high-value
+ *   SOPs. STRICT captures only executable capability + 4-dimension >= 72 points, rejecting Background
+ *   / Preference / one-off debugging entirely, default "When in doubt, silence".
  *
- * 复用来源: git 2026-07-28 commit 7ed721c3 之前的 SKILL_REVIEW_PROMPT
- * (即 MR 107 之前的老严格版),常量重命名为 SKILL_REVIEW_PROMPT_STRICT。
+ * Reused from: SKILL_REVIEW_PROMPT before git commit 7ed721c3 of 2026-07-28
+ * (i.e. the old strict version before MR 107), with the constant renamed SKILL_REVIEW_PROMPT_STRICT.
  *
- * 保留的 v1 硬约束:
- *   - 5-class 分类 gate (Skill / Memory / Wiki / Code-Graph / Temporary)
- *   - 5-条件 minimum gate (条件 1+2+5 必须都真, 3 或 4 至少一)
- *   - 4-维度 ≥72 分 acceptance gate (每维 ≥12)
- *   - Required SKILL.md 模板 (必须能填大部分 section 才可保存)
- *   - "When in doubt, silence" 默认
+ * Retained v1 hard constraints:
+ *   - 5-class classification gate (Skill / Memory / Wiki / Code-Graph / Temporary)
+ *   - 5-condition minimum gate (conditions 1+2+5 must all be true, at least one of 3 or 4)
+ *   - 4-dimension >= 72 points acceptance gate (>= 12 per dimension)
+ *   - Required SKILL.md template (most sections must be fillable before it can be saved)
+ *   - "When in doubt, silence" default
  *
  * Drives the AI SDK tool-calling loop wired by `createSkillTools()`. The agent
  * is given six tools and persists every change through them:

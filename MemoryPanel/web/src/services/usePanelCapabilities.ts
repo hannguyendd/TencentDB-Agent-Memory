@@ -1,27 +1,27 @@
 /**
- * usePanelCapabilities / useAnalyticsChConfigured — 「可观测」入口可见性判定。
+ * usePanelCapabilities / useAnalyticsChConfigured -- visibility decision for the "Observability" entry.
  *
- * 两层条件（缺一不可）：
- *   1. 面板 env 开关：PANEL_FEATURE_ANALYTICS_ENABLED（随 GET /meta/instances
- *      的 capabilities 下发）。默认关闭 → 菜单/路由不展示，且不发 CH 探测请求。
- *   2. 运行时 CH 探测：开关开启后调 GET /api/v1/analytics/config（面板透明代理
- *      → 内核 /v3/analytics/config）。未配置 ClickHouse 自动隐藏入口。
+ * Two layers of conditions (both required):
+ *   1. Panel env switch: PANEL_FEATURE_ANALYTICS_ENABLED (delivered with the capabilities of
+ *      GET /meta/instances). Off by default -> the menu/route is not shown, and no CH probe request is sent.
+ *   2. Runtime CH probe: once the switch is on, call GET /api/v1/analytics/config (panel transparent proxy
+ *      -> kernel /v3/analytics/config). When ClickHouse is not configured the entry is hidden automatically.
  *
- * 探测结果均做模块级缓存：env 开关在会话内不变；CH 探测与 AnalyticsPage 页内的
- * useAnalyticsMetrics 探测走同一接口（analyticsApi 内部经 dedupeInFlight 去重），
- * 不会产生重复网络请求。
+ * Both probe results are cached at module level: the env switch doesn't change within a session; the CH probe uses the same endpoint as the probe of
+ * useAnalyticsMetrics inside AnalyticsPage (analyticsApi dedupes internally via dedupeInFlight),
+ * so no duplicate network requests are produced.
  */
 import { useEffect, useState } from 'react';
 import { metaInstancesApi } from '@/lib/api/meta-instances';
 import { analyticsApi } from '@/lib/api/analytics';
 
-/** env 开关状态缓存（会话级，null = 尚未取得）。 */
+/** env switch state cache (session-level, null = not yet obtained). */
 let analyticsEnabledCache: boolean | null = null;
 
 /**
- * 面板「可观测」env 开关。
- * 返回 null 表示尚未取得（渲染方可先按不可见处理或保持现状）；
- * false = 开关关闭或获取失败（保守隐藏）；true = 开关开启（还需过 CH 探测）。
+ * Panel "Observability" env switch.
+ * Returns null for not yet obtained (the renderer can first treat it as invisible or keep the status quo);
+ * false = the switch is off or the fetch failed (conservatively hidden); true = the switch is on (still needs the CH probe).
  */
 export function usePanelAnalyticsEnabled(): boolean | null {
   const [enabled, setEnabled] = useState<boolean | null>(analyticsEnabledCache);
@@ -36,7 +36,7 @@ export function usePanelAnalyticsEnabled(): boolean | null {
         if (alive) setEnabled(caps.analyticsEnabled);
       })
       .catch(() => {
-        // 获取失败按关闭兜底（保守隐藏，不阻断面板其他功能）
+        // On fetch failure fall back to off (conservatively hidden, without blocking other panel features)
         analyticsEnabledCache = false;
         if (alive) setEnabled(false);
       });
@@ -49,8 +49,8 @@ export function usePanelAnalyticsEnabled(): boolean | null {
 }
 
 /**
- * 内核侧 analytics ClickHouse 是否已配置（运行时探测）。
- * 仅在 enabled=true 时发起；null = 探测中（调用方可先按"可见"处理，探测完成后收敛）。
+ * Whether the kernel-side analytics ClickHouse is configured (runtime probe).
+ * Only initiated when enabled=true; null = probing (the caller may first treat it as "visible", converging after the probe completes).
  */
 export function useAnalyticsChConfigured(enabled: boolean): boolean | null {
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -64,7 +64,7 @@ export function useAnalyticsChConfigured(enabled: boolean): boolean | null {
         if (alive) setConfigured(cfg.configured && cfg.reachable !== false);
       })
       .catch(() => {
-        // 探测失败（网络/权限）按未配置处理：入口隐藏，页面内提示由 AnalyticsPage 承担
+        // On probe failure (network/permission) treat as not configured: the entry is hidden, and the in-page notice is handled by AnalyticsPage
         if (alive) setConfigured(false);
       });
     return () => {

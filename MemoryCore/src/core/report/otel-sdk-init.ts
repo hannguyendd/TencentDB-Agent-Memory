@@ -1,24 +1,24 @@
 /**
- * OTel SDK 初始化模块 — core 服务
+ * OTel SDK initialization module — core service
  *
- * 基于参考代码（trace 分支 otel-sdk-init.ts）适配 core 服务。
- * 负责初始化 OpenTelemetry NodeSDK，支持 Trace/Metrics/Logs 三信号。
+ * Adapted for the core service from the reference code (otel-sdk-init.ts on the trace branch).
+ * Responsible for initializing the OpenTelemetry NodeSDK, supporting the Trace/Metrics/Logs signals.
  *
- * 环境变量配置（OTel 标准）：
- * - OTEL_EXPORTER_OTLP_ENDPOINT    : Collector endpoint (默认: http://localhost:4317)
- * - OTEL_EXPORTER_OTLP_PROTOCOL    : "grpc" | "http/protobuf" (默认: "grpc")
- * - OTEL_EXPORTER_OTLP_HEADERS     : 逗号分隔的 key=value 对，用于鉴权
- * - OTEL_SERVICE_NAME               : 服务名 (默认: "core")
- * - OTEL_RESOURCE_ATTRIBUTES        : 额外 resource 属性（智研需要 tps.tenant.id）
+ * Environment variable configuration (OTel standard):
+ * - OTEL_EXPORTER_OTLP_ENDPOINT    : Collector endpoint (default: http://localhost:4317)
+ * - OTEL_EXPORTER_OTLP_PROTOCOL    : "grpc" | "http/protobuf" (default: "grpc")
+ * - OTEL_EXPORTER_OTLP_HEADERS     : comma-separated key=value pairs, used for authentication
+ * - OTEL_SERVICE_NAME               : service name (default: "core")
+ * - OTEL_RESOURCE_ATTRIBUTES        : extra resource attributes (Zhiyan requires tps.tenant.id)
  *
- * 自定义环境变量：
- * - TDAI_OTEL_ENABLED              : "true" 启用 OTel SDK (默认: "false")
- * - TDAI_INSTANCE_ID               : 实例标识
- * - TDAI_METRICS_MODE              : "otlp" | "none" (默认: "none")
- * - CLICKHOUSE_ENABLED             : "true" 启用 ClickHouse 双写
+ * Custom environment variables:
+ * - TDAI_OTEL_ENABLED              : "true" to enable the OTel SDK (default: "false")
+ * - TDAI_INSTANCE_ID               : instance identifier
+ * - TDAI_METRICS_MODE              : "otlp" | "none" (default: "none")
+ * - CLICKHOUSE_ENABLED             : "true" to enable ClickHouse dual-write
  */
 
-// 防御性加载 @opentelemetry/api — 即使包缺失也不影响启动
+// Defensively load @opentelemetry/api — a missing package does not affect startup
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let diag: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,7 +37,7 @@ try {
   trace = api.trace;
   _otelApiAvailable = true;
 } catch {
-  // @opentelemetry/api 不可用，OTel SDK 初始化将被跳过
+  // @opentelemetry/api unavailable; OTel SDK initialization will be skipped
   console.warn("[core][otel] @opentelemetry/api not available, OTel SDK disabled.");
 }
 
@@ -47,7 +47,7 @@ export interface OTelSDKInitOptions {
   instanceId?: string;
   endpoint?: string;
   protocol?: "grpc" | "http/protobuf";
-  /** 智研租户 ID，会设置为 Resource Attribute "tps.tenant.id"（智研 APM 认证必需） */
+  /** Zhiyan tenant ID, set as the Resource Attribute "tps.tenant.id" (required for Zhiyan APM authentication) */
   tenantId?: string;
   headers?: Record<string, string>;
   debug?: boolean;
@@ -58,7 +58,7 @@ export interface OTelSDKInitOptions {
     password?: string;
     database?: string;
   };
-  /** Langfuse LLM trace 上报配置（只转发 ai 和 gen_ai 前缀的 span） */
+  /** Langfuse LLM trace reporting config (forwards only spans with the ai and gen_ai prefixes) */
   langfuse?: boolean | {
     host: string;
     publicKey: string;
@@ -70,14 +70,14 @@ let _sdkInstance: { shutdown: () => Promise<void> } | undefined;
 let _initialized = false;
 
 /**
- * 初始化 OpenTelemetry SDK。
- * 安全地多次调用 — 后续调用为 no-op。
- * 如果 SDK 包未安装，记录警告并返回 false。
+ * Initialize the OpenTelemetry SDK.
+ * Safe to call multiple times — subsequent calls are no-ops.
+ * If the SDK packages are not installed, logs a warning and returns false.
  */
 export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boolean> {
   if (_initialized) return true;
 
-  // 当配置了 endpoint 或 Langfuse 时启用 SDK
+  // Enable the SDK when an endpoint or Langfuse is configured
   const hasLangfuse = typeof options.langfuse === "object" && options.langfuse && options.langfuse.host;
   const enabled = options.endpoint
     ? true
@@ -86,7 +86,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       : process.env.TDAI_OTEL_ENABLED === "true";
   if (!enabled) return false;
 
-  // @opentelemetry/api 不可用时直接返回
+  // return directly when @opentelemetry/api is unavailable
   if (!_otelApiAvailable) {
     console.warn("[core][otel] @opentelemetry/api not available, skipping SDK init.");
     return false;
@@ -119,13 +119,13 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       import("@opentelemetry/context-async-hooks"),
     ]);
 
-    // 兼容新旧版本 @opentelemetry/resources
-    // 新版使用 resourceFromAttributes()，旧版使用 new Resource()
+    // compatible with old and new versions of @opentelemetry/resources
+    // the new version uses resourceFromAttributes(); the old version uses new Resource()
     const createResource = (attrs: Record<string, string>) => {
       if ("resourceFromAttributes" in resourcesModule) {
         return (resourcesModule as { resourceFromAttributes: (a: Record<string, string>) => unknown }).resourceFromAttributes(attrs);
       }
-      // 旧版 fallback
+      // old-version fallback
       const ResourceClass = (resourcesModule as { Resource: new (a: Record<string, string>) => unknown }).Resource;
       return new ResourceClass(attrs);
     };
@@ -133,12 +133,12 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
     const logsApiModule = "@opentelemetry/api-logs";
     const { logs } = await import(logsApiModule);
 
-    // 解析配置
+    // parse configuration
     const endpoint = options.endpoint
       ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT
       ?? "";
 
-    // 是否有主 OTel collector（区别于仅 Langfuse 场景）
+    // whether there is a main OTel collector (as opposed to a Langfuse-only scenario)
     const hasMainOtel = Boolean(endpoint);
 
     const protocol = options.protocol
@@ -151,7 +151,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
     const os = await import("node:os");
     const instanceId = options.instanceId ?? process.env.TDAI_INSTANCE_ID ?? process.env.HOSTNAME ?? os.hostname() ?? "unknown";
 
-    // 构建 Resource（智研 APM 需要 tps.tenant.id 作为 Resource Attribute 认证）
+    // build the Resource (Zhiyan APM requires tps.tenant.id as a Resource Attribute for authentication)
     const extraResourceAttrs = parseResourceAttributesFromEnv();
     const tenantId = options.tenantId ?? extraResourceAttrs["tps.tenant.id"] ?? "";
     const resourceAttrs: Record<string, string> = {
@@ -160,13 +160,13 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       [ATTR_SERVICE_INSTANCE_ID]: instanceId,
       ...extraResourceAttrs,
     };
-    // 确保 tps.tenant.id 被设置为 Resource Attribute（智研 APM 认证方式）
+    // ensure tps.tenant.id is set as a Resource Attribute (Zhiyan APM authentication method)
     if (tenantId) {
       resourceAttrs["tps.tenant.id"] = tenantId;
     }
     const resource = createResource(resourceAttrs);
 
-    // Trace Exporter（仅当有主 OTel endpoint 时创建）
+    // Trace Exporter (created only when there is a main OTel endpoint)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let traceExporter: any = null;
     if (hasMainOtel) {
@@ -175,9 +175,9 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
         : new HttpTraceExporter({ url: `${endpoint}/v1/traces`, headers });
     }
 
-    // 注意：Metric 不走 OTLP，通过 Kafka 上报。
+    // Note: Metrics do not go through OTLP; they are reported via Kafka.
 
-    // Log Exporter（仅当有主 OTel endpoint 时创建）
+    // Log Exporter (created only when there is a main OTel endpoint)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let logExporter: any = null;
     if (hasMainOtel) {
@@ -186,7 +186,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
         : new HttpLogExporter({ url: `${endpoint}/v1/logs`, headers });
     }
 
-    // 收集所有 Log Processors（新版 LoggerProvider 需要在构造时传入）
+    // collect all Log Processors (the new LoggerProvider requires them at construction time)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const logProcessors: any[] = [];
     if (logExporter) {
@@ -198,9 +198,9 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       );
     }
 
-    // ClickHouse 双写（可选）
-    // options.clickhouse 为对象时视为已启用，为 true 时也视为启用，
-    // 为 false/undefined 时回退检查环境变量。
+    // ClickHouse dual-write (optional)
+    // when options.clickhouse is an object it is treated as enabled, and true is also treated as enabled,
+    // for false/undefined fall back to checking the environment variable.
     const clickhouseEnabled = (typeof options.clickhouse === "object" && options.clickhouse !== null)
       || options.clickhouse === true
       || (options.clickhouse !== false && process.env.CLICKHOUSE_ENABLED === "true");
@@ -222,7 +222,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
           debug: options.debug,
         });
 
-        // 添加 ClickHouse Log Processor
+        // add the ClickHouse Log Processor
         const chLogExporter = new ClickHouseLogExporter(chExporter);
         logProcessors.push(
           new BatchLogRecordProcessor(chLogExporter as unknown as InstanceType<typeof GrpcLogExporter>, {
@@ -245,18 +245,18 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       }
     }
 
-    // 创建 LoggerProvider（新版 API：构造时传入 resource + processors）
+    // create the LoggerProvider (new API: pass resource + processors at construction)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const loggerProvider = new LoggerProvider({ resource, processors: logProcessors } as any);
     logs.setGlobalLoggerProvider(loggerProvider);
 
-    // ── 收集所有 SpanProcessors（必须在 NodeSDK 构造前准备好） ──
-    // @opentelemetry/sdk-trace-base@2.x 移除了 addSpanProcessor()，
-    // 所有 processor 必须在构造时通过 spanProcessors 选项一次性传入。
+    // ── collect all SpanProcessors (must be prepared before constructing NodeSDK) ──
+    // @opentelemetry/sdk-trace-base@2.x removed addSpanProcessor(),
+    // all processors must be passed in one go via the spanProcessors option at construction.
     const { BatchSpanProcessor, SimpleSpanProcessor } = await import("@opentelemetry/sdk-trace-base");
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const spanProcessors: any[] = [];
-    // 仅当有主 OTel endpoint 时添加 BatchSpanProcessor
+    // add BatchSpanProcessor only when there is a main OTel endpoint
     if (traceExporter) {
       spanProcessors.push(new BatchSpanProcessor(traceExporter));
     }
@@ -271,13 +271,13 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       delete (globalThis as Record<string, unknown>).__chSpanExporter;
     }
 
-    // Langfuse 过滤型 SpanProcessor（只转发 LLM 相关 span）
+    // Langfuse filtering SpanProcessor (forwards only LLM-related spans)
     let langfuseShutdown: (() => Promise<void>) | undefined;
     try {
       const { LangfuseFilteringProcessor } =
         await import("./langfuse-span-processor.js");
 
-      // 从 options 读取 Langfuse 配置（已经由 gateway/config.ts 从 YAML 解析好）
+      // read the Langfuse config from options (already parsed from YAML by gateway/config.ts)
       let langfuseEnabled = false;
       let langfuseHost = "";
       let langfusePublicKey = "";
@@ -289,7 +289,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
         langfusePublicKey = options.langfuse.publicKey;
         langfuseSecretKey = options.langfuse.secretKey;
       } else if (options.langfuse === true || process.env.LANGFUSE_ENABLED === "true") {
-        // 兼容环境变量兜底
+        // compatible with environment variable fallback
         langfuseEnabled = true;
         langfuseHost = process.env.LANGFUSE_HOST ?? "";
         langfusePublicKey = process.env.LANGFUSE_PUBLIC_KEY ?? "";
@@ -303,7 +303,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       }
 
       if (langfuseEnabled && langfuseHost && langfusePublicKey && langfuseSecretKey) {
-        // 构造 OTLP HTTP exporter 指向 Langfuse 的 OTel 端点
+        // construct the OTLP HTTP exporter pointing at Langfuse's OTel endpoint
         const langfuseExporter = new HttpTraceExporter({
           url: `${langfuseHost}/api/public/otel/v1/traces`,
           headers: {
@@ -325,9 +325,9 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
       console.warn(`[core][otel] Langfuse exporter init failed: ${msg}. Continuing without Langfuse.`);
     }
 
-    // 初始化 NodeSDK（不含 Metric，Metric 通过 Kafka 上报）
-    // 注意：@opentelemetry/sdk-trace-base@2.x 不再支持动态 addSpanProcessor，
-    // 所有 processor 必须在此处通过 spanProcessors 一次性传入。
+    // initialize NodeSDK (without Metrics; Metrics are reported via Kafka)
+    // Note: @opentelemetry/sdk-trace-base@2.x no longer supports dynamic addSpanProcessor,
+    // all processors must be passed in one go via spanProcessors here.
     const sdk = new NodeSDK({
       resource,
       spanProcessors,
@@ -361,7 +361,7 @@ export async function initOTelSDK(options: OTelSDKInitOptions = {}): Promise<boo
 }
 
 /**
- * 优雅关闭 OTel SDK。
+ * Gracefully shut down the OTel SDK.
  */
 export async function shutdownOTelSDK(): Promise<void> {
   if (!_sdkInstance) return;
@@ -376,7 +376,7 @@ export async function shutdownOTelSDK(): Promise<void> {
 }
 
 /**
- * 检查 OTel SDK 是否已初始化。
+ * Check whether the OTel SDK has been initialized.
  */
 export function isOTelSDKInitialized(): boolean {
   return _initialized;

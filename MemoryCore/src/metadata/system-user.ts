@@ -1,5 +1,5 @@
 /**
- * YAML 静态 memory 系统用户（仅 auth/verify 路径，不落库、不接入 authenticateV3）。
+ * YAML static memory system user (auth/verify path only; not persisted, not hooked into authenticateV3).
  */
 
 import { timingSafeEqual } from "node:crypto";
@@ -33,12 +33,12 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
-/** user_key 格式：sk-mem- + 32 位 base64url。 */
+/** user_key format: sk-mem- + 32-character base64url. */
 export function isValidMemorySystemUserKey(userKey: string): boolean {
   return /^sk-mem-[A-Za-z0-9_-]{32}$/.test(userKey);
 }
 
-/** 从 Gateway metadata + process.env 解析（env 优先）。 */
+/** Resolve from Gateway metadata + process.env (env takes precedence). */
 export function resolveMemorySystemUserConfig(
   metadata: GatewayMetadataConfig,
 ): MemorySystemUserConfig | undefined {
@@ -107,7 +107,7 @@ function buildSyntheticUser(
   };
 }
 
-/** 常量时间比较 userKey；命中则返回合成 UserEntity。 */
+/** Constant-time comparison of userKey; on a hit returns a synthesized UserEntity. */
 export function lookupMemorySystemUser(
   userKey: string,
   instanceId: string,
@@ -119,7 +119,7 @@ export function lookupMemorySystemUser(
   return buildSyntheticUser(config);
 }
 
-/** Header API 鉴权用：配置中的 memory key 不可作 x-tdai-user-key。 */
+/** For Header API auth: the memory key in the config cannot be used as x-tdai-user-key. */
 export function isMemorySystemUserKey(
   userKey: string,
   config: MemorySystemUserConfig | undefined,
@@ -128,7 +128,7 @@ export function isMemorySystemUserKey(
   return safeEqual(userKey, config.userKey);
 }
 
-/** auth/verify 对外响应：隐藏内部 system 标记。 */
+/** auth/verify external response: hides the internal system marker. */
 export function toMemorySystemVerifyUser(user: UserEntity): UserEntity {
   const { password: _pw, auth_provider: _ap, external_id: _ei, ...rest } = user;
   return {
@@ -141,7 +141,7 @@ export function toMemorySystemVerifyUser(user: UserEntity): UserEntity {
   };
 }
 
-/** 启动日志用：脱敏 key 前缀。 */
+/** For startup logs: sanitized key prefix. */
 export function maskMemorySystemUserKeyForLog(userKey: string): string {
   if (!userKey.startsWith(USER_KEY_PREFIX)) return "****";
   const tail = userKey.slice(-4);

@@ -1,17 +1,17 @@
 /**
- * InjectionObserver — 注入管线可观测性抽象。
+ * InjectionObserver -- observability abstraction for the injection pipeline.
  *
- * 设计目标：
- *   钩子开发者不需要写任何观测代码。管线在关键生命周期节点自动回调观察者，
- *   观察者实现（Noop/Logging）由管线构造时注入，永不阻断业务逻辑。
+ * Design goals:
+ *   Hook developers do not need to write any observation code. The pipeline automatically calls back the observer at key lifecycle points;
+ *   the observer implementation (Noop/Logging) is injected when the pipeline is constructed and never blocks business logic.
  *
- * 架构：
+ * Architecture:
  *   InjectionPipeline → try/catch → InjectionObserver.onXxx() → log facade
  *
- * 原则：
- *   - Fire-and-forget：observer 内部可以异步，但不 await
- *   - 错误隔离：observer 的任何异常都不传播到管线
- *   - 默认 Noop：未配置时零开销
+ * Principles:
+ *   - Fire-and-forget: the observer may be async internally, but is not awaited
+ *   - Error isolation: no exception in the observer propagates to the pipeline
+ *   - Noop by default: zero overhead when not configured
  */
 
 import type { AgentContextMetadata, ContextBlock, InjectionHook, InjectionPoint } from "./types.js";
@@ -22,7 +22,7 @@ import { startObservation, LangfuseOtelSpanAttributes } from "@langfuse/tracing"
 
 // ── Hook execution result ─────────────────────────────────────────────────────
 
-/** 单个钩子的执行结果汇总，由管线在 onPipelineEnd 时聚合上报。 */
+/** Summary of a single hook's execution result, aggregated and reported by the pipeline at onPipelineEnd. */
 export interface HookResult {
   hookId: string;
   point: InjectionPoint;
@@ -35,34 +35,34 @@ export interface HookResult {
 // ── Observer interface ────────────────────────────────────────────────────────
 
 /**
- * 注入管线观察者接口。
+ * Injection pipeline observer interface.
  *
- * 管线在以下时机调用观察者方法：
- *   process() 入口     → onPipelineStart
- *   executeHooks 循环内 → onHookStart / onHookDone / onHookError（每个钩子）
- *   process() 出口     → onPipelineEnd（成功）或 onPipelineError（失败）
+ * The pipeline calls observer methods at the following times:
+ *   process() entry     -> onPipelineStart
+ *   inside the executeHooks loop -> onHookStart / onHookDone / onHookError (for each hook)
+ *   process() exit      -> onPipelineEnd (success) or onPipelineError (failure)
  *
- * 默认实现：NoopInjectionObserver（零开销）。
- * 生产实现：LoggingInjectionObserver（写入结构化日志）。
+ * Default implementation: NoopInjectionObserver (zero overhead).
+ * Production implementation: LoggingInjectionObserver (writes structured logs).
  */
 export interface InjectionObserver {
-  /** 管线开始处理一个请求。 */
+  /** The pipeline starts processing a request. */
   onPipelineStart(meta: AgentContextMetadata): void;
 
-  /** 管线成功完成（所有钩子已执行）。 */
+  /** The pipeline completed successfully (all hooks executed). */
   onPipelineEnd(
     meta: AgentContextMetadata,
     durationMs: number,
     results: HookResult[],
   ): void;
 
-  /** 管线级错误（如未知协议、适配器缺失），请求未能进入钩子执行阶段。 */
+  /** Pipeline-level error (e.g. unknown protocol, missing adapter); the request did not reach the hook execution stage. */
   onPipelineError(meta: AgentContextMetadata, error: Error): void;
 
-  /** 单个钩子开始执行。 */
+  /** A single hook starts executing. */
   onHookStart(hook: InjectionHook, point: InjectionPoint): void;
 
-  /** 单个钩子执行完成（包括返回空 blocks 的情况）。 */
+  /** A single hook finished executing (including the case of returning empty blocks). */
   onHookDone(
     hook: InjectionHook,
     point: InjectionPoint,
@@ -71,7 +71,7 @@ export interface InjectionObserver {
     cacheStrategy?: string,
   ): void;
 
-  /** 单个钩子执行异常（会由 error start→error/done 记录）。 */
+  /** A single hook threw an exception (recorded via error start->error/done). */
   onHookError(
     hook: InjectionHook,
     point: InjectionPoint,
@@ -83,8 +83,8 @@ export interface InjectionObserver {
 // ── Noop implementation ───────────────────────────────────────────────────────
 
 /**
- * 空操作观察者 —— 默认实现，零开销。
- * 所有方法均为空函数体，JIT 内联后无性能损耗。
+ * No-op observer -- the default implementation, zero overhead.
+ * All methods have empty bodies, with no performance loss after JIT inlining.
  */
 export class NoopInjectionObserver implements InjectionObserver {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -104,17 +104,17 @@ export class NoopInjectionObserver implements InjectionObserver {
 // ── Logging implementation ────────────────────────────────────────────────────
 
 /**
- * 结构化日志观察者 —— 写入 `src/report/log.ts` 的结构化日志系统。
+ * Structured-log observer -- writes to the structured logging system in `src/report/log.ts`.
  *
- * 上报事件：
- *   injection.pipeline.start  — 管线开始
- *   injection.pipeline.done   — 管线完成（含 durationMs, hookCount, totalBlockCount）
- *   injection.pipeline.error  — 管线级错误
- *   injection.hook.start      — 单个钩子开始
- *   injection.hook.done       — 单个钩子完成（含 blocks 摘要）
- *   injection.hook.error      — 单个钩子失败
+ * Reported events:
+ *   injection.pipeline.start  -- pipeline start
+ *   injection.pipeline.done   -- pipeline done (with durationMs, hookCount, totalBlockCount)
+ *   injection.pipeline.error  -- pipeline-level error
+ *   injection.hook.start      -- single hook start
+ *   injection.hook.done       -- single hook done (with blocks summary)
+ *   injection.hook.error      -- single hook failure
  *
- * 安全保证：所有方法内部 try/catch，绝不抛异常。
+ * Safety guarantee: all methods have an internal try/catch and never throw.
  */
 export class LoggingInjectionObserver implements InjectionObserver {
   onPipelineStart(meta: AgentContextMetadata): void {
@@ -221,39 +221,39 @@ export class LoggingInjectionObserver implements InjectionObserver {
 // ── Langfuse implementation ───────────────────────────────────────────────────
 
 /**
- * 确定性派生 Langfuse traceId（与 langfuse.ts 中 langfuseTurnTraceId 算法一致）。
- * 由 sessionKey + turnSeq 经 SHA-256 派生，取 hex 前 32 位。
+ * Deterministically derive the Langfuse traceId (same algorithm as langfuseTurnTraceId in langfuse.ts).
+ * Derived from sessionKey + turnSeq via SHA-256, taking the first 32 hex characters.
  */
 function deriveLangfuseTraceId(sessionKey: string, turnSeq: number): string {
   return createHash("sha256").update(`${sessionKey}:${turnSeq}`).digest("hex").slice(0, 32);
 }
 
-/** 派生 phantom parent spanId（与 langfuse.ts 中 deriveParentSpanId 一致）。 */
+/** Derive the phantom parent spanId (same as deriveParentSpanId in langfuse.ts). */
 function deriveParentSpanId(traceId: string): string {
   return traceId.slice(0, 16);
 }
 
 /**
- * Langfuse 注入观察者 —— 将每个钩子的执行作为 span observation 挂到 Langfuse turn trace 下。
+ * Langfuse injection observer -- attaches each hook's execution as a span observation under the Langfuse turn trace.
  *
- * 前提条件：metadata.sessionKey 和 metadata.turnSeq 必须存在，
- * 否则所有方法降级为 no-op（因为无法派生 Langfuse traceId）。
+ * Precondition: metadata.sessionKey and metadata.turnSeq must exist,
+ * otherwise all methods degrade to no-op (because the Langfuse traceId cannot be derived).
  *
- * 每个 hook 产生一条 span observation：
- *   - name: `[inject] {hookId}` 或 `[inject] {hookId} (error)`
- *   - metadata: hookId, point, cacheStrategy, durationMs, blockCount, blocks 摘要
- *   - traceId: 由 sessionKey + turnSeq 确定性派生（与上游 LLM generation 共享同一 trace）
+ * Each hook produces one span observation:
+ *   - name: `[inject] {hookId}` or `[inject] {hookId} (error)`
+ *   - metadata: hookId, point, cacheStrategy, durationMs, blockCount, blocks summary
+ *   - traceId: deterministically derived from sessionKey + turnSeq (shares the same trace as the upstream LLM generation)
  *
- * 安全保证：所有方法内部 try/catch，绝不抛异常；observer 不存在或降级时 fallback noop。
+ * Safety guarantee: all methods have an internal try/catch and never throw; falls back to noop when the observer is absent or degraded.
  */
 export class LangfuseInjectionObserver implements InjectionObserver {
-  /** 从 onPipelineStart 的 metadata 中捕获，后续 hook 回调使用。 */
+  /** Captured from the metadata of onPipelineStart, used by subsequent hook callbacks. */
   private meta: AgentContextMetadata | null = null;
 
   onPipelineStart(meta: AgentContextMetadata): void {
     try {
       this.meta = meta;
-      // 无 span — 延迟到 hook 级别记录
+      // No span -- deferred to hook-level recording
     } catch { /* observer must never throw */ }
   }
 
@@ -274,7 +274,7 @@ export class LangfuseInjectionObserver implements InjectionObserver {
   }
 
   onHookStart(_hook: InjectionHook, _point: InjectionPoint): void {
-    // span 在 onHookDone/onHookError 中一次性创建（含完整 duration）。
+    // The span is created in one go in onHookDone/onHookError (with the full duration).
   }
 
   onHookDone(
@@ -299,7 +299,7 @@ export class LangfuseInjectionObserver implements InjectionObserver {
           : `[${b.type}] ${b.metadata?.tool_name ?? ""}`,
       }));
 
-      // Name 格式：[inject] <hookId> @ <point> — 可在 Langfuse 按前缀/关键词搜索
+      // Name format: [inject] <hookId> @ <point> -- searchable by prefix/keyword in Langfuse
       const name = blocks.length > 0
         ? `[inject] ${hook.id} @ ${point}`
         : `[inject] ${hook.id} @ ${point} (empty)`;
@@ -334,10 +334,10 @@ export class LangfuseInjectionObserver implements InjectionObserver {
         },
       );
 
-      // 观察级标注
+      // observation-level annotation
       const otelSpan = span.otelSpan;
       otelSpan.setAttribute(LangfuseOtelSpanAttributes.OBSERVATION_METADATA, JSON.stringify(obsMeta));
-      // trace 级标注：叠加注入摘要（last-write-wins，所有 hook 都会写，最终保留最后一次的值）
+      // trace-level annotation: overlay the injection summary (last-write-wins; all hooks write, finally the last value is kept)
       otelSpan.setAttribute(LangfuseOtelSpanAttributes.TRACE_METADATA, JSON.stringify({
         injection: { hookId: hook.id, point, blockCount: blocks.length, durationMs },
       }));

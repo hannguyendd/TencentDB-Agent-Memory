@@ -1,12 +1,12 @@
 /**
- * ChatMemoryPanel — Memory 页面特有样式。
+ * ChatMemoryPanel -- styles specific to the Memory page.
  *
- * 通用列表容器 / 分栏布局 / 骨架屏 已由
- * ResourcePage/components/asset-list-panel.css 统一提供。
- * 此处：
- *   1. 在 _asset-memory-page 作用域下把通用 ALP 列表项改写为「无边框纯背景卡片」样式
- *      （对齐 Skills 页成熟风格：无边框 + 圆角 + 纯背景，hover 浅灰、选中浅蓝）
- *   2. 提供 Memory 专属的卡片内部 4 行结构样式（标题+计数 / id / 作者+时间·解绑 / 共享·私密）
+ * The shared list container / split layout / skeleton screen are already provided uniformly by
+ * ResourcePage/components/asset-list-panel.css.
+ * Here:
+ *   1. Under the _asset-memory-page scope, restyle the generic ALP list item as a "borderless solid-background card"
+ *      (aligned with the mature Skills page style: no border + rounded corners + solid background, light gray on hover, light blue when selected)
+ *   2. Provide the Memory-specific 4-row card internal structure styles (title + count / id / author + time / unbind / shared / private)
  */
 
 ._asset-memory-page {
@@ -16,13 +16,13 @@
 }
 
 /* ============================================================
- * Memory 页面下：把通用 ALP 列表项改写为「无边框纯背景卡片」
- * （对齐项目 Skills 页 `_memory-personal-asset` 的成熟风格：
- *   无边框 + 圆角 + 纯背景；hover 浅灰、选中浅蓝）
- * 仅作用于本页面，不影响 Skills 等复用同一面板的页面。
+ * Under the Memory page: restyle the generic ALP list item as a "borderless solid-background card"
+ * (aligned with the mature style of the project's Skills page `_memory-personal-asset`:
+ *   no border + rounded corners + solid background; light gray on hover, light blue when selected)
+ * Applies only to this page, and does not affect pages such as Skills that reuse the same panel.
  *
- * 关键：AssetListPanel 结构是 li > button，视觉必须只落在 button 上
- * （li 保持透明），否则 button 的直角背景会盖住 li 圆角 → 四角被覆盖。
+ * Key: AssetListPanel's structure is li > button, and the visuals must land only on the button
+ * (li stays transparent); otherwise the button's square-cornered background would cover the li's rounded corners -> the four corners get covered.
  * ============================================================ */
 ._asset-memory-page ._alp-items {
   display: flex;
@@ -31,13 +31,13 @@
   padding: 4px 0;
 }
 
-/* li：去掉 ALP 默认下分隔线，只做圆角定位，不承载背景/边框 */
+/* li: remove ALP's default bottom divider, only handle rounded positioning, carry no background/border */
 ._asset-memory-page ._alp-item {
   border-bottom: none;
   border-radius: 8px;
 }
 
-/* 视觉全部落在 button：圆角 + 纯背景，hover/选中色统一由 button 呈现 */
+/* All visuals land on the button: rounded corners + solid background; hover/selected colors are uniformly presented by the button */
 ._asset-memory-page ._alp-item-btn {
   padding: 12px 14px;
   border-radius: 8px;
@@ -62,10 +62,10 @@
 }
 
 /* ============================================================
- * Memory 卡片内部 4 行结构
+ * Memory card internal 4-row structure
  * ============================================================ */
 
-/* 第 1 行：标题 + 蓝色计数徽章 */
+/* Row 1: title + blue count badge */
 ._memory-card-header {
   display: flex;
   align-items: center;
@@ -89,7 +89,7 @@
   gap: 6px;
 }
 
-/* 右上角蓝色计数徽章（如 L0 消息数） */
+/* Top-right blue count badge (e.g. L0 message count) */
 ._memory-card-count {
   flex-shrink: 0;
   font-size: 11px;
@@ -101,7 +101,7 @@
   white-space: nowrap;
 }
 
-/* 第 2 行：资产真实 id，等宽灰色 */
+/* Row 2: the asset's real id, monospace gray */
 ._memory-card-id {
   margin-top: 4px;
   font-family: var(--font-mono);
@@ -112,16 +112,16 @@
   white-space: nowrap;
 }
 
-/* 第 3 行：用户名 + 时间 / 解绑（复用通用 AssetItemBadges 容器，与 Skills 页同构）
-   时间戳走通用 ._alp-item-time（已声明 12px / secondary + margin-left:auto 靠右），
-   此处只对 memory 特有部分做覆盖。 */
+/* Row 3: username + time / unbind (reuses the generic AssetItemBadges container, isomorphic with the Skills page)
+   The timestamp uses the generic ._alp-item-time (already declares 12px / secondary + margin-left:auto to right-align),
+   so only the memory-specific parts are overridden here. */
 
-/* 用户名徽章：与时间戳统一字号（覆盖通用 ._alp-badge 的 11px） */
+/* Username badge: same font size as the timestamp (overrides the generic ._alp-badge's 11px) */
 ._memory-card ._alp-badge {
   font-size: 12px;
 }
 
-/* 「解绑」红色链接文字按钮：靠右对齐（对齐 AssetItemTime 的 margin-left:auto） */
+/* "Unbind" red link text button: right-aligned (aligned with AssetItemTime's margin-left:auto) */
 ._memory-card-unbind {
   margin-left: auto;
   padding: 0;
@@ -140,12 +140,12 @@
   text-decoration: underline;
 }
 
-/* 第 4 行：共享/私密切换 */
+/* Row 4: shared/private toggle */
 ._memory-card-scope {
   margin-top: 10px;
 }
 
-/* ===== Memory 特有：已私密警告徽章 ===== */
+/* ===== Memory-specific: already-private warning badge ===== */
 ._memory-badge {
   display: inline-flex;
   align-items: center;
@@ -165,7 +165,7 @@
   margin-left: 6px;
 }
 
-/* ===== 详情面板容器 ===== */
+/* ===== Detail panel container ===== */
 ._memory-detail-panel {
   min-height: 480px;
   padding: 16px;
@@ -175,14 +175,14 @@
   box-shadow: var(--tea-shadow-xs);
 }
 
-/* ===== Memory 详情区 ===== */
+/* ===== Memory detail area ===== */
 ._memory-detail-head {
   border-bottom: 1px solid var(--tea-color-border-secondary-default);
   padding-bottom: 12px;
   margin-bottom: 16px;
 }
 
-/* ===== BlockDetail 头部 ===== */
+/* ===== BlockDetail header ===== */
 ._memory-detail-header {
   display: flex;
   align-items: flex-start;
@@ -191,14 +191,14 @@
   margin-bottom: 16px;
 }
 
-/* 左侧标题 + meta 信息列，占据剩余宽度 */
+/* Left title + meta info column, takes the remaining width */
 ._memory-detail-header-info {
   min-width: 0;
   flex: 1;
 }
 
-/* 右侧操作区：手动刷新 + 模式切换横向排列，靠右顶部对齐。
-   刷新紧邻模式切换控件左侧；L2 / L3 无模式切换时仅剩刷新按钮。 */
+/* Right action area: manual refresh + mode switch laid out horizontally, aligned to the top right.
+   Refresh sits immediately left of the mode switch control; when L2 / L3 have no mode switch only the refresh button remains. */
 ._memory-detail-header-actions {
   flex: none;
   display: flex;
@@ -206,7 +206,7 @@
   gap: 8px;
 }
 
-/* 手动刷新按钮：与右侧模式切换区顶部对齐，图标居中 */
+/* Manual refresh button: aligned with the top of the right mode switch area, icon centered */
 ._memory-detail-refresh {
   flex: none;
   display: inline-flex;
@@ -232,7 +232,7 @@
   font-weight: 600;
 }
 
-/* 名字旁弱化展示的真实 id */
+/* The real id shown de-emphasized next to the name */
 ._memory-detail-title-id {
   font-size: 12px;
   font-weight: 400;
@@ -261,7 +261,7 @@
   color: var(--tea-color-text-secondary);
 }
 
-/* ===== 层级选择器 ===== */
+/* ===== Tier selector ===== */
 ._memory-detail-layers {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -326,8 +326,8 @@
   margin-top: 2px;
 }
 
-/* ===== 详情高度链：让 L0 滚动区撑满右栏剩余空间 ===== */
-/* 分栏行内左右等高（覆盖 ResourcePage 的 align-items: start） */
+/* ===== Detail height chain: make the L0 scroll area fill the remaining space of the right column ===== */
+/* Left and right equal height within the split row (overrides ResourcePage's align-items: start) */
 ._asset-memory-page ._asset-split {
   align-items: stretch;
 }
@@ -340,10 +340,10 @@
 ._memory-detail {
   display: flex;
   flex-direction: column;
-  /* 撑满右栏高度（外层 _asset-split-detail 已限定视口高度），内部body滚动，头部固定 */
+  /* Fill the right column height (the outer _asset-split-detail already limits the viewport height), the inner body scrolls, the header is fixed */
   height: 100%;
   min-height: 0;
-  /* 卡片外框：与左栏列表（_alp）、Skills 右栏详情（_memory-skill-detail-card）视觉统一 */
+  /* Card frame: visually consistent with the left column list (_alp) and the Skills right-column detail (_memory-skill-detail-card) */
   padding: 16px;
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 6px;
@@ -351,7 +351,7 @@
   box-shadow: var(--tea-shadow-xs);
 }
 
-/* 详情空态：同样套卡片外框并撑满高度，避免"贴边灰底"与留白 */
+/* Detail empty state: also wrapped in a card frame and filling the height, avoiding "edge-hugging gray background" and blank space */
 ._memory-detail-empty-card {
   display: flex;
   align-items: center;
@@ -367,7 +367,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* 窄屏堆叠布局下（AssetSplitLayout 取消高度限制），卡片也回归文档流高度 */
+/* In the narrow-screen stacked layout (AssetSplitLayout removes the height limit), the card also returns to document-flow height */
 @media (max-width: 960px) {
   ._memory-detail {
     height: auto;
@@ -379,9 +379,9 @@
   }
 }
 
-/* ===== 层内容区 ===== */
-/* 唯一滚动容器：L1/L2/L3 列表在此滚动；L0 由内部 _memory-chat-scroll 自管滚动锚点，
-   两者不会同时出现（互斥渲染），故不会产生双层滚动条 */
+/* ===== Tier content area ===== */
+/* The only scroll container: L1/L2/L3 lists scroll here; L0 manages its scroll anchors itself via the inner _memory-chat-scroll,
+   and the two never appear at the same time (rendered mutually exclusively), so there are no double scrollbars */
 ._memory-detail-body {
   flex: 1;
   min-height: 200px;
@@ -390,7 +390,7 @@
   overflow-y: auto;
 }
 
-/* L0 聊天滚动容器：需自管"滚到底 / 加载更早"的锚点，作为独立滚动容器 */
+/* L0 chat scroll container: must manage the "scroll to bottom / load earlier" anchors itself, as a standalone scroll container */
 ._memory-chat-scroll {
   flex: 1;
   min-height: 0;
@@ -420,7 +420,7 @@
   }
 }
 
-/* 通用骨架元素：圆角矩形 + 呼吸动画（行级文字骨架用） */
+/* Generic skeleton element: rounded rectangle + breathing animation (for row-level text skeletons) */
 ._memory-detail-skel-line {
   height: 12px;
   border-radius: 4px;
@@ -433,7 +433,7 @@
   height: 10px;
 }
 
-/* ===== 进入 L0（聊天流）的加载骨架 ===== */
+/* ===== Loading skeleton on entering L0 (chat stream) ===== */
 ._memory-detail-skeleton--l0 {
   display: flex;
   flex-direction: column;
@@ -472,8 +472,8 @@
   animation: _memory-detail-pulse 1.5s ease-in-out infinite;
 }
 
-/* flex column 子项默认按 content 尺寸收缩（无文字内容 → 0 宽），
-   显式 width: 100% 让骨架线撑满气泡列宽，避免气泡被压窄成竖条。 */
+/* flex column children shrink to content size by default (no text content -> 0 width),
+   explicit width: 100% makes the skeleton lines fill the bubble column width, preventing bubbles from being squeezed into vertical strips. */
 ._memory-detail-skel-chat-bubble ._memory-detail-skel-line {
   width: 100%;
 }
@@ -482,7 +482,7 @@
   background: var(--tea-color-bg-brand-lighten-default);
 }
 
-/* system 行（居中通栏胶囊） */
+/* system row (centered full-width capsule) */
 ._memory-detail-skel-chat-system {
   align-self: center;
   padding: 4px 10px;
@@ -491,7 +491,7 @@
   animation: _memory-detail-pulse 1.5s ease-in-out infinite;
 }
 
-/* ===== 进入 L1/L2/L3（原子记忆）的加载骨架 ===== */
+/* ===== Loading skeleton on entering L1/L2/L3 (atomic memory) ===== */
 ._memory-detail-skeleton--l1,
 ._memory-detail-skeleton--l2,
 ._memory-detail-skeleton--l3 {
@@ -501,7 +501,7 @@
 }
 
 ._memory-detail-skel-atomic {
-  /* 与真实 _memory-detail-atomic-item 一致：padding 12px 14px，圆角 8px，浅边 + 微阴影 */
+  /* Consistent with the real _memory-detail-atomic-item: padding 12px 14px, 8px radius, light border + subtle shadow */
   padding: 12px 14px;
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 8px;
@@ -509,7 +509,7 @@
   box-shadow: var(--tea-shadow-xs);
 }
 
-/* 进入 L2 时只有标题行：去掉底部 padding / 阴影，让卡片高度贴合 head 实际高度 */
+/* On entering L2 there is only the title row: remove bottom padding / shadow so the card height matches the head's actual height */
 ._memory-detail-skel-atomic--headonly {
   padding-bottom: 12px;
 }
@@ -523,8 +523,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  /* head 不再占 margin-bottom；间距由 body 的 padding-top + head 的 box-shadow 1px 承担，
-     与真实条目 head(padding-bottom: 8px) + body(margin-top: 8px) 的 16px 呼吸空间对齐 */
+  /* head no longer takes margin-bottom; the spacing is provided by the body's padding-top + the head's box-shadow 1px,
+     aligned with the 16px breathing room of a real item's head (padding-bottom: 8px) + body (margin-top: 8px) */
   padding-bottom: 8px;
   box-shadow: 0 1px 0 var(--tea-color-border-secondary-default);
 }
@@ -537,12 +537,12 @@
 
 ._memory-detail-skel-block--layer {
   flex-shrink: 0;
-  /* 真实 _memory-detail-atomic-layer 高度 ≈ 16px（10px 字号 + 3+3 padding + 2 line-height） */
+  /* Real _memory-detail-atomic-layer height ~ 16px (10px font size + 3+3 padding + 2 line-height) */
   width: 24px;
   height: 16px;
 }
 
-/* 头部层级徽章配色（与真实原子条目 _memory-detail-atomic-layer--* 对齐） */
+/* Header tier badge colors (aligned with the real atomic item _memory-detail-atomic-layer--*) */
 ._memory-detail-skel-block--layer._memory-detail-skel-block--brand {
   background: var(--tea-color-bg-brand-lighten-default);
 }
@@ -556,7 +556,7 @@
 ._memory-detail-skel-block--title {
   flex: 1;
   min-width: 60px;
-  /* 真实标题 13px 字号 + 1.5 line-height ≈ 19.5px；骨架用 16px 居中 */
+  /* Real title is 13px font size + 1.5 line-height ~ 19.5px; the skeleton uses 16px, centered */
   height: 16px;
 }
 
@@ -581,7 +581,7 @@
 }
 
 ._memory-detail-skel-body {
-  /* 与真实 body 区对齐：margin-top: 8px + padding-top: 8px = 16px 间距（上沿分隔由 head box-shadow 提供） */
+  /* Aligned with the real body area: margin-top: 8px + padding-top: 8px = 16px spacing (the top divider is provided by the head box-shadow) */
   margin-top: 8px;
   padding-top: 8px;
   display: flex;
@@ -589,7 +589,7 @@
   gap: 8px;
 }
 
-/* L3 正文骨架首行高一点，贴合 MarkdownView 标题级字号 */
+/* The first line of the L3 body skeleton is a bit taller, matching MarkdownView heading-level font size */
 ._memory-detail-skeleton--l3 ._memory-detail-skel-body {
   padding-top: 8px;
 }
@@ -605,15 +605,15 @@
   color: var(--tea-color-text-warning, #e6a23c);
 }
 
-/* ===== 时间筛选器（L0 / L1，使用 Tea RangePicker）===== */
-/* 置于详情头部右上角，随标题行顶部对齐，不随内容宽度收缩 */
+/* ===== Time filter (L0 / L1, uses Tea RangePicker) ===== */
+/* Placed at the top right of the detail header, aligned with the top of the title row, does not shrink with content width */
 ._memory-detail-timefilter {
   flex-shrink: 0;
   display: flex;
   align-items: center;
 }
 
-/* ===== 浏览 / 搜索 模式切换（详情头部右上角）===== */
+/* ===== Browse / Search mode switch (top right of detail header) ===== */
 ._memory-detail-mode {
   flex-shrink: 0;
   display: flex;
@@ -622,7 +622,7 @@
   gap: 8px;
 }
 
-/* 分段控件容器：两个互斥按钮 */
+/* Segmented control container: two mutually exclusive buttons */
 ._memory-detail-mode-switch {
   display: inline-flex;
   padding: 2px;
@@ -664,8 +664,8 @@
   cursor: not-allowed;
 }
 
-/* ===== L0 对话原文（IM 聊天布局：头像 + 气泡）===== */
-/*顶部「加载更早」区 */
+/* ===== L0 conversation original text (IM chat layout: avatar + bubble) ===== */
+/* Top "Load earlier" area */
 ._memory-chat-more {
   display: flex;
   justify-content: center;
@@ -720,7 +720,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* 消息流：整体纵向排布，行间距稍大让气泡有呼吸感 */
+/* Message stream: laid out vertically overall, with slightly larger row spacing so bubbles have breathing room */
 ._memory-chat-list {
   display: flex;
   flex-direction: column;
@@ -728,7 +728,7 @@
   padding: 4px 2px;
 }
 
-/* 单行：主体左右分列，assistant 左、user 右 */
+/* Single row: body split left/right, assistant on the left, user on the right */
 ._memory-chat-row {
   display: flex;
   align-items: flex-start;
@@ -739,7 +739,7 @@
   justify-content: flex-end;
 }
 
-/* 主体：meta（角色 + 时间）在气泡上方，气泡随行左右靠 */
+/* Body: meta (role + time) above the bubble, the bubble leans left/right with the row */
 ._memory-chat-main {
   min-width: 0;
   max-width: 85%;
@@ -777,7 +777,7 @@
   white-space: nowrap;
 }
 
-/* 气泡：柔和圆角 + 细边+ 轻阴影 + hover 抬升；尾部小缺角贴合头像侧 */
+/* Bubble: soft rounded corners + thin border + light shadow + hover lift; small notch at the tail near the avatar side */
 ._memory-chat-bubble {
   position: relative;
   max-width: 100%;
@@ -793,13 +793,13 @@
   box-shadow: var(--tea-shadow-sm);
 }
 
-/* assistant / tool：左侧，左上角收一个尖角贴向头像 */
+/* assistant / tool: on the left, the top-left corner is pointed toward the avatar */
 ._memory-chat-bubble--assistant,
 ._memory-chat-bubble--tool {
   border-top-left-radius: 3px;
 }
 
-/* user：右侧，品牌浅底、无边、右上角收尖角 */
+/* user: on the right, brand light background, no border, top-right corner pointed */
 ._memory-chat-bubble--user {
   border-top-right-radius: 3px;
   border-color: transparent;
@@ -816,7 +816,7 @@
   font-family: inherit;
 }
 
-/* system：居中通栏胶囊提示 */
+/* system: centered full-width capsule hint */
 ._memory-chat-system {
   align-self: center;
   display: inline-flex;
@@ -846,7 +846,7 @@
   opacity: 0.8;
 }
 
-/* ===== L1/L2/L3 原子列表 ===== */
+/* ===== L1/L2/L3 atomic list ===== */
 ._memory-detail-atomic-list {
   list-style: none;
   margin: 0;
@@ -856,19 +856,19 @@
   gap: 10px;
 }
 
-/* 条目卡片：标题行与正文同处一张白底卡片，避免「标题浮在灰底、正文另起白盒」的割裂感。
-   li 自身不设内边距——间距全部交给 head（12px）与正文区（expand-inner / md）各自负责，
-   这样收起态（只有 head）时卡片高度恰好贴合 head，不会因 li padding 与 head margin
-   叠加/抵消不当导致标题贴顶或卡片偏矮。 */
+/* Entry card: the title row and body sit on the same white card, avoiding the disjointed feel of "title floating on gray and body in a separate white box".
+   The li itself has no padding -- spacing is left entirely to the head (12px) and the body area (expand-inner / md) each,
+   so in the collapsed state (head only) the card height fits the head exactly, and improper stacking/cancelling of li padding and head margin
+   won't push the title against the top or make the card too short. */
 ._memory-detail-atomic-item {
   padding: 0;
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 8px;
   background: var(--tea-color-bg-primary-default);
   box-shadow: var(--tea-shadow-xs);
-  /* 不要在此设 overflow:hidden——它会让 head 的 position:sticky 吸顶失效
-     （overflow 会将 li 变成 sticky 的滚动容器，而 li 本身无额外滚动空间，故无法吸附）。
-     head 现已与卡片边缘对齐、无越界溢出，无需裁切；圆角由 head 自身的 border-radius 保证。 */
+  /* Do not set overflow:hidden here -- it would break the head's position:sticky pinning
+     (overflow turns the li into sticky's scroll container, and the li has no extra scroll space, so it cannot stick).
+     The head is now aligned with the card edges with no overflow beyond them, so no clipping is needed; the rounded corners are guaranteed by the head's own border-radius. */
   transition:
     border-color 0.15s ease-in-out,
     box-shadow 0.15s ease-in-out;
@@ -879,14 +879,14 @@
   box-shadow: var(--tea-shadow-sm);
 }
 
-/* 标题行：层级徽章 + 标题 + 右侧（loading/时间/展开箭头）。
-   作为条目头部 sticky 固定：滚动时当前可见记忆的标题行吸顶，便于长列表中定位。
-   sticky 范围受每条记忆卡片（li）约束——当该记忆滚出视口时头部随之释放，不会被下一条顶住。
-   li 无内边距，head 自带 12px padding 并与卡片边缘对齐，故无需负 margin。
-   顶部圆角继承 li 的 8px，避免白底方块遮住卡片左上/右上角。
-   分隔线（底部 box-shadow）不在这里画——只有有正文时（--with-body）才显示，
-   L2 未展开时下方无内容，直接展示标题、无横线。
-   注：L0 聊天流走独立滚动容器（_memory-chat-scroll），不经过此列表，故天然不受影响。 */
+/* Title row: tier badge + title + right side (loading/time/expand arrow).
+   Pinned as the entry header with sticky: while scrolling, the title row of the currently visible memory sticks to the top, making it easier to locate within a long list.
+   The sticky range is bounded by each memory card (li) -- when that memory scrolls out of the viewport the header is released with it, and is not held by the next one.
+   The li has no padding, the head has its own 12px padding and aligns with the card edges, so no negative margin is needed.
+   The top rounded corners inherit the li's 8px, preventing the white square from covering the card's top-left/top-right corners.
+   The divider (bottom box-shadow) is not drawn here -- it shows only when there is a body (--with-body);
+   when L2 is not expanded there is nothing below, so the title is shown directly with no line.
+   Note: the L0 chat stream uses a standalone scroll container (_memory-chat-scroll) and doesn't go through this list, so it is naturally unaffected. */
 ._memory-detail-atomic-head {
   position: sticky;
   top: 0;
@@ -902,8 +902,8 @@
   border-radius: 8px 8px 0 0;
 }
 
-/* 有正文时：head 底部画 1px 分隔线，衔接下方正文（或加载骨架）。
-   L2 未展开（无正文）不加此 class，故无横线；展开 / 加载中才加。 */
+/* When there is a body: draw a 1px divider at the bottom of the head, joining the body below (or the loading skeleton).
+   L2 not expanded (no body) does not get this class, so no line; it is added only when expanded / loading. */
 ._memory-detail-atomic-head--with-body {
   box-shadow: 0 1px 0 var(--tea-color-border-secondary-default);
 }
@@ -974,9 +974,9 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* 正文行骨架（多行堆叠，仿 MarkdownView 的文本行形态）。
-   用于 L2 展开加载正文 / L1、L3 加载正文时，标题保持真实展示，仅正文区进入骨架。
-   分隔线由 head 的 box-shadow 承担，此处不重复。 */
+/* Body row skeleton (multiple stacked lines, imitating MarkdownView's text line shape).
+   Used when L2 expands to load the body / L1, L3 load the body: the title stays really shown, and only the body area enters the skeleton.
+   The divider is carried by the head's box-shadow and is not repeated here. */
 ._memory-detail-atomic-body-skel {
   margin-top: 8px;
   padding: 8px 12px 12px;
@@ -1003,7 +1003,7 @@
   transition: transform 0.15s ease-in-out;
 }
 
-/* chevron 独立可点击区域：扩大热区、给出手势与 hover 反馈 */
+/* chevron independent clickable area: enlarge the hot zone, give a pointer cursor and hover feedback */
 ._memory-detail-atomic-chevron-btn {
   display: inline-flex;
   align-items: center;
@@ -1025,8 +1025,8 @@
   transform: rotate(180deg);
 }
 
-/* 正文区：与标题行同属一张卡片。head 的 box-shadow 1px 已作为正文上分隔线，
-   此处不再重复 border-top，避免双线。 */
+/* Body area: belongs to the same card as the title row. The head's 1px box-shadow already serves as the divider above the body,
+   so border-top is not repeated here, avoiding a double line. */
 ._memory-detail-atomic-body {
   margin: 8px 0 0;
   padding: 8px 12px 12px;
@@ -1038,8 +1038,8 @@
   font-family: inherit;
 }
 
-/* L2 正文逐渐展开/收起：外层 grid 0fr↔1fr 过渡高度，配合透明度淡入淡出。
-   内容常驻 DOM（未展开时 0fr 高度为 0），展开时高度与透明度一起平滑过渡。 */
+/* L2 body gradual expand/collapse: the outer grid 0fr<->1fr transitions height, together with opacity fade in/out.
+   Content stays in the DOM (height 0 at 0fr when not expanded); on expand, height and opacity transition smoothly together. */
 ._memory-detail-atomic-expand {
   display: grid;
   grid-template-rows: 0fr;
@@ -1054,14 +1054,14 @@
   opacity: 1;
 }
 
-/* 内层裁剪容器：0fr 时裁掉内容，保证高度为 0 且正文不溢出 */
+/* Inner clipping container: clips content at 0fr, ensuring zero height with no body overflow */
 ._memory-detail-atomic-expand-inner {
   overflow: hidden;
   min-height: 0;
 }
 
-/* L2/L3 正文使用共享 MarkdownView（bare 变体），head 已画分隔线，此处不重复 border-top。
-   li 无内边距，正文自带左右/底部 12px 内边距，顶部 8px 与 head 分隔线留白。 */
+/* L2/L3 body uses the shared MarkdownView (bare variant); the head already draws the divider, so border-top is not repeated here.
+   The li has no padding, the body has its own 12px left/right/bottom padding, with 8px of top space from the head divider. */
 ._memory-detail-atomic-md {
   margin-top: 8px;
   padding: 8px 12px 12px;
@@ -1094,14 +1094,14 @@
   font-weight: 500;
 }
 
-/* ===== 分页器（与任务看板一致，居中的 Tea Pagination） ===== */
+/* ===== Pager (consistent with the task board, centered Tea Pagination) ===== */
 ._memory-detail-pager {
   display: flex;
   justify-content: center;
   margin-top: 12px;
 }
 
-/* ===== L1 语义搜索框 ===== */
+/* ===== L1 semantic search box ===== */
 ._memory-detail-search {
   display: flex;
   align-items: center;
@@ -1127,14 +1127,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* ===== 原子条目操作入口（三个点下拉：编辑 / 复制）===== */
-/* 三点按钮容器：位于时间右侧，阻止冒泡避免触发 L2 折叠 */
+/* ===== Atomic entry action entry point (three-dot dropdown: edit / copy) ===== */
+/* Three-dot button container: to the right of the time, stops propagation to avoid triggering L2 collapse */
 ._memory-detail-atomic-actions {
   display: inline-flex;
   align-items: center;
 }
 
-/* 三点触发按钮（tea Button type=text）：紧凑尺寸，与时间/chevron 对齐 */
+/* Three-dot trigger button (tea Button type=text): compact size, aligned with time/chevron */
 ._memory-detail-atomic-more.tea-btn {
   min-width: auto;
   height: 20px;
@@ -1147,14 +1147,14 @@
   color: var(--tea-color-text-primary);
 }
 
-/* L2 展开加载态：复用 chat spinner 动画，占位与 chevron 相同 */
+/* L2 expand loading state: reuses the chat spinner animation, takes the same space as the chevron */
 ._memory-detail-atomic-spinner {
   width: 12px;
   height: 12px;
   flex-shrink: 0;
 }
 
-/* ===== 编辑 Modal ===== */
+/* ===== Edit Modal ===== */
 ._memory-detail-edit-name {
   margin-bottom: 8px;
   font-size: 12px;
@@ -1171,7 +1171,7 @@
   line-height: 1.6;
 }
 
-/* 内容区域 — 无边框，纯背景 + 圆角 */
+/* Content area -- borderless, solid background + rounded corners */
 ._memory-item-content {
   padding: 16px;
   background: var(--tea-color-bg-secondary-default);

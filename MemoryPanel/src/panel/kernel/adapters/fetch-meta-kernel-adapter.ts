@@ -3,8 +3,8 @@ import type { KernelHttpPort } from '../ports/kernel-http-port.js';
 import type { MetaKernelPort } from '../ports/meta-kernel-port.js';
 import { toKernelCredentials, type MetaCallContext } from '../types.js';
 
-// 只有 auth/verify 走"无 user-key"路径：它的 user_key 放 body，不放 Header。
-// user/create(-with-key) 已改回要求 system_admin，建号时传实例 admin user_key。
+// Only auth/verify takes the "no user-key" path: its user_key goes in the body, not in a Header.
+// user/create(-with-key) has been changed back to require system_admin; pass the instance admin user_key when creating an account.
 const OMIT_USER_KEY_ACTIONS = new Set(['auth/verify']);
 
 function sanitizeBody(action: string, body: Record<string, unknown>): Record<string, unknown> {

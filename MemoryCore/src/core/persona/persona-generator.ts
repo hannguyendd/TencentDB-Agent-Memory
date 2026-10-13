@@ -53,7 +53,7 @@ export class PersonaGenerator {
     llmRunner?: LLMRunner;
     /** StorageAdapter for file operations (COS/local). Falls back to fs when absent. */
     storage?: StorageAdapter;
-    /** langfuse 上报身份四元组（team/user/agent/session），填充 trace 顶级字段。 */
+    /** langfuse reporting identity quadruple (team/user/agent/session), fills the trace top-level fields. */
     traceContext?: TraceContext;
   }) {
     this.dataDir = opts.dataDir;
@@ -153,13 +153,13 @@ export class PersonaGenerator {
     let changedScenesContent: string;
     if (changedSceneContents.length > 0) {
       changedScenesContent =
-        `\n\n## 📄 变化场景完整内容\n\n` +
-        `*自上次 Persona 更新后，以下 ${changedSceneContents.length} 个场景发生了变化。工程已为你预加载完整内容：*\n\n` +
+        `\n\n## 📄 Full Content of Changed Scenes\n\n` +
+        `*Since the last Persona update, the following ${changedSceneContents.length} scene(s) have changed. The full content has been preloaded for you:*\n\n` +
         changedSceneContents.join("\n\n") +
         `\n\n---\n\n` +
-        `⚠️ **重点分析变化场景**：上述场景是自上次更新后的**新增/修改内容**，请**重点分析**这些场景中的新信息。\n`;
+        `⚠️ **Focus on the changed scenes**: The scenes above are **new/modified content** since the last update; **focus your analysis** on the new information in these scenes.\n`;
     } else {
-      changedScenesContent = `\n\n⚠️ **无变化场景**：所有场景均已在上次 Persona 更新中分析过，本次可直接读取所有场景进行全局审视。\n`;
+      changedScenesContent = `\n\n⚠️ **No changed scenes**: All scenes were already analyzed in the last Persona update; this time you may read all scenes directly for a global review.\n`;
     }
 
     // 6. Build prompt
@@ -198,7 +198,7 @@ export class PersonaGenerator {
     // 8. Run LLM agent (sandboxed to dataDir, tools enabled — LLM writes target L3 file directly)
     try {
       this.logger?.debug?.(`${TAG} Calling LLM for ${targetFile} generation (timeout=180s, tools=enabled, workspaceDir=${this.dataDir})...`);
-      // langfuse trace 语义：L3 persona 生成有独立 name / 顶级 user/session 列 / 可筛选 tags。
+      // langfuse trace semantics: L3 persona generation has its own name / top-level user/session columns / filterable tags.
       const traceParams = buildTraceParams("memory.persona-generate", this.traceContext);
       await this.runner.run({
         systemPrompt,
@@ -271,7 +271,7 @@ export class PersonaGenerator {
       });
     }
 
-    // ── 评测指标：L3 延迟 + 画像变化 ──
+    // ── Eval metrics: L3 latency + persona changes ──
     try {
       reportL3LatencyMetrics({
         instanceId: this.instanceId ?? "",
@@ -283,7 +283,7 @@ export class PersonaGenerator {
         hasError: false,
       });
     } catch {
-      // 静默忽略
+      // silently ignore
     }
 
     return true;

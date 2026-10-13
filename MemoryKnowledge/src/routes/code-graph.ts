@@ -7,9 +7,9 @@
  * Query endpoints delegate to engines/code executeTool, return {text, isError}.
  * Routes are defined WITHOUT /v2 prefix — prefix applied at server.ts mount level.
  *
- * 多租户（001）：`service_id` 每个端点必传于 `x-tdai-service-id` 请求头（与内核路由键统一）。
- * id-only 端点用 `getById(service_id, code_graph_id)` 收敛归属，跨租户返回 404（R1）；
- * service_id / code_graph_id 先做路径分段白名单校验（R5）。
+ * Multi-tenancy (001): `service_id` must be passed on every endpoint via the `x-tdai-service-id` request header (unified with the kernel routing key).
+ * id-only endpoints use `getById(service_id, code_graph_id)` to converge ownership; cross-tenant returns 404 (R1);
+ * service_id / code_graph_id first go through path-segment allowlist validation (R5).
  */
 
 import { Hono } from "hono";
@@ -190,7 +190,7 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
     const branch = typeof body.branch === "string" && body.branch ? body.branch : "main";
     const repoName = typeof body.repo_name === "string" ? body.repo_name : undefined;
 
-    // 私有仓：可选 provider_id + secret，与 create 同请求传入，入队前落凭据（消除时序窗口）。
+    // Private repo: optional provider_id + secret, passed in the same request as create; credentials are persisted before enqueueing (eliminating the timing window).
     const providerId = typeof body.provider_id === "string" ? body.provider_id : undefined;
     const secret = typeof body.secret === "string" ? body.secret : undefined;
     const username = typeof body.username === "string" ? body.username : undefined;
@@ -283,7 +283,7 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
     const result = cgService.sync(serviceId, row.team_id, cgId, requesterUserId);
     if (result.kind === "not_found") return c.json(wrapError(404, "code graph not found"), 404);
     if (result.kind === "busy") {
-      // 并发拒绝：干净最小的 409 响应体（调用方用 code 判断，不 parse message）。
+      // Concurrency rejection: a clean, minimal 409 response body (callers use code to decide, not parse message).
       return c.json({ code: 409, message: "busy", data: { status: result.status, step: result.step } }, 409);
     }
     return c.json(wrapOk({ code_graph_id: result.row.code_graph_id, status: result.row.status }), 202);
@@ -314,7 +314,7 @@ export function createCodeGraphRoutes(deps: CodeGraphRouteDeps): Hono {
       }
       const ok = cgService.delete(serviceId, row.team_id, id);
       if (ok) {
-        // instance pool 释放已由 service.cleanupResources(releaseInstance) 统一处理。
+        // instance pool release is handled uniformly by service.cleanupResources(releaseInstance).
         result.deleted_ids.push(id);
       } else {
         result.failed.push({ id, reason: "delete failed" });

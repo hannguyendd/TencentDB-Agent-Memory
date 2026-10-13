@@ -1,49 +1,49 @@
 /**
- * stages/session-init-orchestrate.ts — session-init 主编排 stage。
+ * stages/session-init-orchestrate.ts — the main session-init orchestration stage.
  *
- * 抽自 4 runner 里 ~200 行同构骨架 (openai-chat / anthropic / codex / workbuddy):
- *   1. store / metadataClient / parsePresetIdentity 组装 (完全相同)
- *   2. compositeKey + identity 组装 (workbuddy 硬编码 codex: 前缀 — 参数化)
- *   3. store.getOrRecover (完全相同)
- *   4. isTerminalState + needsPrewarm 判断 (完全相同)
+ * Extracted from ~200 lines of isomorphic skeleton across 4 runners (openai-chat / anthropic / codex / workbuddy):
+ *   1. store / metadataClient / parsePresetIdentity assembly (identical)
+ *   2. compositeKey + identity assembly (workbuddy hardcodes the codex: prefix — parameterized)
+ *   3. store.getOrRecover (identical)
+ *   4. isTerminalState + needsPrewarm checks (identical)
  *   5. recover branch: buildSessionContextBlockWithToggles / injectSessionContextWithToggles
- *      → 组装 initResult 里的 messages/systemAppend (protocol 差, 由 recoverApplyFn 参数化)
- *   6. handleSessionInit 主状态机调用 (完全相同; reqCtx protocol/questionsAsArray/codexAnswerInput
- *      参数由 caller 通过 buildReqCtx 提供; agentSource 也参数化 —— workbuddy 用 "codex")
- *   7. intercept response 组装 (protocol 差, 由 buildInterceptResponse 参数化;
- *      openai/anthropic 用 initResult.response, codex/wb 走 buildCodexFormResponse)
- *   8. Default-gate 分支 (codex/wb 独有 — 由 caller 通过 buildDefaultGateResponse 可选传入)
+ *      → assemble messages/systemAppend in initResult (protocol differs, parameterized via recoverApplyFn)
+ *   6. handleSessionInit main state machine call (identical; the reqCtx protocol/questionsAsArray/codexAnswerInput
+ *      parameters are provided by the caller via buildReqCtx; agentSource is also parameterized — workbuddy uses "codex")
+ *   7. intercept response assembly (protocol differs, parameterized via buildInterceptResponse;
+ *      openai/anthropic use initResult.response, codex/wb go through buildCodexFormResponse)
+ *   8. Default-gate branch (codex/wb only — optionally passed by the caller via buildDefaultGateResponse)
  *
- * 差异保留为 4 个 callback 参数, 每个 runner 自己给:
+ * Differences are kept as 4 callback parameters, each supplied by its own runner:
  *   - synthesizeMessages: (body) => Record<string,unknown>[]
- *     * openai-chat: body.messages 原样
- *     * anthropic: body.messages 原样
+ *     * openai-chat: body.messages as is
+ *     * anthropic: body.messages as is
  *     * codex/wb: codexFormAnswersAsMessages(input)
  *   - buildRecoverInitResult: (recovered) => Partial<SessionInitResult>
  *     * openai-chat: injectSessionContextWithToggles → messages
  *     * anthropic/codex/wb: buildSessionContextBlockWithToggles → systemAppend
  *   - buildInterceptResponse: (initResult) => Response | null
- *     * openai-chat/anthropic: 直接 initResult.response
- *     * codex/wb: 用 formData → buildCodexFormResponse
+ *     * openai-chat/anthropic: initResult.response directly
+ *     * codex/wb: formData → buildCodexFormResponse
  *   - buildDefaultGateResponse?: (initResult) => Response | null
- *     * codex/wb 独有; openai-chat/anthropic 传 undefined
+ *     * codex/wb only; openai-chat/anthropic pass undefined
  *
- * ForkSideQuery 短路 (anthropic 独有 requestKind==="fork" L2b miss → passthrough):
- *   - fork 分支由 caller 前置判断, 命中直接 no-op 返 initResult, 不进本 stage;
- *     或本 stage 提供 forkPassthrough 选项让 caller 传入 requestKind + branch。
- *   - 当前简单起见: fork 分支保留在 caller (anthropic runner) 里, 因它只 1 处独有。
+ * ForkSideQuery short-circuit (anthropic only, requestKind==="fork" L2b miss → passthrough):
+ *   - the fork branch is checked up front by the caller; on a hit it is a no-op returning initResult and does not enter this stage;
+ *     or this stage provides a forkPassthrough option for the caller to pass requestKind + branch.
+ *   - For simplicity, currently the fork branch stays in the caller (anthropic runner), since it is unique to just one place.
  *
- * 每个 runner 的调用姿势 (伪代码):
+ * Calling pattern for each runner (pseudocode):
  *   const { proceed, response, initResult, wentThroughStateMachine } = await stageSessionInitOrchestrate({
  *     agentSourceForState, sessionKey, userId, config, headers, spaceId,
  *     apiKey, body, isStream, modelId, capabilities,
- *     compositeKeyOverride: (wb 传 "codex:...", 其他传 undefined),
+ *     compositeKeyOverride: (wb passes "codex:...", others pass undefined),
  *     synthesizeMessages, buildRecoverInitResult, buildInterceptResponse,
  *     buildDefaultGateResponse, // codex/wb
  *     buildReqCtx, // protocol + questionsAsArray + codexAnswerInput
  *   });
  *   if (!proceed) return response!;
- *   // caller 继续用 initResult 走 apply / prewarm / archive-ctx 等
+ *   // the caller continues using initResult for apply / prewarm / archive-ctx, etc.
  */
 
 import type {
@@ -58,82 +58,82 @@ import type {
 import type { PresetIdentity } from "../../session/preset.js";
 import type { MetadataClient } from "../../meta/client.js";
 
-/** Recover 命中时由 caller 自定的 initResult 构造 (protocol 特化); 可 async 以便 caller dynamic import */
+/** initResult construction defined by the caller on a recover hit (protocol-specific); may be async so the caller can dynamic import */
 export type RecoverApplyFn = (
   recovered: NonNullable<Awaited<ReturnType<SessionStore["getOrRecover"]>>>,
   bodyMessages: Array<Record<string, unknown>>,
 ) => (Partial<SessionInitResult> & { messages?: Array<Record<string, unknown>>; systemAppend?: unknown })
   | Promise<Partial<SessionInitResult> & { messages?: Array<Record<string, unknown>>; systemAppend?: unknown }>;
 
-/** 拦截时的 Response 组装 (openai/anthropic 直接返 initResult.response; codex/wb 组装 formResponse) */
+/** Response assembly on interception (openai/anthropic return initResult.response directly; codex/wb assemble a formResponse) */
 export type BuildInterceptFn = (initResult: SessionInitResult) => Response | null;
 
-/** Default-gate 分支 (codex/wb 独有; openai/anthropic 传 undefined) */
+/** Default-gate branch (codex/wb only; openai/anthropic pass undefined) */
 export type BuildDefaultGateFn = (initResult: SessionInitResult) => Response | null;
 
-/** 用户消息合成: openai/anthropic 直接返 body.messages, codex/wb 返 codexFormAnswersAsMessages(input) */
+/** User message synthesis: openai/anthropic return body.messages directly, codex/wb return codexFormAnswersAsMessages(input) */
 export type SynthesizeMessagesFn = () => Array<Record<string, unknown>>;
 
-/** SessionRequestContext 构造 (protocol / questionsAsArray / codexAnswerInput / capabilities) */
+/** SessionRequestContext construction (protocol / questionsAsArray / codexAnswerInput / capabilities) */
 export type BuildReqCtxFn = () => SessionRequestContext;
 
 export interface SessionInitOrchestrateInput {
-  /** 状态机分派的 agentSource (workbuddy 传 "codex" 复用 CB 分支) */
+  /** agentSource used for state machine dispatch (workbuddy passes "codex" to reuse the CB branch) */
   agentSourceForState: string;
-  /** compositeKey 前缀; wb 传 "codex:..." (借用 codex L2b binding), 其他传 undefined 走 agentSource */
+  /** compositeKey prefix; wb passes "codex:..." (borrowing the codex L2b binding), others pass undefined to use agentSource */
   compositeKeyOverride?: string;
   sessionKey: string;
   userId: string | null;
   spaceId?: string;
   config: ProxyConfig & { sessionInit: SessionInitConfig };
-  /** kernel /v3/meta 鉴权用 sk-mem-* key; openai-chat 用 `apiKey || config.tdai.apiKey`, 其他用 apiKey */
+  /** sk-mem-* key used for kernel /v3/meta auth; openai-chat uses `apiKey || config.tdai.apiKey`, others use apiKey */
   kernelUserKey: string;
-  /** 请求 header lowercased map, 供 parsePresetIdentity 用 */
+  /** request header lowercased map, for parsePresetIdentity */
   headers: Record<string, string>;
-  /** 用户消息合成 (openai/anthropic body.messages / codex/wb codexFormAnswersAsMessages) */
+  /** user message synthesis (openai/anthropic body.messages / codex/wb codexFormAnswersAsMessages) */
   synthesizeMessages: SynthesizeMessagesFn;
-  /** recover 命中时 initResult protocol-specific 组装 */
+  /** protocol-specific initResult assembly on a recover hit */
   buildRecoverInitResult: RecoverApplyFn;
-  /** state machine 的 reqCtx (protocol + questionsAsArray + codexAnswerInput + capabilities + stream + modelId) */
+  /** reqCtx of the state machine (protocol + questionsAsArray + codexAnswerInput + capabilities + stream + modelId) */
   buildReqCtx: BuildReqCtxFn;
-  /** intercept response protocol-specific 组装 */
+  /** protocol-specific intercept response assembly */
   buildInterceptResponse: BuildInterceptFn;
-  /** Default-gate 首次命中的 Plan 提示响应 (codex/wb 独有); undefined 表示不检查此分支 */
+  /** Plan hint response on the first Default-gate hit (codex/wb only); undefined means skip this branch */
   buildDefaultGateResponse?: BuildDefaultGateFn;
-  /** L2b recovery 时是否传 messages 给 store (openai/anthropic 传 body.messages, codex/wb 传 []) */
+  /** Whether to pass messages to the store during L2b recovery (openai/anthropic pass body.messages, codex/wb pass []) */
   recoveryMessages: Array<Record<string, unknown>>;
   /**
-   * anthropic 独有: requestKind === "fork" 且 recover 未命中终态时短路 passthrough。
-   * 传入的函数在 store.getOrRecover 后, isTerminalState 判断前被调用;
-   * 若返回非 null 就直接用返回的 initResult 短路 (跳过 recover/state-machine 分支)。
+   * anthropic only: when requestKind === "fork" and recover did not hit a terminal state, short-circuit to passthrough.
+   * The passed function is called after store.getOrRecover and before the isTerminalState check;
+   * if it returns non-null, the returned initResult is used directly to short-circuit (skipping the recover/state-machine branches).
    *
-   * 老 anthropic runner 的语义 (行为等价保留):
+   * Semantics of the old anthropic runner (behavior-equivalent, preserved):
    *   if (requestKind === "fork" && !recovered?.status !== "initialized") → passthrough
    */
   forkPassthroughHook?: (recovered: Awaited<ReturnType<SessionStore["getOrRecover"]>>) => SessionInitResult | null;
 }
 
 export interface SessionInitOrchestrateResult {
-  /** false → response 非 null 需立即返回给客户端; true → 继续走 apply/prewarm */
+  /** false → response is non-null and must be returned to the client immediately; true → continue to apply/prewarm */
   proceed: boolean;
-  /** 立即返回给客户端的响应 (intercept / default-gate); proceed=true 时为 null */
+  /** Response to return to the client immediately (intercept / default-gate); null when proceed=true */
   response: Response | null;
-  /** state-machine 或 recover 后的完整 initResult (proceed=false 时可能为 null) */
+  /** Full initResult after the state machine or recover (may be null when proceed=false) */
   initResult: SessionInitResult | null;
-  /** 本 turn 是否真的走了 handleSessionInit state machine (recover 分支为 false) */
+  /** Whether this turn actually went through the handleSessionInit state machine (false on the recover branch) */
   wentThroughStateMachine: boolean;
 }
 
 /**
- * 主编排。
+ * Main orchestration.
  *
- * 与老 handler 100% 等价, 差别只在:
- *   - 4 个 callback 参数取代 4 处 inline protocol/agent 特化代码
- *   - metadataClient / store 由本 stage 自己 import (老 runner 里 dynamic import 4 处 duplicate)
+ * 100% equivalent to the old handlers, differing only in:
+ *   - 4 callback parameters replace 4 inline protocol/agent-specific code blocks
+ *   - metadataClient / store are imported by this stage itself (the old runners had 4 duplicate dynamic imports)
  *
- * 老 handler 里的 try/catch degrade (recover/state machine 失败) 保留在 caller 手里,
- * 因为 caller 通常会在 catch 里 log + inject continue 而不是 stage 决定。所以本
- * stage 里的 store 调用不做 try/catch, 让异常向上冒。
+ * The try/catch degrade in the old handlers (recover/state machine failure) stays with the caller,
+ * because the caller usually logs + continues injecting in the catch rather than the stage deciding. So the
+ * store calls in this stage have no try/catch and let exceptions bubble up.
  */
 export async function stageSessionInitOrchestrate(
   input: SessionInitOrchestrateInput,
@@ -173,7 +173,7 @@ export async function stageSessionInitOrchestrate(
   let initResult: SessionInitResult;
   let wentThroughStateMachine = false;
 
-  // fork passthrough (anthropic 独有): 若 hook 返回非 null, 直接用它作为 initResult
+  // fork passthrough (anthropic only): if the hook returns non-null, use it directly as initResult
   const forkOverride = input.forkPassthroughHook?.(recovered ?? undefined);
   if (forkOverride) {
     return {

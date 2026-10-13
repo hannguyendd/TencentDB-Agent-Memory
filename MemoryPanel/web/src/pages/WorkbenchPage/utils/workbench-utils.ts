@@ -1,6 +1,6 @@
 /**
- * workbench-utils —— 工作台的共享类型、常量与纯工具函数。
- * 从 TaskWorkbench.tsx 拆出。
+ * workbench-utils -- shared types, constants and pure utility functions of the workbench.
+ * Split out of TaskWorkbench.tsx.
  */
 import { useTranslation } from 'react-i18next';
 
@@ -11,11 +11,11 @@ export function errMsg(e: unknown): string {
 }
 
 /**
- * 从 task 的 metadata_json 里读出**具体来源** id。
+ * Read the **specific source** id from the task's metadata_json.
  *
- * 与后端 `readExternalRef` 对应：source_type 只表大类（manual / external），
- * 具体是哪个系统存在 `metadata_json.external.provider`。
- * 读不到返回 null —— 调用方据此回落到「不显示来源行」。
+ * Corresponds to the backend `readExternalRef`: source_type only denotes the category (manual / external),
+ * and which specific system it is is stored in `metadata_json.external.provider`.
+ * Returns null if it cannot be read -- the caller falls back to "do not show the source row" accordingly.
  */
 export function readExternalProvider(task: { metadata_json?: string }): string | null {
   if (!task.metadata_json) return null;
@@ -26,18 +26,18 @@ export function readExternalProvider(task: { metadata_json?: string }): string |
     const provider = meta.external?.provider;
     return typeof provider === 'string' && provider ? provider : null;
   } catch {
-    // metadata_json 非 JSON（脏数据/旧格式）：当作没有来源，不抛错。
+    // metadata_json is not JSON (dirty data / old format): treat as having no source, don't throw.
     return null;
   }
 }
 
 /**
- * 外部来源 id → 展示名。
+ * External source id -> display name.
  *
- * 按约定取 `task.source.<id>`，不在代码里列举来源 —— 新增来源只需在 i18n
- * 加一条，无需改本函数（若在此处写 `if (id === 'tapd')`，每接一个源都要改代码）。
+ * By convention takes `task.source.<id>`, without enumerating sources in code -- adding a source only needs one entry in i18n,
+ * with no need to change this function (if `if (id === 'tapd')` were written here, code would need changing for every source connected).
  *
- * 未登记的来源回落到 id 本身，不会显示空白。
+ * An unregistered source falls back to the id itself, never showing blank.
  */
 export function useSourceLabel() {
   const { t } = useTranslation();
@@ -45,8 +45,8 @@ export function useSourceLabel() {
     t(`task.source.${sourceId}`, { defaultValue: sourceId });
 }
 
-// Task 状态在演示阶段简化为二态：进行中 / 已完成。
-// 历史的 待处理 / 阻塞 / 已归档 已下线（参见 backendStore.ts 里的 normalizeTaskStatus）。
+// Task status is simplified to two states in the demo phase: in progress / completed.
+// The historical pending / blocked / archived have been taken offline (see normalizeTaskStatus in backendStore.ts).
 export function useStatusLabels() {
   const { t } = useTranslation();
   return {
@@ -61,37 +61,37 @@ export interface AgentOption {
 }
 
 /**
- * task 层聚合视图：按 task_id 分桶后再各自 dedupe。
+ * Task-level aggregated view: bucketed by task_id, then each deduped separately.
  *
- * 内核 append-only 语义：同一 (user, agent, task) 每次 session init 都追加一条，
- * 数据库表里会累积冗余；前端按 Set 做客户端 dedupe，"跑 10 次 session"和
- * "跑 1 次"展示一致。
+ * Kernel append-only semantics: for the same (user, agent, task) every session init appends a record,
+ * so the database table accumulates redundancy; the frontend dedupes client-side with a Set, so "running 10 sessions" and
+ * "running 1 session" display the same.
  */
 export interface TaskParticipationView {
-  /** dedupe 后的 user_id 列表 */
+  /** The user_id list after dedupe */
   users: string[];
-  /** dedupe 后的 agent_id 列表 */
+  /** The agent_id list after dedupe */
   agentIds: string[];
 }
 
 export const EMPTY_VIEW: TaskParticipationView = { users: [], agentIds: [] };
 
 /**
- * 需要隐藏的「非真实 agent」哨兵 id。
+ * Sentinel id of the "non-real agent" that needs to be hidden.
  *
- * 导入产生的参与记录用哨兵 `external-import` 作 agent_id（对应 meta_agents 里
- * 名为「外部任务导入」的假 agent）—— 因为 participation_log 的 agent_id 必填，
- * 而导入场景没有真实 agent 开工。
+ * Participation records produced by import use the sentinel `external-import` as agent_id (corresponding to the fake agent in meta_agents
+ * named "External task import") -- because participation_log's agent_id is required,
+ * while the import scenario has no real agent working.
  *
- * 该哨兵是**记账占位**，不是真的有 agent 参与，故展示层统一过滤掉它：
- *   - 「实际参与 Agent」→ 列表为空 → 落到既有的「—」，与非导入 task 一致；
- *   - 看板卡片 → 同样不渲染该 chip。
+ * This sentinel is a **bookkeeping placeholder**, not a real agent participation, so the display layer uniformly filters it out:
+ *   - "Agents actually participating" -> the list is empty -> falls to the existing "—", consistent with non-imported tasks;
+ *   - Board card -> likewise does not render the chip.
  *
- * 注意这只影响 **agentIds** 桶；同一条记录的 `user_id`（来源系统的处理人）照常
- * 进 `users` 桶，正常显示在「参与的 User」—— 两个桶互不干扰。
+ * Note this only affects the **agentIds** bucket; the `user_id` of the same record (the source system's assignee) still
+ * goes into the `users` bucket and displays normally under "Participating Users" -- the two buckets don't interfere.
  *
- * `tapd-import` 是**改名前的旧值**，历史上已写入库，一并过滤以免旧数据
- * 露出「外部任务导入」（只做展示过滤、**不删数据**：参与记录是观测数据）。
+ * `tapd-import` is an **old value from before the rename**, already written to the database historically, and is filtered together so legacy data
+ * doesn't expose "External task import" (display filtering only, **no data deleted**: participation records are observation data).
  */
 const HIDDEN_AGENT_IDS = new Set(['external-import', 'tapd-import']);
 
@@ -99,7 +99,7 @@ export function isHiddenAgentId(agentId: string): boolean {
   return HIDDEN_AGENT_IDS.has(agentId);
 }
 
-/** 过滤掉哨兵后的真实 agent_id 列表。 */
+/** The list of real agent_ids after filtering out sentinels. */
 export function visibleAgentIds(agentIds: readonly string[]): string[] {
   return agentIds.filter((id) => !isHiddenAgentId(id));
 }

@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-v2 → v3 数据迁移脚本
+v2 → v3 data migration script
 
-1. 对 vectors.db 做表结构升级 + 存量数据字段补齐：
-   - l1_records: 新增 team_id, task_id, user_id, agent_id, version
-   - l0_conversations: 新增 team_id, task_id, user_id, agent_id
-   - l1_fts / l0_fts: FTS5 不支持 ALTER，需 DROP + 重建
-   - 新增空表: memory_audit, skills, skill_fts
+1. Upgrade the table schema of vectors.db + backfill fields of existing data:
+   - l1_records: add team_id, task_id, user_id, agent_id, version
+   - l0_conversations: add team_id, task_id, user_id, agent_id
+   - l1_fts / l0_fts: FTS5 does not support ALTER, so DROP + rebuild is needed
+   - add empty tables: memory_audit, skills, skill_fts
 
-2. L2/L3 文件迁移（复制到 v3 profiles 目录）：
-   - 将 scene_blocks/、persona.md、.metadata/ 复制到
-     profiles/team%3Adefault%7Cagent%3Adefault/ 下
+2. L2/L3 file migration (copy to the v3 profiles directory):
+   - copy scene_blocks/, persona.md, .metadata/ into
+     profiles/team%3Adefault%7Cagent%3Adefault/
 
-不处理：
-  - skill_vec: vec0 虚拟表，依赖运行时 embedding dimensions 参数，
-    由 v3 服务启动时自动创建（仅在 dimensions > 0 时创建）
-  - metadata.db: 独立数据库，由管控面创建和维护
-  - l1_vec / l0_vec / embedding_meta: 表结构无变更
+Not handled:
+  - skill_vec: a vec0 virtual table that depends on the runtime embedding dimensions parameter,
+    created automatically when the v3 service starts (only when dimensions > 0)
+  - metadata.db: a standalone database, created and maintained by the control plane
+  - l1_vec / l0_vec / embedding_meta: no table-schema changes
 
-用法:
+Usage:
     python v2-to-v3-migrate.py /path/to/memory-tdai
     python v2-to-v3-migrate.py /path/to/memory-tdai --dry-run
-    python v2-to-v3-migrate.py /path/to/memory-tdai --db-only     (仅迁移数据库，跳过 L2/L3 文件)
+    python v2-to-v3-migrate.py /path/to/memory-tdai --db-only     (migrate the database only, skip L2/L3 files)
 """
 
 import argparse
@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 
 
 # ============================================================
-# 默认值
+# Defaults
 # ============================================================
 DEFAULT_TEAM_ID = "default"
 DEFAULT_USER_ID = "default"
@@ -44,7 +44,7 @@ DEFAULT_VERSION = 0
 
 
 # ============================================================
-# 新增表 DDL（空表）
+# DDL of newly added tables (empty tables)
 # ============================================================
 MEMORY_AUDIT_DDL = """
 CREATE TABLE IF NOT EXISTS memory_audit (
@@ -116,7 +116,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS skill_fts USING fts5(
 """
 
 # ============================================================
-# 新版 L1 FTS DDL（含租户隔离列）
+# New L1 FTS DDL (with tenant isolation columns)
 # ============================================================
 L1_FTS_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS l1_fts USING fts5(
@@ -141,7 +141,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS l1_fts USING fts5(
 """
 
 # ============================================================
-# 新版 L0 FTS DDL（含租户隔离列）
+# New L0 FTS DDL (with tenant isolation columns)
 # ============================================================
 L0_FTS_DDL = """
 CREATE VIRTUAL TABLE IF NOT EXISTS l0_fts USING fts5(
@@ -166,22 +166,22 @@ def log(msg: str):
 
 
 def safe_alter(db: sqlite3.Connection, table: str, col: str, col_def: str):
-    """幂等的 ALTER TABLE ADD COLUMN（忽略重复列错误）。"""
+    """Idempotent ALTER TABLE ADD COLUMN (ignores duplicate-column errors)."""
     try:
         db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def};")
-        log(f"  + 添加字段 {table}.{col}")
+        log(f"  + adding column {table}.{col}")
     except sqlite3.OperationalError as e:
         if "duplicate column name" in str(e).lower():
-            log(f"  ~ 字段已存在 {table}.{col}，跳过")
+            log(f"  ~ column already exists {table}.{col}, skipping")
         else:
             raise
 
 
 def migrate_l1_records(db: sqlite3.Connection):
-    """L1 表：新增 team_id, task_id, user_id, agent_id, version。"""
+    """L1 table: add team_id, task_id, user_id, agent_id, version."""
     log("--- L1: l1_records ---")
     before = db.execute("SELECT COUNT(*) FROM l1_records").fetchone()[0]
-    log(f"  迁移前记录数: {before}")
+    log(f"  records before migration: {before}")
 
     safe_alter(db, "l1_records", "team_id", "TEXT DEFAULT ''")
     safe_alter(db, "l1_records", "task_id", "TEXT DEFAULT ''")
@@ -189,7 +189,7 @@ def migrate_l1_records(db: sqlite3.Connection):
     safe_alter(db, "l1_records", "agent_id", "TEXT NOT NULL DEFAULT 'default'")
     safe_alter(db, "l1_records", "version", "INTEGER NOT NULL DEFAULT 0")
 
-    # 补齐存量数据
+    # backfill existing data
     db.execute("UPDATE l1_records SET team_id = ? WHERE team_id = '' OR team_id IS NULL",
                (DEFAULT_TEAM_ID,))
     db.execute("UPDATE l1_records SET user_id = ? WHERE user_id = '' OR user_id IS NULL",
@@ -203,7 +203,7 @@ def migrate_l1_records(db: sqlite3.Connection):
     db.execute("UPDATE l1_records SET session_id = ? WHERE session_id = '' OR session_id IS NULL",
                ("default",))
 
-    # 新增索引
+    # add indexes
     indexes = [
         "CREATE INDEX IF NOT EXISTS idx_l1_task_updated       ON l1_records(task_id, updated_time);",
         "CREATE INDEX IF NOT EXISTS idx_l1_team_agent_updated  ON l1_records(team_id, agent_id, updated_time);",
@@ -213,23 +213,23 @@ def migrate_l1_records(db: sqlite3.Connection):
     ]
     for idx_sql in indexes:
         db.execute(idx_sql)
-        log(f"  + 索引: {idx_sql.split(' ON ')[0].split()[-1]}")
+        log(f"  + index: {idx_sql.split(' ON ')[0].split()[-1]}")
 
-    log(f"  L1 迁移完成, 记录数: {before}")
+    log(f"  L1 migration complete, records: {before}")
 
 
 def migrate_l0_conversations(db: sqlite3.Connection):
-    """L0 表：新增 team_id, task_id, user_id, agent_id。"""
+    """L0 table: add team_id, task_id, user_id, agent_id."""
     log("--- L0: l0_conversations ---")
     before = db.execute("SELECT COUNT(*) FROM l0_conversations").fetchone()[0]
-    log(f"  迁移前记录数: {before}")
+    log(f"  records before migration: {before}")
 
     safe_alter(db, "l0_conversations", "team_id", "TEXT DEFAULT ''")
     safe_alter(db, "l0_conversations", "task_id", "TEXT DEFAULT ''")
     safe_alter(db, "l0_conversations", "user_id", "TEXT NOT NULL DEFAULT 'default'")
     safe_alter(db, "l0_conversations", "agent_id", "TEXT NOT NULL DEFAULT 'default'")
 
-    # 补齐存量数据
+    # backfill existing data
     db.execute("UPDATE l0_conversations SET team_id = ? WHERE team_id = '' OR team_id IS NULL",
                (DEFAULT_TEAM_ID,))
     db.execute("UPDATE l0_conversations SET user_id = ? WHERE user_id = '' OR user_id IS NULL",
@@ -241,7 +241,7 @@ def migrate_l0_conversations(db: sqlite3.Connection):
     db.execute("UPDATE l0_conversations SET session_id = ? WHERE session_id = '' OR session_id IS NULL",
                ("default",))
 
-    # 新增索引
+    # add indexes
     indexes = [
         "CREATE INDEX IF NOT EXISTS idx_l0_task              ON l0_conversations(task_id);",
         "CREATE INDEX IF NOT EXISTS idx_l0_team_agent        ON l0_conversations(team_id, agent_id);",
@@ -251,83 +251,83 @@ def migrate_l0_conversations(db: sqlite3.Connection):
     ]
     for idx_sql in indexes:
         db.execute(idx_sql)
-        log(f"  + 索引: {idx_sql.split(' ON ')[0].split()[-1]}")
+        log(f"  + index: {idx_sql.split(' ON ')[0].split()[-1]}")
 
-    log(f"  L0 迁移完成, 记录数: {before}")
+    log(f"  L0 migration complete, records: {before}")
 
 
 def rebuild_fts(db: sqlite3.Connection, fts_table: str, ddl: str,
                 data_table: str, columns: list[str], source_exprs: list[str]):
     """
-    删除旧 FTS 表，创建新版，从数据表全量重建索引。
+    Drop the old FTS table, create the new one, and rebuild the index in full from the data table.
     """
     log(f"--- FTS: {fts_table} ---")
-    # 检查旧 FTS 表是否存在
+    # check whether the old FTS table exists
     exists = db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
         (fts_table,)
     ).fetchone()
 
     if exists:
-        # 先查旧表列数来判断是否需要重建
+        # first check the old table's column count to decide whether a rebuild is needed
         old_cols = db.execute(f"PRAGMA table_info({fts_table})").fetchall()
         new_col_names = [c.split()[0] for c in columns]
         old_col_names = [row[1] for row in old_cols]
 
         if set(new_col_names).issubset(set(old_col_names)):
-            log(f"  {fts_table} 已包含所有新列，跳过重建")
+            log(f"  {fts_table} already contains all new columns, skipping rebuild")
             return
 
-        log(f"  删除旧 {fts_table}...")
+        log(f"  dropping old {fts_table}...")
         db.execute(f"DROP TABLE IF EXISTS {fts_table};")
 
-    log(f"  创建新版 {fts_table}...")
+    log(f"  creating new {fts_table}...")
     db.execute(ddl)
 
-    log(f"  从 {data_table} 重建 FTS 索引...")
+    log(f"  rebuilding FTS index from {data_table}...")
     cols_str = ", ".join(columns)
     sources_str = ", ".join(source_exprs)
     insert_sql = f"INSERT INTO {fts_table}({cols_str}) SELECT {sources_str} FROM {data_table};"
     db.execute(insert_sql)
     count = db.execute(f"SELECT COUNT(*) FROM {fts_table}").fetchone()[0]
-    log(f"  {fts_table} 重建完成, 行数: {count}")
+    log(f"  {fts_table} rebuild complete, rows: {count}")
 
 
 def create_new_tables(db: sqlite3.Connection):
-    """创建新版新增的空表。"""
-    log("--- 新增表 ---")
+    """Create the empty tables newly added in the new version."""
+    log("--- new tables ---")
 
-    log("  创建 memory_audit...")
+    log("  creating memory_audit...")
     db.execute(MEMORY_AUDIT_DDL)
     for idx_sql in MEMORY_AUDIT_INDEXES:
         db.execute(idx_sql)
 
-    log("  创建 skills...")
+    log("  creating skills...")
     db.execute(SKILLS_DDL)
     for idx_sql in SKILLS_INDEXES:
         db.execute(idx_sql)
 
-    log("  创建 skill_fts...")
+    log("  creating skill_fts...")
     db.execute(SKILL_FTS_DDL)
 
-    log("  新增表创建完成")
+    log("  new tables created")
 
 
 def migrate_l2_l3_files(data_dir: str):
     """
-    L2/L3 文件迁移：复制到 v3 profiles 目录。
+    L2/L3 file migration: copy to the v3 profiles directory.
 
-    将 data_dir 下的 scene_blocks/、persona.md、.metadata/ 复制到
-    data_dir/profiles/team%3Adefault%7Cagent%3Adefault/ 下。
-    如果目标目录已存在对应文件则跳过。
+    Copy scene_blocks/, persona.md, .metadata/ under data_dir into
+    data_dir/profiles/team%3Adefault%7Cagent%3Adefault/.
+    If the corresponding file already exists in the target directory, skip it.
     """
     PROFILE_DIR = "team%3Adefault%7Cagent%3Adefault"
-    log("--- L2/L3 文件迁移 ---")
+    log("--- L2/L3 file migration ---")
 
     src_dir = os.path.abspath(data_dir)
     dst_root = os.path.join(src_dir, "profiles", PROFILE_DIR)
 
-    # 需要复制的目录和文件
+    # directories and files that need to be copied
     to_copy = {
         "scene_blocks": os.path.join(src_dir, "scene_blocks"),
         ".metadata": os.path.join(src_dir, ".metadata"),
@@ -336,50 +336,50 @@ def migrate_l2_l3_files(data_dir: str):
 
     for name, src_path in to_copy.items():
         if not os.path.exists(src_path):
-            log(f"  ~ {name} 不存在，跳过")
+            log(f"  ~ {name} does not exist, skipping")
             continue
 
         dst_path = os.path.join(dst_root, name)
 
         if os.path.isdir(src_path):
-            # 目录：递归复制
+            # directory: copy recursively
             if os.path.exists(dst_path):
-                log(f"  ~ {name}/ 已存在，跳过目录复制")
+                log(f"  ~ {name}/ already exists, skipping directory copy")
                 continue
             os.makedirs(dst_root, exist_ok=True)
             shutil.copytree(src_path, dst_path)
-            log(f"  + 复制目录: {name}/ -> profiles/{PROFILE_DIR}/{name}/")
+            log(f"  + copying directory: {name}/ -> profiles/{PROFILE_DIR}/{name}/")
         else:
-            # 文件
+            # file
             if os.path.exists(dst_path):
-                log(f"  ~ {name} 已存在，跳过")
+                log(f"  ~ {name} already exists, skipping")
                 continue
             os.makedirs(dst_root, exist_ok=True)
             shutil.copy2(src_path, dst_path)
-            log(f"  + 复制文件: {name} -> profiles/{PROFILE_DIR}/{name}")
+            log(f"  + copying file: {name} -> profiles/{PROFILE_DIR}/{name}")
 
-    log("  L2/L3 文件迁移完成")
+    log("  L2/L3 file migration complete")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="v2 → v3 数据迁移脚本 (SQLite vectors.db 表结构升级)"
+        description="v2 → v3 data migration script (SQLite vectors.db table-schema upgrade)"
     )
     parser.add_argument(
         "data_dir",
-        help="v2 数据目录路径，例如 /path/to/memory-tdai（目录下需包含 vectors.db）"
+        help="path to the v2 data directory, e.g. /path/to/memory-tdai (the directory must contain vectors.db)"
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="仅检查，不实际修改数据库"
+        help="check only, do not actually modify the database"
     )
     parser.add_argument(
         "--no-backup", action="store_true",
-        help="跳过备份"
+        help="skip backup"
     )
     parser.add_argument(
         "--db-only", action="store_true",
-        help="仅迁移数据库，跳过 L2/L3 文件迁移"
+        help="migrate the database only, skip L2/L3 file migration"
     )
     args = parser.parse_args()
 
@@ -387,16 +387,16 @@ def main():
     db_path = os.path.join(data_dir, "vectors.db")
 
     if not os.path.isfile(db_path):
-        log(f"错误: 找不到 vectors.db: {db_path}")
+        log(f"error: vectors.db not found: {db_path}")
         sys.exit(1)
 
-    # ---- 连接数据库 ----
-    log(f"数据目录: {data_dir}")
-    log(f"数据库:   {db_path}")
+    # ---- connect to the database ----
+    log(f"data directory: {data_dir}")
+    log(f"database:       {db_path}")
 
     if args.dry_run:
-        log("[DRY-RUN 模式] 仅检查，不修改数据库\n")
-        # dry-run: 只读连接，打印表信息
+        log("[DRY-RUN mode] check only, database not modified\n")
+        # dry-run: read-only connection, print table info
         db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         tables = ["l1_records", "l0_conversations", "l1_fts", "l0_fts", "memory_audit", "skills"]
         for t in tables:
@@ -407,40 +407,40 @@ def main():
             if exists:
                 cols = db.execute(f"PRAGMA table_info({t})").fetchall()
                 count = db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                log(f"  [{t}] 列数={len(cols)}, 行数={count}")
-                log(f"         列: {[c[1] for c in cols]}")
+                log(f"  [{t}] columns={len(cols)}, rows={count}")
+                log(f"         columns: {[c[1] for c in cols]}")
             else:
-                log(f"  [{t}] 不存在")
+                log(f"  [{t}] does not exist")
         db.close()
 
-        # dry-run: 检查 L2/L3 文件
+        # dry-run: check L2/L3 files
         if not args.db_only:
-            log("--- L2/L3 文件检查 ---")
+            log("--- L2/L3 file check ---")
             profile_dir = "team%3Adefault%7Cagent%3Adefault"
             for name in ["scene_blocks", ".metadata", "persona.md"]:
                 src = os.path.join(data_dir, name)
                 dst = os.path.join(data_dir, "profiles", profile_dir, name)
-                src_status = "存在" if os.path.exists(src) else "不存在"
-                dst_status = "存在" if os.path.exists(dst) else "不存在"
-                log(f"  {name}: 源={src_status}, 目标={dst_status}")
+                src_status = "exists" if os.path.exists(src) else "does not exist"
+                dst_status = "exists" if os.path.exists(dst) else "does not exist"
+                log(f"  {name}: source={src_status}, target={dst_status}")
 
-        log("\nDRY-RUN 完成，未做任何修改")
+        log("\nDRY-RUN complete, nothing was modified")
         return
 
-    # ---- 备份 ----
+    # ---- backup ----
     if not args.no_backup:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         backup_path = f"{db_path}.bak.{timestamp}"
-        log(f"备份: {backup_path}")
+        log(f"backup: {backup_path}")
         shutil.copy2(db_path, backup_path)
 
     # ---- WAL checkpoint ----
-    log("执行 WAL checkpoint...")
+    log("running WAL checkpoint...")
     ck_db = sqlite3.connect(db_path)
     ck_db.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     ck_db.close()
 
-    # ---- 迁移 ----
+    # ---- migrate ----
     db = sqlite3.connect(db_path)
     db.execute("PRAGMA journal_mode = WAL;")
 
@@ -449,7 +449,7 @@ def main():
     migrate_l1_records(db)
     migrate_l0_conversations(db)
 
-    # FTS 表重建
+    # FTS table rebuild
     rebuild_fts(
         db, "l1_fts", L1_FTS_DDL, "l1_records",
         columns=[
@@ -481,18 +481,18 @@ def main():
         ],
     )
 
-    # 新增表
+    # new tables
     create_new_tables(db)
 
     db.commit()
     db.close()
 
-    # L2/L3 文件迁移（除非指定 --db-only）
+    # L2/L3 file migration (unless --db-only is specified)
     if not args.db_only:
         migrate_l2_l3_files(data_dir)
 
     elapsed = time.time() - t_start
-    log(f"\n迁移完成! 耗时: {elapsed:.2f}s")
+    log(f"\nMigration complete! Elapsed: {elapsed:.2f}s")
 
 
 if __name__ == "__main__":

@@ -1,17 +1,17 @@
 /**
- * 关联表 `id` 列插入：碰撞检测与重试（配合 generateRelationId）。
+ * Insert into the association table `id` column: collision detection and retry (used with generateRelationId).
  */
 import { generateRelationId } from "../utils/id-generator.js";
 
 export const RELATION_ID_RETRY_LIMIT = 3;
 
-/** SQLite：关联表主键 `id` 唯一约束冲突。 */
+/** SQLite: unique-constraint conflict on the association table primary key `id`. */
 export function isSqliteRelationIdCollision(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /UNIQUE constraint failed: meta_\w+\.id\b/.test(msg);
 }
 
-/** MongoDB：关联表主键 `id` 重复键（E11000）。 */
+/** MongoDB: duplicate key (E11000) on the association table primary key `id`. */
 export function isMongoRelationIdCollision(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { code?: number; keyPattern?: Record<string, unknown> };
@@ -19,7 +19,7 @@ export function isMongoRelationIdCollision(err: unknown): boolean {
 }
 
 /**
- * 使用自动生成的 relation id 执行插入；`fixedId` 已指定时不重试。
+ * Execute the insert with an auto-generated relation id; no retry when `fixedId` is specified.
  */
 export function runWithGeneratedRelationId<T>(
   fixedId: string | undefined,

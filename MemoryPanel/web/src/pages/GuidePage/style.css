@@ -1,6 +1,6 @@
 /**
- * GuidePage 使用说明页样式
- * 明亮简洁风格，颜色走 Tea Design Token，命令块用等宽字体。
+ * GuidePage usage guide page styles
+ * Bright and clean style, colors use Tea Design Tokens, command blocks use a monospace font.
  */
 
 .guide-page {
@@ -10,7 +10,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* ===== 页头 ===== */
+/* ===== Page header ===== */
 .guide-titlebar {
   display: flex;
   align-items: flex-start;
@@ -54,7 +54,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== 主 tab ===== */
+/* ===== Main tabs ===== */
 .guide-main-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -96,7 +96,7 @@
   border-color: var(--tea-color-border-brand-default);
 }
 
-/* ===== 内容区 ===== */
+/* ===== Content area ===== */
 .guide-surface {
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 10px;
@@ -104,7 +104,7 @@
   padding: 20px;
 }
 
-/* ===== 快速接入步骤条（三步流程）===== */
+/* ===== Quick start step bar (three-step flow) ===== */
 .guide-stepper {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -190,7 +190,7 @@
   white-space: nowrap;
 }
 
-/* ===== 步骤导航（上一步 / 下一步）===== */
+/* ===== Step navigation (previous / next) ===== */
 .guide-step-nav {
   display: flex;
   align-items: center;
@@ -241,7 +241,7 @@
   }
 }
 
-/* ===== 配置包下载 ===== */
+/* ===== Config package download ===== */
 .guide-package-download {
   display: flex;
   align-items: center;
@@ -281,7 +281,7 @@
   opacity: 0.9;
 }
 
-/* ===== 准备信息区 ===== */
+/* ===== Preparation info area ===== */
 .guide-prepare {
   display: flex;
   flex-direction: column;
@@ -336,7 +336,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* Analyse 模式提示：脚本配不出 /analyse，需手动配置（醒目但不刺眼） */
+/* Analyse mode hint: the script cannot configure /analyse, manual configuration is needed (noticeable but not harsh) */
 .guide-mode-notice {
   color: var(--tea-color-text-warning) !important;
   line-height: 18px;
@@ -375,7 +375,7 @@
   padding: 0;
 }
 
-/* ===== 接入方式二选一 ===== */
+/* ===== Choose one of two integration methods ===== */
 .guide-method-picker {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -412,7 +412,7 @@
   box-shadow: 0 0 0 1px var(--tea-color-border-brand-default);
 }
 
-/* ===== 命令块 ===== */
+/* ===== Command block ===== */
 .guide-command {
   display: flex;
   align-items: center;
@@ -461,7 +461,7 @@
   line-height: 18px;
 }
 
-/* ===== 复制按钮 ===== */
+/* ===== Copy button ===== */
 .guide-copy {
   flex-shrink: 0;
   padding: 4px 10px;
@@ -478,7 +478,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* ===== 手动配置 ===== */
+/* ===== Manual configuration ===== */
 .guide-manual-entry {
   margin-top: 16px;
   text-align: center;
@@ -623,8 +623,8 @@
   line-height: 20px;
 }
 
-/* ===== 获取历史数据 ===== */
-/* 配置成功验证提示：明确告诉用户「看到关联团队资产选项 = 配置成功」 */
+/* ===== Fetch history data ===== */
+/* Config verification hint: tells users clearly "seeing the Linked team assets option = configuration succeeded" */
 .guide-verify {
   margin-top: 18px;
   padding: 14px 16px;
@@ -674,7 +674,7 @@
   line-height: 20px;
 }
 
-/* ===== 最佳实践 ===== */
+/* ===== Best practices ===== */
 .guide-practice-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -888,7 +888,7 @@
   margin-bottom: 4px;
 }
 
-/* ===== 引导回放 ===== */
+/* ===== Onboarding replay ===== */
 .guide-replay {
   display: flex;
   align-items: center;
@@ -930,7 +930,7 @@
   opacity: 0.9;
 }
 
-/* ===== 记忆指令（mem: 命令）===== */
+/* ===== Memory commands (mem: commands) ===== */
 .guide-mem-intro {
   margin-bottom: 20px;
 }
@@ -1108,7 +1108,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* ===== 窄屏适配 ===== */
+/* ===== Narrow-screen adaptation ===== */
 @media (max-width: 720px) {
   .guide-main-tabs {
     grid-template-columns: 1fr;

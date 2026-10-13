@@ -1,8 +1,8 @@
 /**
- * 将 Gateway yaml `metadata` 块回填到 process.env（仅当 env 未设置时）。
+ * Backfill the Gateway yaml `metadata` block into process.env (only when env is not set).
  *
- * 解析优先级：process.env > yaml（与 TDAI_METADATA_MAX_USERS 一致）。
- * factory.ts 仍只读 env，无需改调用签名。
+ * Resolution priority: process.env > yaml (consistent with TDAI_METADATA_MAX_USERS).
+ * factory.ts still only reads env, so no call signature changes are needed.
  */
 
 import type { GatewayMetadataConfig } from "./config.js";
@@ -14,7 +14,7 @@ function setEnvIfEmpty(key: string, value: string | undefined): void {
 }
 
 /**
- * 在 validateMetadataStartupConfig / ensureMetadataStore 之前调用。
+ * Called before validateMetadataStartupConfig / ensureMetadataStore.
  */
 export function applyMetadataEnvFromGatewayConfig(metadata: GatewayMetadataConfig): void {
   const store = metadata.store;

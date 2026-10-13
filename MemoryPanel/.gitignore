@@ -12,14 +12,14 @@ build/
 .env.*
 !.env.example
 
-# 实例注册表：含 tdai kernel bearer token，禁止入仓。
-# 各开发机本地按 config/metadata-instances.example.json 自建真值文件。
-# 历史 commit 里存过真值，属于遗留问题（仓库不外发场景可暂不清历史）；
-# 若未来要开源/给客户看仓库，需用 git filter-repo 清历史。
+# Instance registry: contains the tdai kernel bearer token, must not be committed.
+# Each dev machine builds its own real-value file locally from config/metadata-instances.example.json.
+# Real values were committed in history, a legacy issue (history cleanup can wait when the repo is not distributed externally);
+# if the repo is ever open-sourced / shown to customers, history must be cleaned with git filter-repo.
 config/metadata-instances.json
 !config/metadata-instances.example.json
 
-# Local data (SQLite 运行库，含真实用户身份数据，禁止提交)
+# Local data (SQLite runtime DB, contains real user identity data, must not be committed)
 data/
 *.db
 *.db-shm
@@ -55,11 +55,11 @@ tmp/
 # tsc incremental build info
 *.tsbuildinfo
 
-# vite / tsc 编译产物：frontend/src 源码只允许 .ts/.tsx，编译产物不入库
+# vite / tsc build output: frontend/src sources may only be .ts/.tsx; build output is not committed
 frontend/src/**/*.js
 frontend/src/**/*.js.map
 
-# Playwright e2e 测试输出
+# Playwright e2e test output
 frontend/test-results/
 frontend/playwright-report/
 

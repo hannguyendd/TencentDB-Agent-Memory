@@ -1,13 +1,13 @@
 /**
- * MemCommands — GuidePage「记忆指令」主 tab 的内容组件。
+ * MemCommands -- content component of the GuidePage "Memory commands" main tab.
  *
- * 展示 Agent 会话中支持的全部 `mem:` 命令：
- *   - 顶部说明：命令格式约定；
- *   - 按分组（日常高频 / 任务管理）以卡片列出每个命令，命令原文可一键复制，
- *     需多步确认的命令（create-task / update-task）额外展示“回复选项”表；
- *   - 底部“命令示例”区，可整体复制一组常用命令。
+ * Shows all `mem:` commands supported in Agent sessions:
+ *   - Top note: command format conventions;
+ *   - Lists each command as a card by group (daily high-frequency / task management); the raw command can be copied in one click,
+ *     and commands that need multi-step confirmation (create-task / update-task) additionally show a "reply options" table;
+ *   - A "Command examples" section at the bottom, where a set of common commands can be copied as a whole.
  *
- * 纯展示组件，数据来自 memCommands.ts，复制交互复用 CopyButton。
+ * Pure display component; data comes from memCommands.ts, and the copy interaction reuses CopyButton.
  */
 import { useTranslation } from 'react-i18next';
 import { CopyButton } from './CopyButton';
@@ -15,7 +15,7 @@ import { MEM_COMMANDS, MEM_EXAMPLES_KEY, MEM_GROUPS, type MemCommand } from './m
 
 function CommandCard({ cmd }: { cmd: MemCommand }) {
   const { t } = useTranslation();
-  // 展示文本带占位符（随语言切换）；复制值只取命令静态部分，避免把占位符复制进去
+  // The display text contains placeholders (changes with language); the copied value takes only the static part of the command, to avoid copying placeholders
   const displayCommand = cmd.argKey ? `${cmd.command} ${t(cmd.argKey)}` : cmd.command;
   return (
     <li className="guide-mem-card">

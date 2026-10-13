@@ -1,16 +1,16 @@
 /**
- * Codex AgentStrategy。
- * 走 responses protocol; Default-gate 检测在 session/codebuddy/init.ts (见下)。
+ * Codex AgentStrategy.
+ * Uses the responses protocol; Default-gate detection lives in session/codebuddy/init.ts (see below).
  *
- * stageGates: full — 与 CC/CB 观测能力对齐;
- * 修复了老 codexHandler 的 handler-audit bug B1-B8 (rate limit / credit /
- * opik / identity / model gate / usage log / model intent 等观测和治理 stage)。
- * 部署后 CH tool_call_logs / Opik trace / identity 表都会开始有 codex 数据。
+ * stageGates: full -- aligned with CC/CB observability;
+ * fixes the handler-audit bugs B1-B8 of the old codexHandler (rate limit / credit /
+ * opik / identity / model gate / usage log / model intent and other observability and governance stages).
+ * After deployment, the CH tool_call_logs / Opik trace / identity tables will start receiving codex data.
  *
- * 2026-10-08 清理: 删去 strategy 上的 `archiveProtocol` / `detectDefaultGate` ——
- * 两者零读取点。真正生效的 Default-gate 检测是
- * `session/codebuddy/init.ts::detectCodexDefaultGate` (611 行调用);
- * archive 的 protocol 由 runner 以字面量传给 stageArchive。
+ * 2026-10-08 cleanup: removed `archiveProtocol` / `detectDefaultGate` from the strategy --
+ * neither has any read site. The Default-gate detection that actually takes effect is
+ * `session/codebuddy/init.ts::detectCodexDefaultGate` (called at line 611);
+ * the archive protocol is passed to stageArchive as a literal by the runner.
  */
 
 import { codexAdapter } from "../../../agent-adapters/codex.js";

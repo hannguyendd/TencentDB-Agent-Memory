@@ -1,7 +1,7 @@
 /**
- * source-provider routes —— 已启用的外部来源列表（读部署配置）。
+ * source-provider routes — list of enabled external sources (reads deployment config).
  *
- * Panel 前端据此渲染下拉，不在 Panel 侧重复配置（KS 是唯一真相源）。
+ * Panel's frontend renders dropdowns from this, with no duplicate config on the Panel side (KS is the single source of truth).
  */
 
 import { Hono } from "hono";
@@ -20,13 +20,13 @@ export function createSourceProviderRoutes(deps: SourceProviderRouteDeps = {}): 
   const registry = deps.registry ?? new CodeSourceRegistry();
   const wikiRegistry = deps.wikiRegistry ?? new WikiSourceRegistry();
 
-  // GET /code —— codegraph 来源（gongfeng / github / gitlab ...）
+  // GET /code — codegraph sources (gongfeng / github / gitlab ...)
   app.get("/code", (c) => c.json(wrapOk({ items: registry.list() })));
 
-  // GET /wiki —— wiki 来源（iwiki ...）
+  // GET /wiki — wiki sources (iwiki ...)
   app.get("/wiki", (c) => c.json(wrapOk({ items: wikiRegistry.list() })));
 
-  // GET / —— 聚合全部类型
+  // GET / — aggregate all types
   app.get("/", (c) =>
     c.json(wrapOk({ code: registry.list(), wiki: wikiRegistry.list() })),
   );

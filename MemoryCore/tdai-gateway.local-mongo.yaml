@@ -1,12 +1,12 @@
 # ============================================================
-# TDAI Gateway — 本地 Mongo 形态配置（配合 docker-compose.local-mongo.yaml）
+# TDAI Gateway -- local Mongo flavor config (used with docker-compose.local-mongo.yaml)
 # ============================================================
-# 适用场景: 本地容器化验证 Mongo 后端（atlas-local mongot + gateway 单容器）
-# 存储选择: **由环境变量决定，本文件不含存储后端配置** —
-#   STORE_MODE=mongodb            数据面走 Mongo（gateway 形态不读 memory.storeBackend）
-#   MONGODB_ENDPOINT/DATABASE     Mongo 连接信息（compose 内指向 mongo-search 服务）
-#   STATE_BACKEND=local           进程内状态/pipeline（免 Redis）
-# 元数据: 不设 TDAI_METADATA_MONGO_URI → 自动 sqlite（落 baseDir，Phase 4 才收敛）
+# Use case: local containerized verification of the Mongo backend (atlas-local mongot + single gateway container)
+# Storage selection: **determined by environment variables; this file contains no storage backend config** --
+#   STORE_MODE=mongodb            data plane on Mongo (gateway flavor does not read memory.storeBackend)
+#   MONGODB_ENDPOINT/DATABASE     Mongo connection info (inside compose points to the mongo-search service)
+#   STATE_BACKEND=local           in-process state/pipeline (no Redis)
+# Metadata: TDAI_METADATA_MONGO_URI not set -> automatically sqlite (lands in baseDir, converged only in Phase 4)
 # ============================================================
 
 deployMode: standalone
@@ -14,13 +14,13 @@ stateBackend: "local"
 
 server:
   port: 8420
-  host: "0.0.0.0"                      # 容器内必须监听全网卡，否则端口映射不生效
-  apiKey: "${TDAI_GATEWAY_API_KEY}"    # 本地置空 = 关闭 Layer1 鉴权（同 .env.knowledge-local 语义）
+  host: "0.0.0.0"                      # must listen on all interfaces inside the container, otherwise port mapping has no effect
+  apiKey: "${TDAI_GATEWAY_API_KEY}"    # empty locally = Layer1 auth off (same semantics as .env.knowledge-local)
 
 data:
   baseDir: /data/tdai-memory
 
-# ── LLM (必填，经环境变量注入) ──
+# -- LLM (required, injected via environment variables) --
 llm:
   baseUrl: "${TDAI_LLM_BASE_URL}"
   apiKey: "${TDAI_LLM_API_KEY}"
@@ -28,7 +28,7 @@ llm:
   maxTokens: 65536
   timeoutMs: 300000
 
-# ── Memory 引擎配置 ──
+# -- Memory engine config --
 memory:
   capture:
     enabled: true
@@ -53,12 +53,12 @@ memory:
     strategy: "hybrid"
     timeoutMs: 5000
   embedding:
-    provider: "none"                   # 关闭向量，仅 mongot 原生 BM25
+    provider: "none"                   # vectors off, native mongot BM25 only
   bm25:
     enabled: true
     language: "zh"
 
-# ── Skill 模块 ──
+# -- Skill module --
 skill:
   enabled: true
   routing:
@@ -71,7 +71,7 @@ skill:
     maxResourceSizeBytes: 5000000
     allowExecutable: false
 
-# ── 元数据（meta_assets / ACL）──
+# -- Metadata (meta_assets / ACL) --
 metadata:
   maxUsersPerInstance: 500
   maxTeamsPerInstance: 100

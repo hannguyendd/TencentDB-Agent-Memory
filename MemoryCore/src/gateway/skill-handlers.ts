@@ -1,10 +1,10 @@
 /**
  * /skill/* HTTP handlers — v3 (migrated from v2, 2026-06-17).
  *
- * 设计文档对应：docs/design/2026-06-17-skill-redesign-v2.md §3.5 / §3.6。
+ * Corresponding design doc: docs/design/2026-06-17-skill-redesign-v2.md §3.5 / §3.6.
  *
- * 错误码映射（核心层 SkillCoreError → HTTP envelope code）：
- *   INVALID_FRONTMATTER       → 40001  (frontmatter.name 与 body/head 不一致)
+ * Error code mapping (core-layer SkillCoreError -> HTTP envelope code):
+ *   INVALID_FRONTMATTER       -> 40001  (frontmatter.name inconsistent with body/head)
  *   INVALID_PATH              → 40001
  *   SKILL_NOT_OWNER           → 40301
  *   SKILL_TEAM_MISMATCH       → 40302
@@ -13,11 +13,11 @@
  *   RESOURCE_TOO_LARGE        → 41301
  *   SKILL_NAME_DUPLICATE      → 42201
  *   SKILL_PATCH_NOT_UNIQUE    → 42202
- *   SKILL_FRONTMATTER_INVALID → 42203  (frontmatter parse / 长度 / regex)
- *   STORAGE_NOT_FOUND         → 50301  (版本目录被 GC)
- *   QUEUE_UNAVAILABLE         → 50301  (extract 时队列未就绪)
- *   LLM_UNAVAILABLE           → 50302  (LLM 不可用)
- *   其他                       → 50001
+ *   SKILL_FRONTMATTER_INVALID -> 42203  (frontmatter parse / length / regex)
+ *   STORAGE_NOT_FOUND         -> 50301  (version directory GC'd)
+ *   QUEUE_UNAVAILABLE         -> 50301  (queue not ready at extract time)
+ *   LLM_UNAVAILABLE           -> 50302  (LLM unavailable)
+ *   others                    -> 50001
  */
 
 import { randomUUID } from "node:crypto";
@@ -59,11 +59,11 @@ import { obsLogger } from "../core/report/obs-logger.js";
 
 const TAG = "[skill-handlers]";
 
-// [obs] 观测埋点全部走 obsLogger 底座（`src/core/report/obs-logger.ts`）；
-// 事件名 `skill.<xxx>.done` / `skill.<xxx>.<phase>` 直接字面量写，字段直接
-// inline 字典。undefined 值直接传，不加过滤 —— 跟仓库其他模块（e.g.
-// core/report/traced-task-executor.ts）保持完全一致。降级由 obsLogger 内
-// 部 try/catch 提供，业务代码不加额外防御。
+// [obs] All observability instrumentation goes through the obsLogger base (`src/core/report/obs-logger.ts`);
+// event names `skill.<xxx>.done` / `skill.<xxx>.<phase>` are written as literals, and fields are
+// inline dictionaries. undefined values are passed as-is without filtering -- fully consistent with other modules in the repo (e.g.
+// core/report/traced-task-executor.ts). Degradation is provided by the try/catch inside
+// obsLogger, and business code adds no extra defenses.
 
 // ═════════════════════════════════════════════════════════════════════
 //  Deps
@@ -71,9 +71,9 @@ const TAG = "[skill-handlers]";
 
 export interface SkillRouterDeps {
   getSkillCore: () => SkillCore | undefined;
-  /** Optional. 抽取器实例（供 worker 内部驱动）。 */
+  /** Optional. Extractor instance (driven internally by the worker). */
   getSkillExtractor?: () => SkillExtractor | undefined;
-  /** Optional. 已解析的 skill 配置；handleListing 用 searchTopK 限制注入条目数。 */
+  /** Optional. Resolved skill config; handleListing uses searchTopK to limit the number of injected entries. */
   getResolvedSkillConfig?: () => ResolvedSkillConfig | undefined;
   logger: Logger;
   /**
@@ -86,48 +86,48 @@ export interface SkillRouterDeps {
   quotaManager?: import("../core/quota/quota-manager.js").QuotaManager;
   /**
    * Service mode: build a SkillExtractor for a given SkillCore.
-   * 传入 per-instance SkillCore（TCVDB + COS）+ 当次请求的 instanceId，返回 extractor。
-   * 用于 service 模式下 /v3/skill/extract 的同步抽取，替代 standalone 的队列异步模式。
+   * Pass in the per-instance SkillCore (TCVDB + COS) + the current request's instanceId, and return an extractor.
+   * Used for synchronous extraction of /v3/skill/extract in service mode, replacing standalone's queue async mode.
    *
-   * `instanceId` 会传给 `resolveStandaloneLlmForRuntime` 以拼出
-   * `${baseUrl}/proxy/<instanceId>/v1` —— 缺少它会导致 `provider=proxy`
-   * 场景下 skill extractor 直接打错 upstream URL。
+   * `instanceId` is passed to `resolveStandaloneLlmForRuntime` to assemble
+   * `${baseUrl}/proxy/<instanceId>/v1` -- without it, in the `provider=proxy`
+   * scenario the skill extractor would hit the wrong upstream URL.
    */
   buildSkillExtractor?: (
     core: SkillCore,
     instanceId: string,
   ) => SkillExtractor | Promise<SkillExtractor>;
   /**
-   * 拿到 (per instance) 的 MetadataService。用于 handleCreate 成功后自动登记
-   * skill 资产（asset_id === skill_id）并绑定到 owner agent 的 fixed-asset。
+   * Get the (per instance) MetadataService. Used to automatically register the
+   * skill asset (asset_id === skill_id) after handleCreate succeeds and bind it to the owner agent's fixed-asset.
    *
-   * standalone 模式下 SkillCore 是 TdaiCore 全局构造的（不带钩子），所以由 handler
-   * 层做这个登记；service 模式下 buildSkillCore 里的 onSkillCreated 钩子会做同样的
-   * 事（幂等，重复调用无副作用）。两条路径都覆盖，保证前端管控页永远能看到 skill。
+   * In standalone mode SkillCore is constructed globally by TdaiCore (without hooks), so the handler
+   * layer does this registration; in service mode the onSkillCreated hook in buildSkillCore does the same
+   * thing (idempotent, repeated calls have no side effects). Both paths are covered, ensuring the frontend console always shows the skill.
    *
-   * 语义与 v2-router 里 handleConversationAdd 用同一 dep 自动登记 chat_memory 资产
-   * 一致（详见 v2-router.ts:648 及 metadata-service.ts:ensureSkillAsset）。
+   * The semantics are consistent with handleConversationAdd in v2-router using the same dep to automatically register chat_memory assets
+   * (see v2-router.ts:648 and metadata-service.ts:ensureSkillAsset).
    */
   getMetadataService?: (instanceId: string) => Promise<import("../metadata/service/metadata-service.js").MetadataService>;
   /**
    * `POST /v3/skill/conversation/add` + `POST /v3/skill/extract`
-   * 共用的 wired 结果提供者。返回一整套 { handler, trigger, buffer, ... }：
-   *   - handleConversationAdd 用 .handler
-   *   - handleExtract 用 .trigger
+   * Shared provider of wired results. Returns a whole set { handler, trigger, buffer, ... }:
+   *   - handleConversationAdd uses .handler
+   *   - handleExtract uses .trigger
    *
-   * Service 模式下每租户各持一份；standalone 模式返回单例。由 wiring 层
-   * (server.ts) 按 auth.serviceId 缓存 + resolve。
+   * In service mode each tenant holds its own; in standalone mode a singleton is returned. The wiring layer
+   * (server.ts) caches + resolves it by auth.serviceId.
    */
   resolveConversationAdd?: (instanceId: string) => Promise<
     import("../core/skill/conversation-add/wire.js").WiredConversationAddHandler | undefined
   >;
   /**
-   * 可选. Analytics ClickHouse 只读客户端 (跟 /v3/analytics/* 复用同一 lazy singleton)。
-   * 用于 `handleListing` 的 `mode='activity'` 分支读 `skill_usage_logs` 计算 MRR。
+   * Optional. Analytics ClickHouse read-only client (reuses the same lazy singleton as /v3/analytics/*).
+   * Used by the `mode='activity'` branch of `handleListing` to read `skill_usage_logs` and compute MRR.
    *
-   * 未提供 / 返回 null → activity 模式直接 fallback 到原 BM25/full 逻辑, 主链路无感知。
+   * Not provided / returns null -> activity mode falls back directly to the original BM25/full logic, with no impact on the main path.
    *
-   * 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
+   * Design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
    */
   getAnalyticsChClient?: () => Promise<
     import("./analytics/analytics-ch-client.js").AnalyticsChClient | null
@@ -135,7 +135,7 @@ export interface SkillRouterDeps {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  错误映射
+//  Error mapping
 // ═════════════════════════════════════════════════════════════════════
 
 const ERROR_CODE_MAP: Record<string, number> = {
@@ -161,7 +161,7 @@ function mapCoreError(e: unknown, requestId: string, deps?: SkillRouterDeps, met
   if (e instanceof SkillCoreError) {
     const code = ERROR_CODE_MAP[e.code] ?? 50001;
 
-    // 版本冲突时记录 warn 日志，便于后续统计冲突频率
+    // On version conflict, record a warn log, to help gather conflict-frequency statistics later
     if (e.code === "SKILL_VERSION_STALE" && deps) {
       deps.logger.warn(
         `${TAG} version_conflict requestId=${requestId} skill_id=${meta?.skill_id ?? "?"} ` +
@@ -169,14 +169,14 @@ function mapCoreError(e: unknown, requestId: string, deps?: SkillRouterDeps, met
       );
     }
 
-    // 版本冲突 409 响应里额外带上 current_version，方便调用方重试
+    // The version-conflict 409 response additionally carries current_version, convenient for caller retries
     if (e.code === "SKILL_VERSION_STALE") {
       const match = e.message?.match(/head is (\d+)/);
       const currentVersion = match ? Number(match[1]) : undefined;
       return errorEnvelope(code, e.message, requestId, { current_version: currentVersion });
     }
 
-    // 版本过期 410 响应里额外带上 latest_version，方便调用方升级
+    // The stale-version 410 response additionally carries latest_version, convenient for caller upgrades
     if (e.code === "SKILL_VERSION_EXPIRED") {
       const match = e.message?.match(/latest version v(\d+)/);
       const latestVersion = match ? Number(match[1]) : undefined;
@@ -193,16 +193,16 @@ function formatZodErr(err: ZodError): string {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  共享前置
+//  Shared preconditions
 // ═════════════════════════════════════════════════════════════════════
 
 /**
- * 统一前置校验：优先通过 resolveSkillCore(auth.serviceId) 获取
- * per-instance SkillCore（TCVDB + COS），fallback 到 getSkillCore()（standalone）。
+ * Unified precondition check: prefer to obtain the per-instance SkillCore (TCVDB + COS)
+ * via resolveSkillCore(auth.serviceId), falling back to getSkillCore() (standalone).
  *
- * 修复 (2026-07-04)：service 模式下 read handlers 之前只用 getSkillCore()（standalone
- * SQLite），导致写入 per-instance TCVDB 后读却查空 SQLite。现在读/写路径对齐同一套
- * store 解析逻辑。
+ * Fix (2026-07-04): in service mode the read handlers previously only used getSkillCore() (standalone
+ * SQLite), so after writing to per-instance TCVDB the read queried the empty SQLite. Now the read/write paths are aligned on the same
+ * store resolution logic.
  */
 async function precheck<T>(
   schema: { safeParse(b: unknown): { success: true; data: T } | { success: false; error: ZodError } },
@@ -225,8 +225,8 @@ async function precheck<T>(
 }
 
 /**
- * 写路径的 precheck：与 precheck 逻辑完全一致，只是名字更明确表达"写入语义"。
- * 保留以维持既有 handler 命名一致性；两者可以合并，但先保持向后兼容。
+ * Precheck for write paths: logic exactly the same as precheck, just with a name that expresses "write semantics" more clearly.
+ * Kept to maintain naming consistency of existing handlers; the two could be merged, but backward compatibility is kept for now.
  */
 async function precheckWrite<T>(
   schema: { safeParse(b: unknown): { success: true; data: T } | { success: false; error: ZodError } },
@@ -248,9 +248,9 @@ async function precheckWrite<T>(
   return { ok: true, core, data: parsed.data };
 }
 
-// 把 Skill 行形成 SkillSummary 形态（不带 content；带 manifest 当 detail 时再加）
-// 字段对齐设计文档 §3.4 SkillSummary。
-/** 反序列化 skill.metadata_json 到 metadata 对象；无效 JSON 返回 undefined。 */
+// Shape a Skill row into SkillSummary form (without content; add the manifest when used as detail)
+// Fields aligned with design doc §3.4 SkillSummary.
+/** Deserialize skill.metadata_json into a metadata object; invalid JSON returns undefined. */
 function parseMetadata(s: Skill): Record<string, unknown> | undefined {
   const raw = s.metadata_json;
   if (!raw || raw === "{}" || raw === "") return undefined;
@@ -303,22 +303,22 @@ export async function handleCreate(body: unknown, auth: V2AuthContext, requestId
     const r = await pre.core.create(pre.data);
     try { trace.report("skill.create", { skill_id: r.skill_id, team_id: r.team_id, agent_id: r.owner_agent_id, name: r.name }); } catch { /* noop */ }
 
-    // ── 自动登记 skill 资产（asset_id === skill_id）+ 绑定到 owner agent 的 fixed-asset ──
+    // -- Automatically register the skill asset (asset_id === skill_id) + bind to the owner agent's fixed-asset --
     //
-    // 为什么要在这里做：
-    //   - standalone 模式下 SkillCore 由 TdaiCore 全局构造（无 onSkillCreated 钩子）；
-    //   - 若不在这里补登记，asset/list-accessible / acl/* 等元数据层接口就查不到这个 skill，
-    //     前端管控页的"团队资产 / 授权"链路完全断开。
+    // Why do it here:
+    //   - in standalone mode SkillCore is constructed globally by TdaiCore (no onSkillCreated hook);
+    //   - without supplementary registration here, metadata-layer endpoints such as asset/list-accessible / acl/* cannot find this skill,
+    //     and the frontend console's "team assets / authorization" chain is completely broken.
     //
-    // 与 service 模式的关系：
-    //   - service 模式下 gateway 用 buildSkillCore 构造 per-instance SkillCore 时挂了同名钩子，
-    //     两条路径都调 `metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name })`，
-    //     该方法在 metadata-service.ts 内已实现幂等（LRU + 主键去重），重复调用无副作用。
+    // Relationship with service mode:
+    //   - in service mode the gateway attaches the same-named hook when constructing a per-instance SkillCore with buildSkillCore,
+    //     and both paths call `metaSvc.ensureSkillAsset({ skill_id, team_id, agent_id, name })`,
+    //     which is already idempotent in metadata-service.ts (LRU + primary-key dedup), so repeated calls have no side effects.
     //
-    // 失败策略：
-    //   - 抛出异常 → create 请求整体返回错误。避免出现"skill 落库但 asset 缺失"
-    //     的静默不一致状态（用户会疑惑"我创建成功了但看不到"）。
-    //   - 与 v2-router.ts handleConversationAdd 里 ensureChatMemoryAsset 的做法一致。
+    // Failure policy:
+    //   - throw an exception -> the create request as a whole returns an error. Avoids the silently inconsistent state of "skill persisted but asset missing"
+    //     (users would wonder "I created it successfully but cannot see it").
+    //   - consistent with how ensureChatMemoryAsset is done in handleConversationAdd of v2-router.ts.
     if (deps.getMetadataService && r.team_id && r.owner_agent_id) {
       try {
         const metaSvc = await deps.getMetadataService(auth.serviceId);
@@ -398,17 +398,17 @@ export async function handleDelete(body: unknown, _auth: V2AuthContext, requestI
   try {
     const r = await pre.core.delete(pre.data);
 
-    // ── asset 物理删除兜底：DELETE meta_assets + 级联清 agent 绑定 / ACL ──
+    // -- Asset physical deletion fallback: DELETE meta_assets + cascade clearing of agent bindings / ACL --
     //
-    // 为什么在这里再做一次：
-    //   - service 模式：buildSkillCore 里的 onSkillArchived 钩子已经调过一次；这里再
-    //     调是幂等收敛（deleteAssets 对已不存在的 asset 视为成功，无副作用）。
-    //   - standalone 模式：SkillCore 由 TdaiCore 全局构造，未注入钩子（避免耦合
-    //     MetadataService 拉起时序）。handler 层这一次调用是唯一联动入口。
+    // Why do it again here:
+    //   - service mode: the onSkillArchived hook in buildSkillCore has already been called once; calling it again here
+    //     is idempotent convergence (deleteAssets treats an already-nonexistent asset as success, with no side effects).
+    //   - standalone mode: SkillCore is constructed globally by TdaiCore without injected hooks (to avoid coupling the
+    //     MetadataService startup order). This call at the handler layer is the only linkage entry.
     //
-    // 失败策略：fire-and-forget，warn 不回退 delete。二次 delete 会重触发 core 钩子
-    // 与本次兜底，最终收敛。参考 handleCreate 里 ensureSkillAsset 的对称做法
-    // （只是失败策略相反：create 严格失败，delete 宽松以保证 skill 侧一定成功）。
+    // Failure policy: fire-and-forget, warn without rolling back the delete. A second delete re-triggers the core hook
+    // and this fallback, eventually converging. See the symmetrical approach of ensureSkillAsset in handleCreate
+    // (only the failure policy is the opposite: create fails strictly, delete is lenient so the skill side always succeeds).
     let assetSynced = false;
     if (r.archived && deps.getMetadataService && pre.data.team_id) {
       try {
@@ -440,24 +440,24 @@ export async function handleDelete(body: unknown, _auth: V2AuthContext, requestI
 }
 
 /**
- * `POST /v3/skill/get-by-name` —— (team_id, agent_id, skill_name) → skill 详情。
+ * `POST /v3/skill/get-by-name` -- (team_id, agent_id, skill_name) -> skill details.
  *
- * 见 skill-schemas.ts 里 `getByNameRequestSchema` 的动机注释。实现路径:
- *   1) schema 已强制 team_id + agent_id + skill_name 必填
- *   2) 走 `SkillCore.list` 拿到 (team, agent, name_prefix=name) 的候选(1-2 条)
- *   3) 精确名字匹配一条,交给 `SkillCore.get(skill_id)` 复用 include_content /
- *      include_manifest / version 分支,保证与 /v3/skill/get 输出体一致
+ * See the motivation comment of `getByNameRequestSchema` in skill-schemas.ts. Implementation path:
+ *   1) the schema already enforces team_id + agent_id + skill_name as required
+ *   2) go through `SkillCore.list` to get candidates (1-2 items) for (team, agent, name_prefix=name)
+ *   3) exact-match one by name, and hand it to `SkillCore.get(skill_id)` to reuse the include_content /
+ *      include_manifest / version branches, ensuring the output body is consistent with /v3/skill/get
  *
- * 找不到 → 40401 SKILL_NOT_FOUND(与 get 对齐,agent 视角看不出"是没这名字
- * 还是没这 id",统一一种错误码)。
+ * Not found -> 40401 SKILL_NOT_FOUND (aligned with get; from the agent's view one cannot tell "no such name
+ * or no such id", so a single error code is used).
  */
 export async function handleGetByName(body: unknown, _auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
   const t0 = Date.now();
   const pre = await precheck(getByNameRequestSchema, body, _auth, deps, requestId);
   if (!pre.ok) { obsLogger.warn("skill.handleGetByName.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
   try {
-    // 用 name 当 prefix 拉 1-2 条候选(prefix LIKE 会命中同前缀的邻居,
-    // 显式再 exact-match 一次;不用 limit=1 以便 exact 命中稳定)。
+    // Use name as a prefix to fetch 1-2 candidates (prefix LIKE hits neighbors with the same prefix,
+    // so exact-match explicitly once more; limit=1 is not used so that the exact hit is stable).
     const listed = await pre.core.list({
       team_id: pre.data.team_id,
       agent_id: pre.data.agent_id,
@@ -471,12 +471,12 @@ export async function handleGetByName(body: unknown, _auth: V2AuthContext, reque
         team_id: pre.data.team_id, agent_id: pre.data.agent_id, skill_name: pre.data.skill_name,
         reason: "not_found",
       });
-      // 与 handleGet SKILL_NOT_FOUND 走同一路径:errorEnvelope(40401, ...)
+      // Same path as handleGet SKILL_NOT_FOUND: errorEnvelope(40401, ...)
       return errorEnvelope(40401, `SKILL_NOT_FOUND: no skill named "${pre.data.skill_name}" for agent ${pre.data.agent_id}`, requestId);
     }
 
-    // 复用 handleGet 主体:构造 get input 走 core.get,保证行为完全一致
-    // (含 version 分支、include_content / include_manifest 语义)。
+    // Reuse the body of handleGet: build the get input and go through core.get, ensuring exactly consistent behavior
+    // (including the version branch and include_content / include_manifest semantics).
     const row = await pre.core.get({
       user_id: pre.data.user_id,
       team_id: pre.data.team_id,
@@ -520,8 +520,8 @@ export async function handleGet(body: unknown, _auth: V2AuthContext, requestId: 
     const row = await pre.core.get(pre.data);
     const includeContent = pre.data.include_content ?? true;
     const includeManifest = pre.data.include_manifest ?? true;
-    // Detail view 额外附上 content_hash / storage_dir（summary 没输出这些）。
-    // 参考 docs/design/2026-06-17-skill-redesign-v2.md §3.4 SkillDetail 字段。
+    // Detail view additionally attaches content_hash / storage_dir (summary does not output these).
+    // See docs/design/2026-06-17-skill-redesign-v2.md §3.4 SkillDetail fields.
     const data = {
       ...toSummary(row),
       ...(row.content_hash ? { content_hash: row.content_hash } : {}),
@@ -542,10 +542,10 @@ export async function handleList(body: unknown, _auth: V2AuthContext, requestId:
   const pre = await precheck(listRequestSchema, body, _auth, deps, requestId);
   if (!pre.ok) { obsLogger.warn("skill.handleList.done", { req_id: requestId, code: pre.envelope.code, dur_ms: Date.now() - t0, reason: "precheck" }); return pre.envelope; }
   try {
-    // 归档语义说明：`filters.status` 允许显式传 `['archived']` / `['active','archived']`，
-    // 仅供管控台"回收站"视图使用。不传 status 时默认只返回 active（见
-    // SqliteSkillStore.listSkills / TcvdbSkillStore.listSkills 中的默认值）。
-    // 普通业务调用方 **不应** 显式请求 archived——它对读/写 API 已经不可见。
+    // Archive semantics note: `filters.status` allows explicitly passing `['archived']` / `['active','archived']`,
+    // only for the console's "recycle bin" view. When status is not passed, only active is returned by default (see the defaults in
+    // SqliteSkillStore.listSkills / TcvdbSkillStore.listSkills).
+    // Ordinary business callers **should not** explicitly request archived -- it is already invisible to the read/write APIs.
     const r = await pre.core.list(pre.data);
     obsLogger.info("skill.handleList.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, items: r.items.length, total: r.total });
     return successEnvelope({ items: r.items.map(toSummary), total: r.total }, requestId);
@@ -567,7 +567,7 @@ export async function handleSearch(body: unknown, _auth: V2AuthContext, requestI
     const items = hits.map((h) => ({
       ...toSummary(h.skill),
       score: h.score,
-      // FTS5 snippet 可能为空（content 太短）；fallback 到 description。
+      // The FTS5 snippet may be empty (content too short); fall back to description.
       snippet: h.snippet && h.snippet.length > 0 ? h.snippet : h.skill.description,
     }));
     obsLogger.info("skill.handleSearch.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, items: items.length, scope: pre.data.scope ?? "agent" });
@@ -680,23 +680,23 @@ export async function handleExport(body: unknown, _auth: V2AuthContext, requestI
 }
 
 /**
- * `handleListing` 的 `mode='activity'` 分支实现 —— default-task 活跃度召回。
+ * Implementation of the `mode='activity'` branch of `handleListing` -- default-task activity recall.
  *
- * 流程 (3 段式, 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md):
- *   1. CH 查 skill_usage_logs 拿近 30 天 view/search 计数 + 最近活跃时间 top 60
- *      (`WINDOW_DAYS × CANDIDATE_MULTIPLIER × top_k` 的超集, 保证 version 强
- *       信号能翻盘挤进最终 top_k)
- *   2. 批量拿这些 skill 的 head (name/description/version/updated_at_ms)
- *   3. 4 维等权 MRR 打分 → 按 score DESC 取 top_k
+ * Flow (3 stages, design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md):
+ *   1. Query skill_usage_logs in CH for view/search counts over the past 30 days + the top 60 by last active time
+ *      (a superset of `WINDOW_DAYS x CANDIDATE_MULTIPLIER x top_k`, ensuring a strong version
+ *       signal can overturn the ranking and squeeze into the final top_k)
+ *   2. Batch-fetch the head of those skills (name/description/version/updated_at_ms)
+ *   3. 4-dimension equal-weight MRR scoring -> take top_k by score DESC
  *
- * **绝不 throw**: 返回 null 表示"降级信号"(CH 不可用 / 查询失败 / 缺少必要 dep),
- * 由 handleListing 落到 auto 分支。空数组表示"数据窗内 0 活跃 skill"(冷启动),
- * 同样由 handleListing 落到 auto 分支。
+ * **Never throws**: returning null indicates a "degradation signal" (CH unavailable / query failed / missing required dep),
+ * and handleListing falls to the auto branch. An empty array means "0 active skills within the data window" (cold start),
+ * which likewise falls to the auto branch in handleListing.
  *
  * @returns
- *   - `null`: 无法执行(不可用/异常); 语义 = "请走 fallback"
- *   - `[]`  : 执行了但数据窗内无活跃 skill; 语义 = "请走 fallback (冷启动)"
- *   - `Item[]`: 有 N 个活跃 skill (最多 top_k 个)
+ *   - `null`: cannot execute (unavailable/exception); semantics = "please take the fallback"
+ *   - `[]`  : executed but no active skills in the data window; semantics = "please take the fallback (cold start)"
+ *   - `Item[]`: there are N active skills (at most top_k)
  */
 async function resolveActivityHits(args: {
   deps: SkillRouterDeps;
@@ -707,17 +707,17 @@ async function resolveActivityHits(args: {
 }): Promise<Array<{ skill_id: string; name: string; description: string; version: number }> | null> {
   const { deps, core, team_id, agent_id, top_k } = args;
 
-  // 无 CH client dep → 未装配, 直接降级 (向后兼容: 老 deployment 完全不受影响)
+  // No CH client dep -> not wired, degrade directly (backward compatible: old deployments are completely unaffected)
   if (!deps.getAnalyticsChClient) return null;
 
   const ch = await deps.getAnalyticsChClient().catch(() => null);
-  if (!ch) return null;                              // CH 未配置
+  if (!ch) return null;                              // CH not configured
 
   const WINDOW_DAYS = 30;
-  const CANDIDATE_MULTIPLIER = 3;                    // 超集: 20 * 3 = 60
+  const CANDIDATE_MULTIPLIER = 3;                    // superset: 20 * 3 = 60
   const candidateK = Math.max(top_k, top_k * CANDIDATE_MULTIPLIER);
 
-  // Step 1: CH 查 view/search count + last_active_ts
+  // Step 1: query view/search count + last_active_ts in CH
   type ActivityRow = {
     skill_id: string;
     view_cnt: string | number;
@@ -750,32 +750,32 @@ async function resolveActivityHits(args: {
     });
   } catch (err) {
     deps.logger.warn?.(`${TAG} activity: CH query failed`, err instanceof Error ? err.message : String(err));
-    return null;                                     // CH 查询挂 → 降级
+    return null;                                     // CH query failed -> degrade
   }
-  if (!candidates || candidates.length === 0) return [];   // 冷启动 → 降级
+  if (!candidates || candidates.length === 0) return [];   // cold start -> degrade
 
-  // Step 2: 批量 getHead 拿 name/description/version/updated_at_ms
-  // 不用 SkillCore.get (它有权限校验+审计, 不适合批查); 直接过 store。
-  // 内部错误吞掉不 throw, 单个 skill 失败不影响其他。
+  // Step 2: batch getHead to get name/description/version/updated_at_ms
+  // SkillCore.get is not used (it has permission checks + audit, unsuitable for batch queries); go through the store directly.
+  // Internal errors are swallowed and not thrown; a single skill failing does not affect the others.
   type Enriched = {
     skill_id: string;
     name: string;
     description: string;
     version: number;
-    view_cnt: number;                 // 从 candidates 透传, 强制 Number() 防 CH JSONEachRow string
-    search_cnt: number;               // 同上
-    version_cnt: number;              // 版本数近似 = head.version (每次 patch/update 递增)
+    view_cnt: number;                 // passed through from candidates, force Number() to guard against CH JSONEachRow strings
+    search_cnt: number;               // same as above
+    version_cnt: number;              // version count approximated = head.version (incremented on each patch/update)
     last_active: number;              // max(events last_active, head.updated_at_ms)
   };
   const enriched: Enriched[] = [];
   await Promise.all(candidates.map(async (c) => {
     try {
       const head = await core.get({ skill_id: c.skill_id, team_id });
-      const eventTs = Date.parse(String(c.last_active_ts));    // ISO → ms; 失败为 NaN
+      const eventTs = Date.parse(String(c.last_active_ts));    // ISO -> ms; NaN on failure
       const eventTsSafe = Number.isFinite(eventTs) ? eventTs : 0;
-      // CH JSONEachRow 对 UInt64 count 默认返回 string (output_format_json_quote_64bit_integers=1);
-      // 不强转直接给 rankBy 用 → keyFn 拿到 undefined 或 string 都会让排序坏掉。
-      // Number(undefined) = NaN, Number("16") = 16, 都是安全的兜底。
+      // CH JSONEachRow returns UInt64 counts as strings by default (output_format_json_quote_64bit_integers=1);
+      // passing them to rankBy without coercion -> keyFn gets undefined or a string, either of which breaks sorting.
+      // Number(undefined) = NaN, Number("16") = 16, both are safe fallbacks.
       const viewCnt = Number(c.view_cnt) || 0;
       const searchCnt = Number(c.search_cnt) || 0;
       enriched.push({
@@ -785,20 +785,20 @@ async function resolveActivityHits(args: {
         version: head.version,
         view_cnt: viewCnt,
         search_cnt: searchCnt,
-        version_cnt: head.version,                              // = countVersions 的近似
+        version_cnt: head.version,                              // = approximation of countVersions
         last_active: Math.max(eventTsSafe, head.updated_at_ms),
       });
     } catch {
-      // skill 可能已删/无权访问 → 跳过, 不影响其他候选
+      // The skill may have been deleted / is inaccessible -> skip, without affecting other candidates
     }
   }));
   if (enriched.length === 0) return [];
 
-  // Step 3: 4 维 MRR 打分 + top_k slice
-  // 权重先都相等 (0.25), 上线看 dashboard 数据后调
+  // Step 3: 4-dimension MRR scoring + top_k slice
+  // Weights are all equal for now (0.25); adjust after looking at dashboard data after launch
   const W = { view: 0.25, search: 0.25, recency: 0.25, version: 0.25 };
 
-  // 竞赛式排名 (同分同名次, 下一名跳过); tiebreaker: last_active DESC
+  // Competition-style ranking (ties share the same rank, the next rank is skipped); tiebreaker: last_active DESC
   function rankBy<K>(list: Enriched[], keyFn: (s: Enriched) => number): Map<string, number> {
     const sorted = [...list].sort((a, b) => {
       const dk = keyFn(b) - keyFn(a);
@@ -833,10 +833,10 @@ async function resolveActivityHits(args: {
       + W.version * (1 / (rVersion.get(s.skill_id) ?? enriched.length)),
   }));
 
-  // 同分 tiebreaker: skill_id ASC —— enriched 由 Promise.all + push 组装,
-  // 天然顺序不稳定; 没有 tiebreaker 会让"view=4 search=6" 和 "view=3 search=6
-  // last_active_newer" 这种严格 MRR 相等的 skill 每次返回顺序不同。
-  // 按 skill_id 字典序做兜底保证幂等。
+  // Tie tiebreaker: skill_id ASC -- enriched is assembled by Promise.all + push,
+  // so its order is naturally unstable; without a tiebreaker, skills with strictly equal MRR such as "view=4 search=6" and "view=3 search=6
+  // last_active_newer" would return in a different order each time.
+  // Falling back to skill_id lexicographic order guarantees idempotency.
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     return a.skill_id < b.skill_id ? -1 : (a.skill_id > b.skill_id ? 1 : 0);
@@ -859,7 +859,7 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
     const query = (pre.data.query ?? "").trim();
     const useSearch = query.length > 0;
 
-    // 从配置读 routing：searchTopK（listing 最多注入多少条）+ mode（bm25/embedding/hybrid）。
+    // Read routing from config: searchTopK (the max number of listing entries injected) + mode (bm25/embedding/hybrid).
     const routing = deps.getResolvedSkillConfig?.()?.routing;
     const topK = routing?.searchTopK ?? 20;
 
@@ -867,9 +867,9 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
     let items: Item[] = [];
     let mode: "full" | "search" | "activity" = "full";
 
-    // 活跃度召回优先路径 (仅当调用方显式指定 mode='activity')。
-    // 任何环节失败/空 → 落到下面的老逻辑, 主链路无感知。
-    // 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
+    // Activity-recall priority path (only when the caller explicitly specifies mode='activity').
+    // If any stage fails / is empty -> fall to the old logic below, with no impact on the main path.
+    // Design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
     const wantActivity = pre.data.mode === "activity";
     let activityAttempted = false;
     let activityFallbackReason: string | undefined;
@@ -890,7 +890,7 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
           activityFallbackReason = activityItems === null ? "unavailable" : "empty";
         }
       } catch (err) {
-        // resolveActivityHits 内部已经吞了大部分异常, 到这里说明极端情况。
+        // resolveActivityHits has already swallowed most exceptions internally; reaching here means an extreme case.
         activityFallbackReason = "exception";
         deps.logger.warn?.(
           `${TAG} activity recall failed, falling back to auto`,
@@ -899,8 +899,8 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
       }
     }
 
-    // 老 auto 逻辑 —— 未走 activity 或 activity 空/失败 时走此路径。
-    // search 模式：按 routing.mode 选检索算法；fallback 到 list head（query 为空）。
+    // Old auto logic -- this path is taken when activity was not used or activity was empty/failed.
+    // search mode: pick the retrieval algorithm by routing.mode; fall back to list head (when query is empty).
     if (mode !== "activity") {
       if (useSearch) {
         const hits = await pre.core.search({
@@ -935,13 +935,13 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
       }
     }
 
-    // 渲染 listing；按 char_budget 截断（保留头部 + 显式截断标记）。
-    // 默认 id 模式: 每行结构化 `- id=<skill_id>, name=<name>, desc=<description>`,
-    //   并在块内顶部加一行格式说明,让 agent 明确知道哪个字段是 skill_id、调 skill_view 时用它。
-    // SKILL_VIEW_MODE=name 时回退旧格式 `- name: description`(不暴露 id)。
-    // 见 skill_eval v9(name) vs v10(id) 对比实验。
+    // Render the listing; truncate by char_budget (keep the head + an explicit truncation marker).
+    // Default id mode: each line is structured `- id=<skill_id>, name=<name>, desc=<description>`,
+    //   and a format-description line is added at the top of the block so the agent clearly knows which field is the skill_id to use when calling skill_view.
+    // With SKILL_VIEW_MODE=name, fall back to the old format `- name: description` (not exposing the id).
+    // See the skill_eval v9(name) vs v10(id) comparison experiment.
     const exposeSkillId = (process.env.SKILL_VIEW_MODE ?? "id").toLowerCase() !== "name";
-    // description 里的换行会破坏"每行一个 skill"的结构,折成空格。
+    // Newlines in description would break the "one skill per line" structure, so fold them into spaces.
     const flat = (s: string) => (s ?? "").replace(/\s*\n\s*/g, " ").trim();
     const lines = items.map((s) =>
       exposeSkillId
@@ -949,8 +949,8 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
         : `- ${s.name}: ${s.description}`,
     );
     const formatHint = exposeSkillId
-      ? "# 每行一个 skill,字段以逗号分隔: id=<skill_id>, name=<名字>, desc=<描述>。\n" +
-        "# 调用 skill_view 时传 id 字段的值(形如 skl-xxxxxx)。\n"
+      ? "# One skill per line, fields separated by commas: id=<skill_id>, name=<name>, desc=<description>.\n" +
+        "# When calling skill_view, pass the value of the id field (of the form skl-xxxxxx).\n"
       : "";
     let listing = lines.length === 0
       ? "<available_skills>\n(none)\n</available_skills>"
@@ -976,19 +976,19 @@ export async function handleListing(body: unknown, _auth: V2AuthContext, request
 }
 
 /**
- * `POST /v3/skill/extract` — direct-trigger 归档一次会话切片。
+ * `POST /v3/skill/extract` -- direct-trigger archive of one conversation slice.
  *
- * 改造前是"入 Redis job 队列 + 轮询 /result"; 改造后走跟 conversation/add
- * 完全同一套下游 (`SkillTriggerService.archive()` → agent 队列 → 复用
- * `SkillConversationExtractWorker`)，只是不写 data-current/meta，一次调用
- * 产生一个独立 archive + 一条 SkillTaskEntry。
+ * Before the rework it was "enqueue a Redis job + poll /result"; after the rework it goes through the exact same downstream as conversation/add
+ * (`SkillTriggerService.archive()` -> agent queue -> reuses
+ * `SkillConversationExtractWorker`), just without writing data-current/meta, and one call
+ * produces one independent archive + one SkillTaskEntry.
  *
- * 详见 `docs/design/2026-07-17-skill-extract-direct-trigger-plan.md`。
+ * See `docs/design/2026-07-17-skill-extract-direct-trigger-plan.md` for details.
  */
 export async function handleExtract(body: unknown, auth: V2AuthContext, requestId: string, deps: SkillRouterDeps): Promise<ApiResponseEnvelope> {
-  // [obs] handler 内部分段走 obsLogger：每段一次 info 事件，字段结构化
-  // (req_id / dur_ms / …)，一路都能按 req_id 关联；obsLogger 内部 try/catch，
-  // logger 后端挂了也不影响业务。
+  // [obs] The handler logs in segments via obsLogger: one info event per segment, with structured fields
+  // (req_id / dur_ms / ...), all correlatable by req_id; obsLogger has try/catch inside,
+  // so even if the logger backend is down the business is unaffected.
   const t0 = Date.now();
 
   const t0Parse = Date.now();
@@ -1016,15 +1016,15 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
     return errorEnvelope(50301, "skill extract not wired for this instance", requestId);
   }
 
-  // direct-trigger 恒生成一次性 session id (前缀 sx-) —— 因为它没有跨轮 buffer,
-  // session_id 只决定 COS 归档路径分段, 每次调用独立即可; caller 传了也接受。
+  // direct-trigger always generates a one-time session id (prefix sx-) -- because it has no cross-turn buffer,
+  // session_id only determines the COS archive path segment, and each call can be independent; accepted if the caller passes one.
   const sessionId = input.session_id ?? `sx-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
 
-  // 压缩 + 兜底策略 (2026-08-10 重新设计):
-  //   ① 总量 < chunkMax → 全量归档, 不压不截
-  //   ② 总量 ≥ chunkMax → 压缩 tool 消息 (> threshold 的 tool_call/tool_result 截头尾)
-  //   ③ 压缩后仍 ≥ chunkMax → 走 oversize 兜底截断 (保留头 + 尾, 中间砍掉)
-  // 从 resolvedSkillConfig 取参数; DEFAULT_* 仅作 fallback (standalone 未配置场景)。
+  // Compression + fallback policy (redesigned 2026-08-10):
+  //   (1) total < chunkMax -> archive everything in full, no compression or truncation
+  //   (2) total >= chunkMax -> compress tool messages (truncate head/tail of tool_call/tool_result > threshold)
+  //   (3) still >= chunkMax after compression -> go through the oversize fallback truncation (keep head + tail, cut the middle)
+  // Parameters are taken from resolvedSkillConfig; DEFAULT_* is only a fallback (standalone unconfigured scenario).
   const skillCfg = deps.getResolvedSkillConfig?.();
   const compressOpts = skillCfg
     ? {
@@ -1050,7 +1050,7 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
     tool_call_id: m.tool_call_id,
   }));
 
-  // 先算原始字节, 只有超过 chunkMax 时才走压缩 + 兜底
+  // Compute the raw bytes first; only go through compression + fallback when it exceeds chunkMax
   const rawBytes = incoming.reduce(
     (sum, m) => sum + Buffer.byteLength(JSON.stringify(m), "utf8"), 0,
   );
@@ -1072,9 +1072,9 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
     used_compress: prepared.usedCompress, used_oversize: prepared.usedOversize,
   });
 
-  // space_id 优先取 body（向后兼容早期调用方），缺省回落到 auth.serviceId ——
-  // 两个值在设计上就该相等（都是"当前登录实例"）。不等则记一条告警, 帮助早发现
-  // 调用方传错实例的 bug；隔离/鉴权/路由都靠 auth.serviceId 做，跟 body 无关。
+  // space_id is taken from the body first (backward compatible with early callers), defaulting back to auth.serviceId --
+  // the two values should be equal by design (both are "the currently logged-in instance"). If unequal, log a warning to help catch early
+  // the bug of a caller passing the wrong instance; isolation/authentication/routing all rely on auth.serviceId, independent of the body.
   const spaceId = input.space_id ?? auth.serviceId;
   if (input.space_id && input.space_id !== auth.serviceId) {
     deps.logger.warn(
@@ -1086,8 +1086,8 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
     const t0Archive = Date.now();
     const res = await wired.trigger.archive({
       session: {
-        // 2026-07-30 instance_id 塞进 tuple; worker pool 从队列出来后按此路由
-        // 到对应 instance 的资源 (CoS bucket / VDB collection / LLM key)。
+        // 2026-07-30 instance_id is put into the tuple; after the worker pool pops from the queue it routes by this
+        // to the corresponding instance's resources (CoS bucket / VDB collection / LLM key).
         instance_id: auth.serviceId,
         space_id: spaceId,
         user_id: input.user_id,
@@ -1099,10 +1099,10 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
       taskRefId: input.task_id,
       reason: input.reason,
       maxIterations: input.options?.max_iterations,
-      // strict_mode:true 时落 SkillTaskEntry.mode='strict', Worker 消费时透传给
-      // SkillExtractor 用 STRICT prompt。老 client 不传 → 恒走 default (v2 宽松)。
+      // When strict_mode:true, SkillTaskEntry.mode='strict' is written, and the Worker passes it through at consumption
+      // to SkillExtractor to use the STRICT prompt. Old clients do not pass it -> always go default (v2 lenient).
       ...(input.strict_mode === true ? { mode: 'strict' as const } : {}),
-      // 透传 requestId 给 trigger 内部分段 obsLogger 事件用作 anchor
+      // Pass requestId through to the trigger's internal segmented obsLogger events as an anchor
       perfRequestId: requestId,
     });
     obsLogger.info("skill.handleExtract.trigger_archive", {
@@ -1114,8 +1114,8 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
       metricProducer.send({ metric: "skill.extract.request", instanceId: input.team_id, value: 1 });
     } catch { /* noop */ }
 
-    // trace.report 后端 span：跟 create/update/patch/delete 对齐；task_id 是 anchor，
-    // clickhouse / langfuse 里按 task_id 就能拉到 worker 侧 skill.worker.task_done。
+    // trace.report backend span: aligned with create/update/patch/delete; task_id is the anchor,
+    // and in clickhouse / langfuse the worker-side skill.worker.task_done can be pulled by task_id.
     try {
       trace.report("skill.extract", {
         task_id: res.taskId,
@@ -1143,16 +1143,16 @@ export async function handleExtract(body: unknown, auth: V2AuthContext, requestI
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  /v3/skill/conversation/add  —  新链路: 每轮对话增量入口
+//  /v3/skill/conversation/add  --  new chain: per-turn conversation incremental entry
 // ═════════════════════════════════════════════════════════════════════
 
 /**
  * `POST /v3/skill/conversation/add`
  *
- * Client (proxy) 每轮对话结束后同步调用一次。Handler 内部完成
- * 拼接 + 阈值判定 + 归档段（先登记后落 archive）。返回 { status, archived? }.
+ * The Client (proxy) calls this synchronously after each conversation turn ends. The Handler internally completes
+ * concatenation + threshold judgment + archive segment (register first, then write the archive). Returns { status, archived? }.
  *
- * 参考 `docs/design/2026-07-15-skill-trigger-in-core-design.md` §11.1。
+ * See `docs/design/2026-07-15-skill-trigger-in-core-design.md` §11.1.
  */
 export async function handleConversationAdd(
   body: unknown,
@@ -1160,11 +1160,11 @@ export async function handleConversationAdd(
   requestId: string,
   deps: SkillRouterDeps,
 ): Promise<ApiResponseEnvelope> {
-  // [obs] proxy 每轮结束都会打，是最高频的 skill 接口。分段事件：
+  // [obs] The proxy fires this at the end of every turn, making it the highest-frequency skill endpoint. Segmented events:
   //   skill.handleConversationAdd.schema_parse / resolve_wired / handler_handle / done
-  // handler.handle 内部还会分 read_buffer / prepare_archive / trigger.archive /
-  // write_back 四段（由 SkillConversationAddHandler 内部走 obsLogger，跟 trigger
-  // 复用同一 req_id 关联）。
+  // handler.handle also splits internally into read_buffer / prepare_archive / trigger.archive /
+  // write_back four segments (done by SkillConversationAddHandler internally via obsLogger, correlated with the trigger
+  // via the same req_id).
   const t0 = Date.now();
 
   if (!deps.resolveConversationAdd) {
@@ -1182,8 +1182,8 @@ export async function handleConversationAdd(
   }
   const input = parsed.data;
 
-  // service 模式下用 auth.serviceId 解析租户级 wired; standalone 忽略 serviceId
-  // 由 wiring 返回单例。
+  // In service mode resolve the tenant-level wired via auth.serviceId; standalone ignores serviceId
+  // and the wiring returns a singleton.
   const t0Wire = Date.now();
   const wired = await deps.resolveConversationAdd(auth.serviceId);
   obsLogger.info("skill.handleConversationAdd.resolve_wired", {
@@ -1194,8 +1194,8 @@ export async function handleConversationAdd(
     return errorEnvelope(404, "Skill conversation-add module not enabled for this instance", requestId);
   }
 
-  // space_id 优先取 body, 缺省回落到 auth.serviceId (跟 handleExtract 同一处理).
-  // 两个值在设计上就该相等；不等则告警。
+  // space_id is taken from the body first, defaulting back to auth.serviceId (handled the same as handleExtract).
+  // The two values should be equal by design; warn if unequal.
   const spaceId = input.space_id ?? auth.serviceId;
   if (input.space_id && input.space_id !== auth.serviceId) {
     deps.logger.warn(
@@ -1206,7 +1206,7 @@ export async function handleConversationAdd(
   try {
     const t0Handle = Date.now();
     const out = await wired.handler.handle({
-      // 2026-07-30 instance_id 塞进 tuple; worker pool 从队列出来后按此路由。
+      // 2026-07-30 instance_id is put into the tuple; after the worker pool pops from the queue it routes by this.
       instance_id: auth.serviceId,
       session_id: input.session_id,
       space_id: spaceId,
@@ -1214,7 +1214,7 @@ export async function handleConversationAdd(
       team_id: input.team_id,
       agent_id: input.agent_id,
       task_id: input.task_id,
-      // schema 保证 role 合法, tool_name/tool_call_id 由 handler 内校验
+      // The schema guarantees a valid role; tool_name/tool_call_id are validated inside the handler
       messages: input.messages.map((m) => ({
         role: m.role,
         content: m.content,
@@ -1222,10 +1222,10 @@ export async function handleConversationAdd(
         tool_call_id: m.tool_call_id,
         timestamp: typeof m.timestamp === "number" ? m.timestamp : undefined,
       })),
-      // strict_mode:true 时归档段落 SkillTaskEntry.mode='strict', Worker 消费时用
-      // STRICT prompt (SKILL_REVIEW_PROMPT_STRICT)。老 client 不传即走 default。
+      // When strict_mode:true, the archive segment is written with SkillTaskEntry.mode='strict', and the Worker uses
+      // the STRICT prompt (SKILL_REVIEW_PROMPT_STRICT) at consumption. Old clients that do not pass it go default.
       ...(input.strict_mode === true ? { mode: 'strict' as const } : {}),
-      // 透传 requestId 给 handler 内部分段 obsLogger 用；trigger.archive 也会再透传一层
+      // Pass requestId through to the handler's internal segmented obsLogger; trigger.archive passes it through one more layer
       perfRequestId: requestId,
     });
     obsLogger.info("skill.handleConversationAdd.handler_handle", {
@@ -1253,7 +1253,7 @@ export async function handleConversationAdd(
       msg_count: input.messages.length, });
     return successEnvelope(out, requestId);
   } catch (err) {
-    // HandlerValidationError → 400；其他 → 500
+    // HandlerValidationError -> 400; others -> 500
     const isValidation = err instanceof Error && err.name === "HandlerValidationError";
     if (isValidation) {
       obsLogger.error("skill.handleConversationAdd.done", { req_id: requestId, dur_ms: Date.now() - t0, field: (err as { field?: string }).field }, err instanceof Error ? err : undefined);
@@ -1267,7 +1267,7 @@ export async function handleConversationAdd(
 
 // ═════════════════════════════════════════════════════════════════════
 //  POST /v3/skill/conversation/force-archive
-//  手动强制归档当前 session buffer（第三个触发条件：跳过阈值）
+//  Manually force-archive the current session buffer (third trigger condition: skip the threshold)
 // ═════════════════════════════════════════════════════════════════════
 
 export async function handleForceArchive(
@@ -1297,10 +1297,10 @@ export async function handleForceArchive(
   }
 
   const sess = {
-    // 2026-08-04 修复: 缺 instance_id 会让 trigger.archive → serializeAgentTuple
-    // 抛 `instance_id must be a non-empty string`, handler 把它包成 envelope
-    // 50001 返给 proxy, 面板 / mem:create-skill "强制归档" 100% 失败。
-    // 跟 handleExtract / handleConversationAdd 保持一致, 从 auth.serviceId 兜底。
+    // 2026-08-04 fix: a missing instance_id would make trigger.archive -> serializeAgentTuple
+    // throw `instance_id must be a non-empty string`, which the handler wraps into an envelope
+    // 50001 returned to the proxy, so the panel / mem:create-skill "force archive" failed 100% of the time.
+    // Kept consistent with handleExtract / handleConversationAdd, falling back to auth.serviceId.
     instance_id: auth.serviceId,
     space_id: input.space_id,
     user_id: input.user_id,
@@ -1310,19 +1310,19 @@ export async function handleForceArchive(
   };
 
   try {
-    // 读取当前 buffer
+    // Read the current buffer
     const [current, meta] = await Promise.all([
       wired.buffer.readCurrent(sess),
       wired.buffer.readMeta(sess),
     ]);
 
-    // Buffer 为空：无需归档
+    // Buffer empty: no need to archive
     if (!current.messages || current.messages.length === 0) {
       obsLogger.info("skill.handleForceArchive.done", { req_id: requestId, code: 0, dur_ms: Date.now() - t0, status: "empty" });
       return successEnvelope({ status: "empty", message: "No messages in buffer to archive" }, requestId);
     }
 
-    // 无条件调 trigger.archive（跳过阈值判断）
+    // Call trigger.archive unconditionally (skip the threshold check)
     const archiveRes = await wired.trigger.archive({
       session: sess,
       bufferAtTrigger: { messages: current.messages },
@@ -1331,7 +1331,7 @@ export async function handleForceArchive(
       perfRequestId: requestId,
     });
 
-    // 归档后清空 buffer + 重置 meta（与 add-handler 归档后行为一致）
+    // After archiving, clear the buffer + reset meta (consistent with the behavior after archiving in add-handler)
     const nowMs = Date.now();
     await Promise.all([
       wired.buffer.writeCurrent(sess, { messages: [] }),

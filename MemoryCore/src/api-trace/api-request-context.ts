@@ -1,5 +1,5 @@
 /**
- * HTTP API trace 请求上下文（AsyncLocalStorage）。
+ * HTTP API trace request context (AsyncLocalStorage).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 

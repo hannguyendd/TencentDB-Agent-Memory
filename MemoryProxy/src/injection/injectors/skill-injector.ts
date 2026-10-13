@@ -43,14 +43,14 @@ export interface SkillInjectorConfig {
   /** Core skill client config; passed to `getCoreSkillClient(config)`. */
   coreSkill: CoreSkillConfig;
   /**
-   * Optional. The virtual default task_id (from `sessionInit.defaultTaskId`)。
-   * 当 session 关联的 task_id === defaultTaskId 时, prewarm 会向 core 传
-   * `mode='activity'` 走活跃度召回替代 BM25/head。
+   * Optional. The virtual default task_id (from `sessionInit.defaultTaskId`).
+   * When the session's associated task_id === defaultTaskId, prewarm passes
+   * `mode='activity'` to core to use activity-based recall in place of BM25/head.
    *
-   * 未配置 (undefined / 空字符串) → 完全跳过 activity 分支, 100% 走原 BM25 逻辑。
-   * 向后兼容硬约束: 老 deployment 不配这个字段时行为一字不差。
+   * Not configured (undefined / empty string) -> the activity branch is skipped entirely, 100% on the original BM25 logic.
+   * Backward-compat hard constraint: when old deployments do not configure this field, behavior is identical to the letter.
    *
-   * 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
+   * Design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
    */
   defaultTaskId?: string;
 }
@@ -104,11 +104,11 @@ const SKILL_LISTING_FOOTER =
 export function wrapAvailableSkillsBlock(listing: string): string {
   return [
     SKILL_LISTING_HEADER,
-    "以下是你（当前 agent）自带的云端 skill 列表。这些 skill 存储在你的 agent 名下，",
-    "优先使用它们完成任务。如果你觉得自带的 skill 不够，可以用 skill_search 工具",
-    "在团队的 skill 库中检索更多（跨 agent 共享）。",
+    "Below is the list of cloud skills that belong to you (the current agent). These skills are stored under your agent name,",
+    "so prefer them for completing tasks. If you feel your own skills are not enough, you can use the skill_search tool",
+    "to search for more in the team's skill library (shared across agents).",
     "",
-    "**重要：这些 skill 存储在云端，不能使用 read_file / tool_use 直接访问，\n必须用 Bash 执行 curl 调用上方 <skill_tools> 块中的 skill-bridge 工具。**",
+    "**Important: these skills are stored in the cloud and cannot be accessed directly with read_file / tool_use;\nyou must use Bash to run curl against the skill-bridge tools in the <skill_tools> block above.**",
     "",
     listing,
     SKILL_LISTING_FOOTER,
@@ -224,11 +224,11 @@ export class SkillInjector implements InjectionHook {
     if (input.assetCapabilities?.skill === false) return [];
     const ids = input.sessionInfo;
 
-    // Default-task 活跃度召回 gate (设计: 2026-09-09 skill usage telemetry doc §4.1)
-    // - 需要 defaultTaskId 已配置 且 session.task_id 显式等于它
-    // - core 侧 mode='activity' 分支在 CH 不可用/查询失败/冷启动时自动 fallback
-    //   到原 auto (BM25/full) 逻辑, response.mode 会体现最终使用的模式
-    // - 向后兼容: 老 deployment 不配 defaultTaskId 或用户选了真 task → 100% 走原逻辑
+    // Default-task activity-recall gate (design: 2026-09-09 skill usage telemetry doc §4.1)
+    // - requires defaultTaskId to be configured and session.task_id to explicitly equal it
+    // - the core-side mode='activity' branch automatically falls back to the original auto (BM25/full) logic
+    //   when CH is unavailable / the query fails / on cold start; response.mode reflects the mode finally used
+    // - backward compat: old deployments that do not configure defaultTaskId, or users who chose a real task -> 100% on the original logic
     const isDefaultTask = !!(
       this.config.defaultTaskId
       && ids?.task_id
@@ -236,7 +236,7 @@ export class SkillInjector implements InjectionHook {
     );
 
     if (isDefaultTask) {
-      // 走活跃度召回。不带 query (activity 模式不 care query)。
+      // Use activity-based recall. No query (activity mode does not care about the query).
       return this.renderListingBlocks({
         team_id: ids?.team_id,
         agent_id: ids?.agent_id,
@@ -247,7 +247,7 @@ export class SkillInjector implements InjectionHook {
       });
     }
 
-    // 老路径 —— 真 task 或未配置 defaultTaskId 时保持不变。
+    // Old path -- unchanged for a real task or when defaultTaskId is not configured.
     // Build search query from agent description + task description
     // so listing semantically matches relevant skills (FTS BM25).
     const query = buildListingQuery(input);
@@ -278,7 +278,7 @@ export class SkillInjector implements InjectionHook {
     agent_id?: string;
     space_id?: string;
     query: string | undefined;
-    /** 'activity' 触发 core 的活跃度分支; 未传 = auto (老逻辑)。 */
+    /** 'activity' triggers core's activity branch; omitted = auto (old logic). */
     mode?: "auto" | "activity";
     trigger: "prewarm" | "execute" | "prewarm-default";
   }): Promise<ContextBlock[]> {

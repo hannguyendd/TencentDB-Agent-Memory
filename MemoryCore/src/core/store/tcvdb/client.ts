@@ -89,8 +89,8 @@ export class TcvdbClient {
   private readonly dispatcher?: Dispatcher;
 
   constructor(config: TcvdbClientConfig, logger?: StoreLogger) {
-    // 防御性 normalize：Shark 某些实例的 VdbUrl 可能只返回 `host:port`（缺 scheme），
-    // 此时 undici.request() 会抛 Invalid URL。这里补齐 http://（默认 VDB 内网走 HTTP）。
+    // Defensive normalize: for some instances Shark's VdbUrl may return only `host:port` (missing scheme),
+    // in which case undici.request() throws Invalid URL. Fill in http:// here (the default VDB intranet uses HTTP).
     let url = config.url.replace(/\/+$/, "");
     if (!/^https?:\/\//i.test(url)) {
       url = `http://${url}`;
@@ -288,19 +288,19 @@ export class TcvdbClient {
   }
 
   /**
-   * 条件更新 —— VDB 服务器侧原子 CAS 语义。
+   * Conditional update — VDB server-side atomic CAS semantics.
    *
-   * 定位方式两种(二选一,与 /document/delete 对齐):
-   *   - `filter`: filter-index 字段的等值/AND/数值范围表达式 —— 支持 CAS 语义
-   *     (filter 里带上期望旧值, 只有匹配的行被改, `affectedCount` 精确反映
-   *     真实改动数)。注意 filter 里不能引用 primaryKey 字段 `id` —— 用其他
-   *     filter-index 字段(skill_id + team_id + version + is_head)作等价定位。
-   *   - `documentIds`: 主键 (id) 精确定位 —— auto-heal 挑好 winner 后用
-   *     loser 的 row_ids 精确 demote, 避开 filter 表达式在时间戳并列 / VDB
-   *     filter-index 异步刷新等场景下的模糊性。
+   * Two ways to locate (choose one, aligned with /document/delete):
+   *   - `filter`: an equality/AND/numeric-range expression on filter-index fields — supports CAS semantics
+   *     (put the expected old value in the filter, only matching rows are changed, and `affectedCount` accurately reflects
+   *     the real number of changes). Note the filter cannot reference the primaryKey field `id` — use other
+   *     filter-index fields (skill_id + team_id + version + is_head) as an equivalent locator.
+   *   - `documentIds`: precise location by primary key (id) — after auto-heal picks a winner, use
+   *     the loser's row_ids to demote precisely, avoiding the ambiguity of filter expressions in scenarios such as timestamp ties / VDB
+   *     filter-index async refresh.
    *
-   * 我们把 filter 分支当"翻旧 head"的 CAS 用: filter 带 `and is_head=1` 作
-   * 期望旧值, winner 拿 affectedCount=1, loser 拿 0 后自己 rollback。
+   * We use the filter branch as a CAS for "flipping the old head": the filter carries `and is_head=1` as the
+   * expected old value, the winner gets affectedCount=1, and the loser gets 0 and rolls back on its own.
    */
   async update(
     collection: string,

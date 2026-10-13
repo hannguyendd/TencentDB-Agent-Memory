@@ -1,13 +1,13 @@
 /**
- * v3 实例租户：从 x-tdai-service-id 解析 instance_id（v2.8）。
+ * v3 instance tenant: resolve instance_id from x-tdai-service-id (v2.8).
  */
 import type { IncomingHttpHeaders } from "node:http";
 import { InvalidInstanceIdError, resolveMetadataDbName } from "../store/db-name.js";
 import { MetadataError } from "../service/metadata-service.js";
 
 /**
- * 校验 instance_id 可路由到元数据库名；非法时抛 MetadataError。
- * 在路由层统一校验，避免 store 层 InvalidInstanceIdError 泄漏为 500。
+ * Validate that instance_id can be routed to a metadata database name; throw MetadataError if invalid.
+ * Validated uniformly at the route layer so the store-layer InvalidInstanceIdError does not leak as a 500.
  */
 export function normalizeInstanceIdForRoute(instanceId: string): string {
   const trimmed = instanceId.trim();

@@ -1,28 +1,28 @@
 # ============================================================
-# TencentDB-Agent-Memory — 本地 Mongo 形态 Docker Compose
+# TencentDB-Agent-Memory -- local Mongo flavor Docker Compose
 # ============================================================
-# 两个容器：atlas-local（mongod + mongot，$search/Lucene BM25）+ gateway。
-# 与 docker-compose.local.yaml 的区别：那个是 service 形态（Redis + Shark mock），
-# 这个是 standalone 形态（零 Redis/Shark 依赖，进程内 pipeline），数据面走 Mongo。
+# Two containers: atlas-local (mongod + mongot, $search/Lucene BM25) + gateway.
+# Difference from docker-compose.local.yaml: that one is the service flavor (Redis + Shark mock),
+# while this is the standalone flavor (zero Redis/Shark dependency, in-process pipeline), with the data plane on Mongo.
 #
-# 启动（LLM key 从 .env.knowledge-local 借，避免明文入库）:
-#   set -a && source ../.env.knowledge-local && set +a   # 在 memory-tencentdb/ 下
-#   docker compose -f docker-compose.local-mongo.yaml up --build -d   # 在 MemoryCore/ 下
-# 健康: curl http://localhost:8420/health
-# 日志: docker compose -f docker-compose.local-mongo.yaml logs -f memory
-#       （应看到 "cluster profile: topology=replicaSet mongot=yes"）
-# 停止: docker compose -f docker-compose.local-mongo.yaml down        （保留数据卷）
-# 清空: docker compose -f docker-compose.local-mongo.yaml down -v     （连数据+搜索索引一起删）
+# Start (LLM key borrowed from .env.knowledge-local to avoid committing plaintext):
+#   set -a && source ../.env.knowledge-local && set +a   # under memory-tencentdb/
+#   docker compose -f docker-compose.local-mongo.yaml up --build -d   # under MemoryCore/
+# Health: curl http://localhost:8420/health
+# Logs: docker compose -f docker-compose.local-mongo.yaml logs -f memory
+#       (you should see "cluster profile: topology=replicaSet mongot=yes")
+# Stop: docker compose -f docker-compose.local-mongo.yaml down        (keeps data volumes)
+# Wipe: docker compose -f docker-compose.local-mongo.yaml down -v     (deletes data and search indexes together)
 # ============================================================
 
 services:
-  # ── MongoDB 8.3 + Search（mongot）──
-  # 与 docker/mongo-search 那套同镜像，但完全内部网络（不映射宿主端口），
-  # 与宿主机上可能正在跑的 tdai-mongo-search 容器互不干扰。
+  # -- MongoDB 8.3 + Search (mongot) --
+  # Same image as the docker/mongo-search setup, but fully on an internal network (no host port mapping),
+  # so it does not interfere with a tdai-mongo-search container that may be running on the host.
   mongo-search:
     image: mongodb/mongodb-atlas-local:8.3
-    # hostname 必须固定：atlas-local 的 runner 用容器主机名初始化单节点 RS 成员。
-    # 不固定时 compose 重建容器 → 主机名变化 → 卷里 RS 配置失配 → 永远无 primary。
+    # hostname must be fixed: the atlas-local runner uses the container hostname to initialize the single-node RS member.
+    # If not fixed, compose recreating the container -> hostname changes -> RS config in the volume mismatches -> never a primary.
     hostname: mongo-search
     environment:
       - MONGOT_LOG_FILE=/dev/stderr
@@ -30,18 +30,18 @@ services:
     volumes:
       - mongo-db:/data/db
       - mongo-configdb:/data/configdb
-      # 必须持久化，否则重启丢 $search 索引
+      # Must be persisted, otherwise the $search index is lost on restart
       - mongo-mongot:/data/mongot
     healthcheck:
-      # ping 在 RS 无 primary 时也成功 —— 必须等 isWritablePrimary，
-      # 否则 depends_on 会让 core 在 RS 选举完成前启动。
+      # ping also succeeds when the RS has no primary -- must wait for isWritablePrimary,
+      # otherwise depends_on would let core start before the RS election completes.
       test: ["CMD", "mongosh", "--quiet", "--eval", "if (db.adminCommand('hello').isWritablePrimary === true) process.exit(0); else process.exit(1)"]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 10s
 
-  # ── TDAI Memory Gateway（Mongo 后端）──
+  # -- TDAI Memory Gateway (Mongo backend) --
   memory:
     build:
       context: .
@@ -53,17 +53,17 @@ services:
       - ./tdai-gateway.local-mongo.yaml:/data/config/tdai-gateway.yaml:ro
       - memory-data:/data/tdai-memory
     environment:
-      # ── 存储后端选择（gateway 形态只认 env）──
+      # -- Storage backend selection (gateway flavor only honors env) --
       - STORE_MODE=mongodb
       - MONGODB_ENDPOINT=mongodb://mongo-search:27017/?directConnection=true
       - MONGODB_DATABASE=tdai_memory
-      # ── 元数据也落同一个 Mongo（库名 tdai_metadata_<instance>；事务需副本集，atlas-local 满足）──
-      # 想让元数据留在容器内 sqlite，删掉下面这行即可。
+      # -- Metadata also lands in the same Mongo (database name tdai_metadata_<instance>; transactions need a replica set, which atlas-local satisfies) --
+      # To keep metadata in the in-container sqlite, just delete the line below.
       - TDAI_METADATA_MONGO_URI=mongodb://mongo-search:27017/?directConnection=true
-      # ── 本地免鉴权（Layer1 关闭；api_key 仅作 Layer3 管理员 user_key）──
+      # -- Local auth-free (Layer1 off; api_key only serves as the Layer3 admin user_key) --
       - TDAI_GATEWAY_API_KEY=
-      # ── LLM（从宿主环境注入，见文件头用法）──
-      - TDAI_LLM_API_KEY=${TDAI_LLM_API_KEY:?请先 set -a && source ../.env.knowledge-local && set +a}
+      # -- LLM (injected from the host environment, see usage in the file header) --
+      - TDAI_LLM_API_KEY=${TDAI_LLM_API_KEY:?Please run set -a && source ../.env.knowledge-local && set +a first}
       - TDAI_LLM_BASE_URL=${TDAI_LLM_BASE_URL:-https://tokenhub.tencentmaas.com/v1}
       - TDAI_LLM_MODEL=${TDAI_LLM_MODEL:-deepseek-v4-flash}
     depends_on:

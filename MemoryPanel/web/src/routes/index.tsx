@@ -1,8 +1,8 @@
 /**
- * 路由表定义
+ * Route table definition
  *
- * 使用 react-router 的 createBrowserRouter / RouterProvider。
- * ConsoleLayout 作为父路由，各页面作为子路由。
+ * Uses react-router's createBrowserRouter / RouterProvider.
+ * ConsoleLayout is the parent route, and each page is a child route.
  */
 import { createHashRouter, type RouteObject } from 'react-router-dom';
 import { ConsoleLayout } from '@/layouts/ConsoleLayout';
@@ -37,7 +37,7 @@ export const routes: RouteObject[] = [
 ];
 
 /**
- * 使用 HashRouter — 保持与旧版 hash 路由兼容，
- * 避免刷新 404（静态部署不需要服务端 fallback 配置）。
+ * Uses HashRouter -- stays compatible with the old hash routing,
+ * and avoids 404 on refresh (static deployment needs no server-side fallback config).
  */
 export const router = createHashRouter(routes);

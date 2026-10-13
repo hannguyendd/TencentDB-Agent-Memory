@@ -1,25 +1,25 @@
 /**
- * opencode 客户端适配器。
+ * opencode client adapter.
  *
  * OpenCode 1.x uses `@ai-sdk/openai-compatible`; OpenCode 2.0 uses
  * `@opencode/ai/providers/openai-compatible`. Both reach this adapter through
  * OpenAI Chat Completions. Responses/Anthropic runtimes are separate paths.
  *
- * # 与已有 openai-chat 客户端的差异
+ * # Differences from existing openai-chat clients
  *
- *   - CodeBuddy: content 恒字符串，塞 `<user_query>` / `<additional_data>`
- *     / `<user_info>` wrapper —— 需走 `extractUserQueryText` 剥离
- *   - dsh: content 恒字符串，**裸文本**无 wrapper —— 直接返回
- *   - OpenCode 2.0.18 本地 CLI 实测：主请求的最后一条 user content 是裸文本；
- *     同轮标题生成请求使用同一端点，但 system prompt 有固定标题生成标记。
+ *   - CodeBuddy: content is always a string, with `<user_query>` / `<additional_data>`
+ *     / `<user_info>` wrappers -- must go through `extractUserQueryText` to strip them
+ *   - dsh: content is always a string, **bare text** with no wrapper -- returned directly
+ *   - OpenCode 2.0.18 local CLI verified: the last user content of the main request is bare text;
+ *     the title-generation request in the same turn uses the same endpoint, but its system prompt has a fixed title-generation marker.
  *
- *   保守策略：走 `extractUserQueryText`。
- *   —— 该函数对"无 wrapper 的纯字符串"会原样返回，对未来 opencode 若真
- *      塞了 wrapper 也能吃下（forward-compatible）；两种形态零回归。
+ *   Conservative strategy: go through `extractUserQueryText`.
+ *   -- That function returns a plain string without wrapper as-is, and can also handle a wrapper
+ *      if opencode ever adds one (forward-compatible); zero regression in both shapes.
  *
- * # 两个适配点
- *   - `classifyRequest`: OpenCode 2.0 的标题生成请求为 auxiliary
- *   - `extractUserText`: 字符串或文本块数组 → 合并后剥离非用户上下文
+ * # Two adaptation points
+ *   - `classifyRequest`: OpenCode 2.0's title-generation request is auxiliary
+ *   - `extractUserText`: string or text-block array -> merge, then strip non-user context
  *
  * Keep a dedicated adapter so OpenCode request classification and telemetry
  * can evolve independently from CodeBuddy.

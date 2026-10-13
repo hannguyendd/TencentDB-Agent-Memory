@@ -1,5 +1,5 @@
 /**
- * API trace 档位策略：由 metadata store backend 推断，无独立配置项。
+ * API trace tier policy: inferred from the metadata store backend; no standalone config option.
  */
 import type { MetadataBackend } from "../metadata/store/interface.js";
 
@@ -11,13 +11,13 @@ export interface ApiTracePolicy {
   maxFieldChars: number;
   maxJsonChars: number;
   maxSqlChars: number;
-  /** 成功路径是否记录 HTTP body */
+  /** Whether to log the HTTP body on the success path */
   httpBodyOnSuccess: boolean;
-  /** 成功路径是否记录 service enter/exit */
+  /** Whether to log service enter/exit on the success path */
   serviceLayerOnSuccess: boolean;
-  /** 成功路径是否记录 store enter/exit */
+  /** Whether to log store enter/exit on the success path */
   storeLayerOnSuccess: boolean;
-  /** 是否调用 trace.report（OTel/Langfuse） */
+  /** Whether to call trace.report (OTel/Langfuse) */
   httpOtelReport: boolean;
 }
 

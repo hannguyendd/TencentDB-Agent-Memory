@@ -105,9 +105,9 @@ export class CompositeStorageBackend implements IStorageBackend {
   }
 
   /**
-   * 场景索引派生（P2-D2）：委托给 profile 行侧。`scene-index.ts` 的
-   * readSceneIndex/syncSceneIndex 通过结构化探测发现本方法——rowfs 模式下
-   * 索引从 L2 行实时投影，`.metadata/scene_index.json` 不读不写。
+   * Scene-index derivation (P2-D2): delegates to the profile row side. `scene-index.ts`'s
+   * readSceneIndex/syncSceneIndex discover this method via structural probing — in rowfs mode
+   * the index is projected live from L2 rows, and `.metadata/scene_index.json` is neither read nor written.
    */
   async deriveSceneIndex(): Promise<SceneIndexEntry[]> {
     const profile = this.profile as unknown as { deriveSceneIndex?: () => Promise<SceneIndexEntry[]> };

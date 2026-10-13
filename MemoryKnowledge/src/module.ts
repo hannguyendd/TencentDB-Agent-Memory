@@ -44,7 +44,7 @@ import { isGitAuthError, explainGitAuthError } from "./source-fetcher/git-fetche
 
 const log = createLogger("knowledge-module");
 
-/** 进程级全局 LLM 并发信号量（跨所有 wiki 的 extract + merge）。 */
+/** Process-wide global LLM concurrency semaphore (across extract + merge for all wikis). */
 export const globalLlmLimit = pLimit(getGlobalLlmConcurrency());
 
 // ───────────────────────── Module Config ─────────────────────────
@@ -62,7 +62,7 @@ export interface KnowledgeModuleConfig {
   codeWorker?: CodeGraphWorker;
   /** Optional: externally injected credential store (for testing). */
   credentialStore?: ICredentialStore;
-  /** Optional: wiki 拉取服务（外部 wiki 定时同步用）；未注入 → wiki 同步目标跳过。 */
+  /** Optional: wiki fetch service (used for scheduled sync of external wikis); not injected → wiki sync targets are skipped. */
   wikiImporter?: WikiImporter;
 }
 
@@ -77,19 +77,19 @@ export interface KnowledgeModule {
   wikiService: WikiService;
   cgService: CodeGraphService;
   wikiMgr: WikiSourceManager;
-  /** wiki 外部来源注册中心（iWiki 等）。 */
+  /** Registry of wiki external sources (iWiki, etc.). */
   wikiSourceRegistry: WikiSourceRegistry;
   store: IKnowledgeStore;
   instancePool: CodeGraphInstancePool;
   /** Per-instance LLM routing binding (proxy/byo), keyed by service_id. */
   llmBindingStore: ILlmBindingStore;
-  /** 定时自动同步调度器（需显式 start/stop）。 */
+  /** Scheduled auto-sync scheduler (requires explicit start/stop). */
   autoSyncScheduler: AutoSyncScheduler;
-  /** 定时自动同步的解析后配置（挂载 admin 路由时透出）。 */
+  /** Resolved config for scheduled auto-sync (exposed when mounting admin routes). */
   autoSyncConfig: AutoSyncConfig;
-  /** 外部知识源用户令牌（加密存储，明文不出进程）。 */
+  /** External knowledge source user tokens (encrypted storage; plaintext never leaves the process). */
   credentialStore: ICredentialStore;
-  /** 代码来源 provider 注册中心（前端下拉 + provider 查询）。 */
+  /** Code source provider registry (frontend dropdown + provider lookup). */
   codeSourceRegistry: CodeSourceRegistry;
 }
 
@@ -138,24 +138,24 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
   // Source fetcher registry (git/local/ftp routing + security validation)
   const fetcherRegistry = new SourceFetcherRegistry();
 
-  // ── 外部来源凭据存储（base64；无密钥；见 §4.1.3） ──
+  // ── External source credential store (base64; no key; see §4.1.3) ──
   const credentialStore = config.credentialStore ?? createCredentialStore({ db });
 
-  // ── 代码来源 provider 注册中心（内置 + 部署启用列表） ──
+  // ── Code source provider registry (built-in + deployment-enabled list) ──
   const codeSourceRegistry = new CodeSourceRegistry();
 
-  // ── wiki 来源 provider 注册中心（内置 + 部署启用列表） ──
+  // ── Wiki source provider registry (built-in + deployment-enabled list) ──
   const wikiSourceRegistry = new WikiSourceRegistry();
 
   /**
-   * 需要凭据的仓库：clone/sync 前把令牌临时注入 URL。
+   * Repos that need credentials: temporarily inject the token into the URL before clone/sync.
    *
-   * 凭据行是否存在**即**决定该仓是否外部来源（§4.2）：
-   *   有 → 走 provider.applyToCloneUrl 或默认 basic-auth 注入
-   *   无 → 公开仓，返回干净地址（行为与改造前一致）
+   * Whether a credential row exists **is** what decides whether the repo is an external source (§4.2):
+   *   yes → go through provider.applyToCloneUrl or the default basic-auth injection
+   *   no  → public repo, return a clean URL (behavior identical to before the change)
    *
-   * 落库的是干净地址，此处拼出来的带凭据 URL 只活在本次调用栈里
-   * （不写盘、不进日志、不进响应体）。
+   * What gets persisted is the clean URL; the credentialed URL assembled here only lives in this call stack
+   * (not written to disk, not logged, not in response bodies).
    */
   const cloneUrlFor = (
     serviceId: string,
@@ -164,7 +164,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
   ): string => {
     const ref = { type: "code-graph" as const, serviceId, resourceId: codeGraphId };
     const cred = credentialStore.get(ref);
-    if (!cred) return repoUrl; // 无凭据 = 公开仓
+    if (!cred) return repoUrl; // no credential = public repo
     const status = credentialStore.status(ref);
     if (!status) throw new Error(`no credential row for code-graph ${codeGraphId}`);
     const provider = codeSourceRegistry.get(status.provider_id);
@@ -177,10 +177,10 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
   };
 
   /**
-   * 把 clone 后 .git/config 里 origin 的带凭据 URL 改回干净地址。
+   * Change the credentialed origin URL in .git/config after clone back to a clean URL.
    *
-   * 失败不阻断建图，但要告警 —— 明文令牌留在磁盘是安全问题，
-   * 而建图结果本身仍然有效。
+   * Failure does not block graph building, but should warn — leaving a plaintext token on disk is a security issue,
+   * while the graph result itself is still valid.
    */
   const sanitizeCloneRemote = async (
     dir: string,
@@ -204,19 +204,19 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
   const realCodeWorker: CodeGraphWorker = async (ctx) => {
     const { dir, repoUrl, branch, codeGraphId, serviceId, setInternalStatus } = ctx;
 
-    // 外部来源（工蜂等）→ 注入令牌；无凭据行 → 公开仓。
+    // External source (Gongfeng, etc.) → inject token; no credential row → public repo.
     const cleanUrl = stripCredentials(repoUrl);
     const effectiveUrl = cloneUrlFor(serviceId, codeGraphId, cleanUrl);
-    // 判定「是否私有仓」用 URL 是否被改写（等价于凭据行是否存在，且无需再查一次库）。
+    // Decide "is it a private repo" by whether the URL was rewritten (equivalent to whether a credential row exists, with no extra DB query).
     const needsCredential = effectiveUrl !== cleanUrl;
 
     // Resolve protocol-specific fetcher (validates url: https-only + SSRF blocklist).
     const fetcher = fetcherRegistry.resolve(effectiveUrl);
 
     const isExistingRepo = existsSync(join(dir, ".git"));
-    // ★ 私有仓不做增量 sync：GitSourceFetcher.sync() 内部是 `git fetch origin`，
-    //   用的是 .git/config 里的 URL —— 而那已被 sanitize 成干净地址，必然 401。
-    //   因此外部来源一律全量 clone（每次都带令牌），代价是慢，行为正确。
+    // ★ Private repos do no incremental sync: GitSourceFetcher.sync() internally runs `git fetch origin`,
+    //   using the URL in .git/config — which has already been sanitized to a clean URL, so it would inevitably 401.
+    //   Therefore external sources always do a full clone (with the token each time); the cost is slowness, but behavior is correct.
     const canIncremental = isExistingRepo && !needsCredential;
     let didIncrementalSync = false;
     let version: string | null = null;
@@ -244,7 +244,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
     }
 
     if (!didIncrementalSync) {
-      // 私有仓重跑：旧目录还在（增量被跳过）→ 先清掉，否则 clone 到非空目录会失败。
+      // Private repo re-run: the old directory is still there (incremental skipped) → clear it first, otherwise cloning into a non-empty directory fails.
       if (isExistingRepo) {
         try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
       }
@@ -254,8 +254,8 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
       try {
         res = await fetcher.fetch(effectiveUrl, branch, dir);
       } catch (err) {
-        // git 认证/权限错误措辞误导（`could not read Username` = 仓库需要认证），
-        // 转成面向用户的提示后再抛，写入 sync_error 供前端展示。
+        // git auth/permission error wording is misleading (`could not read Username` = the repo requires auth),
+        // convert it into a user-facing hint before rethrowing, written to sync_error for the frontend to display.
         const raw = err instanceof Error ? err.message : String(err);
         if (isGitAuthError(raw)) {
           throw new Error(explainGitAuthError(raw, needsCredential));
@@ -263,8 +263,8 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
         throw err;
       }
       version = res.version;
-      // ★ 凭据落地清理：clone 会把带令牌的 URL 写进 .git/config 的 origin。
-      //   不清理等于把用户 PAT 明文留在磁盘上（后续 git fetch 也一直用它）。
+      // ★ Credential cleanup: clone writes the tokenized URL into the origin in .git/config.
+      //   Not cleaning it up means leaving the user's PAT in plaintext on disk (later git fetch also keeps using it).
       await sanitizeCloneRemote(dir, stripCredentials(repoUrl), serviceId, codeGraphId);
 
       setInternalStatus("indexing");
@@ -290,7 +290,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
 
     // Per-instance LLM routing (proxy/byo/global fallback), keyed by service_id.
     const effectiveLlm = resolveLlm(serviceId);
-    // 进度只推 Panel（Panel 内存 store + wiki/get 聚合）；KS 不落进度态
+    // Progress is pushed only to Panel (Panel in-memory store + wiki/get aggregation); KS does not persist progress state
     const onProgress = config.tmcCallbackUrl
       ? buildProgressFn(config.tmcCallbackUrl, wikiId, serviceId, teamId, ingestRunId)
       : undefined;
@@ -336,7 +336,7 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
     queue: sharedQueue,
     logger: { info: log.info.bind(log), warn: log.warn.bind(log), error: log.error.bind(log) },
     callbackConfig,
-    // 释放 code-graph 内存资源（008 delete 清理）：从 pool 移除并关闭索引句柄。幂等。
+    // Release code-graph in-memory resources (008 delete cleanup): remove from the pool and close the index handle. Idempotent.
     releaseInstance: (codeGraphId: string) => {
       const inst = instancePool.get(codeGraphId);
       if (inst) closeIndex(inst);
@@ -401,16 +401,16 @@ export function createKnowledgeModule(config: KnowledgeModuleConfig): KnowledgeM
     }
   })();
 
-  // ── AutoSync Scheduler: 定时拉取 git 仓库并更新 codegraph / 外部 wiki ──
+  // ── AutoSync Scheduler: periodically pull git repos and update codegraph / external wikis ──
   const autoSyncConfig = resolveAutoSyncConfig();
   const autoSyncScheduler = new AutoSyncScheduler({
     store,
     cgService,
     config: autoSyncConfig,
-    // wiki 同步**跟随全局开关**，无 per-wiki 开关：
-    // 只要 KNOWLEDGE_AUTO_SYNC_ENABLED 开启，所有「存过凭据的 wiki」
-    // （= 外部来源，§4.2 用凭据行存在性判定）都会参与定时同步。
-    // 未注入时（如测试）wiki 目标跳过，code-graph 行为不变。
+    // wiki sync **follows the global switch**, with no per-wiki switch:
+    // as long as KNOWLEDGE_AUTO_SYNC_ENABLED is on, all "wikis that have stored credentials"
+    // (= external sources, §4.2 decided by credential row existence) participate in scheduled sync.
+    // When not injected (e.g. tests), wiki targets are skipped; code-graph behavior is unchanged.
     wikiImporter:
       config.wikiImporter ??
       createWikiImporter({

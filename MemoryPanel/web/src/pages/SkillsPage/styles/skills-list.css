@@ -1,11 +1,11 @@
 /**
- * SkillsPanel 样式。
+ * SkillsPanel styles.
  *
- * 列表容器 / 分栏布局 / 骨架屏 / 列表项 4 行结构已由通用 AssetListPanel
- * （asset-list-panel.css）提供，此处仅保留 Skills 页的差异化覆盖：
- *   1. 页面外层 flex 布局
- *   2. 列表项删除按钮（hover / 选中时显示）
- *   3. 用户名徽章与时间戳的统一字号覆盖
+ * The list container / split layout / skeleton / list item 4-row structure are already provided by the shared AssetListPanel
+ * (asset-list-panel.css); only the Skills page's differentiated overrides are kept here:
+ *   1. Page outer flex layout
+ *   2. List item delete button (shown on hover / when selected)
+ *   3. Unified font size override for username badge and timestamp
  */
 ._memory-skills-body {
   display: flex;
@@ -13,9 +13,9 @@
   gap: 16px;
 }
 
-/* ===== 删除按钮：hover/selected 时显示。
-   列表项容器已重构为通用 _alp-item（见 AssetListPanel），
-   旧选择器 _memory-skill-item:hover 已失效导致按钮永远隐藏，改为挂到 _alp-item 上。 */
+/* ===== Delete button: shown on hover/selected.
+   The list item container has been refactored into the shared _alp-item (see AssetListPanel),
+   and the old selector _memory-skill-item:hover became invalid so the button was always hidden; it is now attached to _alp-item. */
 ._memory-skill-item-delete {
   visibility: hidden;
   opacity: 0;
@@ -31,20 +31,20 @@
   opacity: 1;
 }
 
-/* ===== 通用 AssetListPanel 列表项在 Skills 页的字体统一覆盖 ===== */
-/* 用户名徽章：与时间戳统一字号（覆盖通用 ._alp-badge 的 11px） */
+/* ===== Shared AssetListPanel list item font unification override on the Skills page ===== */
+/* Username badge: same font size as the timestamp (overrides the generic ._alp-badge's 11px) */
 ._memory-skills-body ._alp-item-badges ._alp-badge {
   font-size: 12px;
 }
 
-/* 时间戳：与用户名统一（通用 ._alp-item-time 已声明 12px，这里再兜底颜色一致） */
+/* Timestamp: unified with the username (the generic ._alp-item-time already declares 12px; color consistency is guaranteed again here) */
 ._memory-skills-body ._alp-item-badges ._alp-item-time {
   font-size: 12px;
   color: var(--tea-color-text-secondary);
 }
 
-/* ===== 版本 Tag（标题行名称前）=====
-   紧凑展示，且不被 flex 压缩；名称过长时省略号仍由 ._alp-item-name 负责。 */
+/* ===== Version Tag (before the name in the title row) =====
+   Compact display, not compressed by flex; ellipsis for overly long names is still handled by ._alp-item-name. */
 ._memory-skills-body ._alp-item-header ._memory-skill-item-version {
   flex-shrink: 0;
   margin: 0;

@@ -1,18 +1,18 @@
 /**
- * AssetCategoryCards — 四类资产调用分布（Memory / Skill / Wiki / Code Graph）。
+ * AssetCategoryCards -- call distribution across four asset categories (Memory / Skill / Wiki / Code Graph).
  *
- * 数据来自内核 `tool-calls/endpoint-share`（SQL 全量聚合），面板侧只做端点→类别
- * 归并，因此 calls / pct 是**全量准确值**，不是抽样。
+ * Data comes from the kernel `tool-calls/endpoint-share` (full SQL aggregation); the panel only maps endpoint -> category
+ * so calls / pct are **exact full-volume values**, not samples.
  *
- * 点击卡片直接呼出下钻抽屉查看该类资产的调用明细（不再改动页面主体状态，
- * 避免「点了却要滚动到下方找结果」）。
+ * Clicking a card opens the drill-down drawer directly to view call details for that category (no longer changes the page body state,
+ * avoiding "clicked but have to scroll down to find the result").
  */
 import { useTranslation } from 'react-i18next';
 import { Card, StatusTip, Text, Tooltip } from 'tea-component';
 import type { AssetCategory, CategoryStat } from '../utils/asset-category';
 import { fmtInt, fmtPct } from '../utils/formatters';
 
-/** 类别 → i18n key 后缀与主题色（沿用 Tea 语义色 Token）。 */
+/** Category -> i18n key suffix and theme color (reuses Tea semantic color tokens). */
 const CATEGORY_META: Record<AssetCategory, { i18nKey: string; color: string }> = {
   memory: { i18nKey: 'memory', color: 'var(--tea-color-text-brand-default)' },
   skill: { i18nKey: 'skill', color: 'var(--tea-color-text-success-default)' },
@@ -40,7 +40,7 @@ export function AssetCategoryCards({
     <div className="_an-cat-grid">
       {stats.map((stat) => {
         const meta = CATEGORY_META[stat.category];
-        // 归类依据：展示落入该类的原始端点，便于核对归并是否符合预期
+        // Basis for categorization: show the raw endpoints that fall into this category so the mapping can be verified
         const tip =
           stat.endpoints.length > 0
             ? stat.endpoints.map((e) => `${e.endpoint} (${e.calls})`).join('\n')
@@ -78,19 +78,19 @@ export function AssetCategoryCards({
   );
 }
 
-/** 类别 → 内核 bridge_source 过滤值（用于下钻 trace 明细）。 */
+/** Category -> kernel bridge_source filter value (used for drill-down trace details). */
 export function categoryToBridgeSource(category: AssetCategory): string | undefined {
   if (category === 'memory') return 'memory-bridge';
   if (category === 'skill') return 'skill-bridge';
-  // wiki / codegraph 同属 knowledge-service，无法只靠 bridge_source 区分，
-  // 由调用方改用端点关键字过滤。
+  // wiki / codegraph both belong to knowledge-service, so they cannot be distinguished by bridge_source alone;
+  // the caller filters by endpoint keyword instead.
   if (category === 'wiki' || category === 'codegraph') return 'knowledge-service';
   return undefined;
 }
 
 export { CATEGORY_META };
 
-/** Card 容器包装（供页面直接使用，保持 Card.Body 语义一致）。 */
+/** Card container wrapper (for direct page use, keeps Card.Body semantics consistent). */
 export function AssetCategorySection({
   stats,
   onDrill,

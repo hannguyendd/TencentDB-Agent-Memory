@@ -1,58 +1,58 @@
 /**
- * opencode Session Init Form — `question` tool_call 载体。
+ * opencode Session Init Form — carrier for the `question` tool_call.
  *
- * opencode CLI（sst/opencode，Bun 打包二进制）在 agent-loop 里维护一个**硬白名单**
- * tools 集合：`bash, edit, glob, grep, invalid, question, read, skill, task,
- * todowrite, webfetch, write`。任何名字不在白名单里的 tool_call 都会被客户端
- * 拒绝并渲染成 `invalid [tool=xxx, error=Model tried to call unavailable tool]`。
+ * The opencode CLI (sst/opencode, a Bun-packaged binary) maintains a **hard whitelist** of
+ * tools in its agent-loop: `bash, edit, glob, grep, invalid, question, read, skill, task,
+ * todowrite, webfetch, write`. Any tool_call whose name is not on the whitelist is
+ * rejected by the client and rendered as `invalid [tool=xxx, error=Model tried to call unavailable tool]`.
  *
- * 因此 proxy 侧的 session-init form **不能沿用** CB 的 `ask_followup_question`
- * 或 CC 的 `AskUserQuestion`——必须映射到 opencode 原生 `question` 工具。
+ * Therefore the proxy-side session-init form **cannot reuse** CB's `ask_followup_question`
+ * or CC's `AskUserQuestion` — it must map to the native opencode `question` tool.
  *
- * # `question` 工具的 schema 依据
+ * # Schema basis of the `question` tool
  *
- * 来源：sst/opencode `packages/opencode/src/tool/question.ts` + Question v1
- * schema（`Question.Prompt`）。核心结构：
+ * Source: sst/opencode `packages/opencode/src/tool/question.ts` + Question v1
+ * schema (`Question.Prompt`). Core structure:
  *   {
  *     questions: [
  *       {
- *         question: string,             // 题干（必填）
- *         header:   string,             // ≤30 字符标题（必填）
- *         options:  [{label, description?}, ...],  // 至少 1 项
- *         multiple?: boolean,           // 是否多选（可选，默认 false）
+ *         question: string,             // question text (required)
+ *         header:   string,             // title of <=30 chars (required)
+ *         options:  [{label, description?}, ...],  // at least 1 item
+ *         multiple?: boolean,           // multi-select (optional, default false)
  *       },
  *       ...
  *     ]
  *   }
  *
- * # 与 workbuddy form 的差异（3 处 + tool name）
+ * # Differences from the workbuddy form (3 items + tool name)
  *   - tool_name: `AskUserQuestion` → `question`
- *   - multiSelect (camelCase) → **multiple**（opencode 独有命名，既不是 CC 的
- *     `multiSelect` 也不是 dsh 的 `multi_select`）
- *   - header 长度约束：opencode ≤30 字符（wb/CC 无限制）→ 用 `.slice(0, 30)`
- *   - tool_call id 前缀：`call_oc_session_init_`
+ *   - multiSelect (camelCase) → **multiple** (unique to opencode; neither CC's
+ *     `multiSelect` nor dsh's `multi_select`)
+ *   - header length constraint: opencode <=30 chars (wb/CC have no limit) → use `.slice(0, 30)`
+ *   - tool_call id prefix: `call_oc_session_init_`
  *
- * # 传输
- *   - 协议 = **OpenAI /v1/chat/completions**（opencode 底层用
- *     `@ai-sdk/openai-compatible` provider）
- *   - SSE stream 或 non-stream（与请求 `body.stream` 保持一致）
- *   - 骨架完全照抄 workbuddy（chunk 1 = role+tool_call decl / chunk 2 =
- *     arguments delta / chunk 3 = finish_reason:tool_calls / DONE）
+ * # Transport
+ *   - protocol = **OpenAI /v1/chat/completions** (opencode uses the
+ *     `@ai-sdk/openai-compatible` provider underneath)
+ *   - SSE stream or non-stream (consistent with the request's `body.stream`)
+ *   - the skeleton is copied wholesale from workbuddy (chunk 1 = role+tool_call decl / chunk 2 =
+ *     arguments delta / chunk 3 = finish_reason:tool_calls / DONE)
  *
- * # 状态机
- *   - 完全复用 CB 状态机（session/codebuddy/init.ts），同 workbuddy/dsh 模式；
- *     stage 值（asset_confirm / team / agent_select / task_select / agent_task）
- *     与 CB 完全一致，直接透传。
+ * # State machine
+ *   - fully reuses the CB state machine (session/codebuddy/init.ts), same pattern as workbuddy/dsh;
+ *     the stage values (asset_confirm / team / agent_select / task_select / agent_task)
+ *     are identical to CB and passed through directly.
  *
- * # 分页
- *   - opencode `question.options` 未见硬上限，但为了 UI 观感与 CC/WB 保持一致，
- *     沿用 `computePagination` + `MORE_LABEL` 尾槽方案（≤4 option/页）。
+ * # Pagination
+ *   - opencode `question.options` has no known hard limit, but to keep the UI consistent with CC/WB,
+ *     the `computePagination` + `MORE_LABEL` tail-slot scheme is reused (<=4 options/page).
  *
- * # 用户答复的回传格式（供 extractor 参考）
- *   opencode `question` 工具在用户选完后，会给 model 回一段文本形式的 tool-result：
- *     `User has answered your questions: "问题1"="答案1", "问题2"="答案2, 答案3"`
- *   现有 extractor 的 substring fallback（按 team_name / agent_name / 后 8 位 id
- *   做 `hay.includes`）能覆盖这个格式，无需另加 opencode 专用分支。
+ * # Format of the user's answer passed back (for extractor reference)
+ *   After the user finishes choosing, the opencode `question` tool returns a text-form tool-result to the model:
+ *     `User has answered your questions: "question1"="answer1", "question2"="answer2, answer3"`
+ *   The existing extractor's substring fallback (running `hay.includes` on team_name / agent_name / the
+ *   last 8 chars of id) covers this format, so no opencode-specific branch is needed.
  */
 
 import type { TeamOption } from "../types.js";
@@ -60,34 +60,34 @@ import { computePagination, CC_MAX_OPTIONS as CC_MAX_OPTIONS_SHARED } from "../c
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/** opencode 原生 tool 名，硬白名单成员。不要改成 `AskUserQuestion` 或 `ask_followup_question`。 */
+/** Native opencode tool name, a member of the hard whitelist. Do not change it to `AskUserQuestion` or `ask_followup_question`. */
 export const TOOL_NAME = "question";
 export const TOOLCALL_PREFIX = "call_oc_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = "Session Init — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Init — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Could not recognize your selection, please select again";
 
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
-export const MORE_LABEL = "更多 →";
+export const SKIP_LABEL = "Do not associate this time (skip injection, pass through)";
+export const MORE_LABEL = "More →";
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Init — Associate Team Assets?";
 
 /**
- * 附在每步 question 文末的通用备注。opencode `question` 工具的 UI 也支持用户自由输入答复
- * （非选项文字），回复"跳过 / skip / 不关联"会走 SKIP_RE bypass。
- * 文案与 claude-code / workbuddy / codex / codebuddy / dsh 六端统一。
+ * Generic note appended to the end of each step's question. The opencode `question` tool UI also lets the user type a free-form answer
+ * (non-option text); replying "skip / 跳过 / 不关联" goes through the SKIP_RE bypass.
+ * The wording is unified across six clients: claude-code / workbuddy / codex / codebuddy / dsh / opencode.
  */
-const SKIP_HINT = '（请选择最匹配的选项，当前暂不支持自定义输入。若选择跳过，本次 Session 将不注入团队资产）';
+const SKIP_HINT = ' (Please choose the best-matching option; custom input is not currently supported. If you choose to skip, this Session will not inject team assets)';
 
-/** opencode question header 硬上限。schema 校验 ≤30 字符，超长会被客户端拒收。 */
+/** Hard upper limit of the opencode question header. Schema validation requires <=30 chars; longer ones are rejected by the client. */
 const OC_HEADER_MAX = 30;
 
 const CC_MAX_OPTIONS = CC_MAX_OPTIONS_SHARED;
 
-/** 把任意 header 文本裁到 opencode schema 允许的 ≤30 字符。 */
+/** Clip any header text to the <=30 chars allowed by the opencode schema. */
 function clipHeader(s: string): string {
   return s.length > OC_HEADER_MAX ? s.slice(0, OC_HEADER_MAX) : s;
 }
@@ -116,7 +116,7 @@ export interface FormData {
   stage: FormStage;
   selectedTeamId?: string;
   selectedAgentId?: string;
-  /** 分页：当前页码 (0-based)；对齐 CC/WB 只使用一个 pageIndex（team/agent/task 单题） */
+  /** Pagination: current page index (0-based); aligned with CC/WB, which use only one pageIndex (single question for team/agent/task) */
   pageIndex?: number;
   retry?: boolean;
   stream?: boolean;
@@ -132,10 +132,10 @@ interface OCQuestionOption {
 
 interface OCAskQuestion {
   question: string;
-  /** opencode 硬约束：≤30 字符。 */
+  /** Hard opencode constraint: <=30 chars. */
   header: string;
   options: OCQuestionOption[];
-  /** opencode 独有命名：`multiple`（既不是 CC 的 `multiSelect` 也不是 dsh 的 `multi_select`）。 */
+  /** Unique opencode naming: `multiple` (neither CC's `multiSelect` nor dsh's `multi_select`). */
   multiple: boolean;
 }
 
@@ -146,11 +146,11 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？" + SKIP_HINT,
-      header: clipHeader("关联资产"),
+      question: titlePrefix + "Do you want to associate team assets with this conversation?" + SKIP_HINT,
+      header: clipHeader("Team assets"),
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: "Select Team / Agent / Task and inject the team context" },
+        { label: ASSET_CONFIRM_NO, description: "Inject nothing this time; pass through directly" },
       ],
       multiple: false,
     });
@@ -158,8 +158,8 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
   }
 
   if (stage === "team") {
-    // 分页对齐 agent/task —— 老实现 `slice(0, 4)` 硬截断，用户 team 数 ≥5 时
-    // 后续 team 静默消失且没有翻页入口。2026-09-03 修复。
+    // Pagination aligned with agent/task — the old implementation hard-truncated with `slice(0, 4)`; when the user had >=5 teams,
+    // later teams silently disappeared with no way to page. Fixed on 2026-09-03.
     const pageIndex = Math.max(0, data.pageIndex ?? 0);
     const page = computePagination(teams.length, pageIndex);
     const slice = teams.slice(page.start, page.end);
@@ -170,7 +170,7 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      teamOpts.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Team）` });
+      teamOpts.push({ label: MORE_LABEL, description: `View the next batch (${remaining} Team(s) remaining)` });
     }
 
     if (teamOpts.length < 2) {
@@ -181,9 +181,9 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? ` (page ${pageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择本次会话所属的 Team${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the Team for this session${pageSuffix}:` + SKIP_HINT,
       header: clipHeader(page.totalPages > 1 ? `Team ${pageIndex + 1}/${page.totalPages}` : "Team"),
       options: teamOpts.slice(0, CC_MAX_OPTIONS),
       multiple: false,
@@ -206,7 +206,7 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      combinedOptions.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Agent）` });
+      combinedOptions.push({ label: MORE_LABEL, description: `View the next batch (${remaining} Agent(s) remaining)` });
     }
 
     if (combinedOptions.length < 2) {
@@ -216,9 +216,9 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? ` (page ${pageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the Agent to use under "${team.team_name}"${pageSuffix}:` + SKIP_HINT,
       header: clipHeader(page.totalPages > 1 ? `Agent ${pageIndex + 1}/${page.totalPages}` : "Agent"),
       options: combinedOptions.slice(0, CC_MAX_OPTIONS),
       multiple: false,
@@ -242,7 +242,7 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
       const remaining = page.total - page.end;
       taskOpts.push({
         label: MORE_LABEL,
-        description: `查看下一批（还剩 ${remaining} 个任务）`,
+        description: `View the next batch (${remaining} task(s) remaining)`,
       });
     }
 
@@ -253,9 +253,9 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
       );
     }
 
-    const taskPageSuffix = page.totalPages > 1 ? `（第 ${taskPageIndex + 1}/${page.totalPages} 页）` : "";
+    const taskPageSuffix = page.totalPages > 1 ? ` (page ${taskPageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要关联的任务${taskPageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Please select the task to associate under "${team.team_name}"${taskPageSuffix}:` + SKIP_HINT,
       header: clipHeader(page.totalPages > 1 ? `Task ${taskPageIndex + 1}/${page.totalPages}` : "Task"),
       options: taskOpts.slice(0, CC_MAX_OPTIONS),
       multiple: false,
@@ -271,8 +271,8 @@ function buildQuestionArgs(data: FormData): { questions: OCAskQuestion[] } {
 /**
  * Build an opencode `question` fake form response.
  *
- * 传输：**OpenAI chat/completions**（stream 或 non-stream）。
- * arguments shape：opencode 原生 `{questions: [{question, header, options, multiple}]}`。
+ * Transport: **OpenAI chat/completions** (stream or non-stream).
+ * arguments shape: native opencode `{questions: [{question, header, options, multiple}]}`.
  */
 export function buildFormResponse(data: FormData): Response {
   const model = data.modelId ?? "unknown";

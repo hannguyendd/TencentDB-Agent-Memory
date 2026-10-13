@@ -1,34 +1,34 @@
 /**
- * prompts.ts — 摄取提示词（分析 / 系统 / 生成）。
+ * prompts.ts — ingest prompts (analysis / system / generation).
  *
- * 描述角色（wiki 维护者）、页面类型与目录约定（OKF type）、FILE 块输出协议、
- * wikilink 约定、去重更新策略、输出语言策略。依据本仓库 PRD/INTERFACE。
+ * Describes the role (wiki maintainer), page types and directory conventions (OKF type), the FILE block output protocol,
+ * wikilink conventions, dedup/update strategy, and output language policy. Based on this repo's PRD/INTERFACE.
  *
- * 支持两种摄取流程（PRD §4.2）：
- *   - 单阶段：源全文 + 模板 + 已有页清单 → 直接产出 FILE 块（buildGeneratePrompt）。
- *   - 两阶段（OQ-4）：先「分析」(buildAnalysisPrompt) 产出结构化抽取计划，
- *     再「生成」(buildGenerateFromAnalysisPrompt) 依据分析产出 FILE 块。
- *     好处：把"抽什么"与"落盘格式"解耦，质量更稳、格式更规整。
+ * Supports two ingest flows (PRD §4.2):
+ *   - Single stage: full source + template + existing page list → directly produce FILE blocks (buildGeneratePrompt).
+ *   - Two stage (OQ-4): first "analyze" (buildAnalysisPrompt) to produce a structured extraction plan,
+ *     then "generate" (buildGenerateFromAnalysisPrompt) to produce FILE blocks from the analysis.
+ *     Benefit: decouples "what to extract" from "on-disk format", for steadier quality and tidier formatting.
  */
 
 import type { WikiTemplate } from "./template.js";
 
-/** 已存在页的精简信息，用于让 LLM 感知"已有知识"并决定新建/更新。 */
+/** Concise info about an existing page, so the LLM is aware of "existing knowledge" and can decide to create/update. */
 export interface ExistingPageInfo {
-  /** wiki 相对路径，如 wiki/entities/redis.md */
+  /** wiki-relative path, e.g. wiki/entities/redis.md */
   relPath: string;
   title: string;
   type: string;
   description?: string;
 }
 
-/** 需要被更新的已存在页（命中 dedup 且未锁定），把原文给 LLM 做合并。 */
+/** Existing page that needs to be updated (hit dedup and not locked); the original text is given to the LLM to merge. */
 export interface PageForUpdate {
   relPath: string;
   content: string;
 }
 
-/** 把已有页清单格式化为列表文本（供分析/生成阶段复用）。 */
+/** Format the existing page list as list text (reused by the analysis/generation stages). */
 function formatExistingPages(existingPages: ExistingPageInfo[]): string {
   return existingPages.length > 0
     ? existingPages
@@ -37,9 +37,9 @@ function formatExistingPages(existingPages: ExistingPageInfo[]): string {
     : "(wiki is empty — this is the first source)";
 }
 
-// ─── 阶段 A：分析 ────────────────────────────────────────────
+// ─── Stage A: analysis ────────────────────────────────────────────
 
-/** 分析阶段系统提示词：扮演"抽取规划者"，只产出结构化分析，不写页面。 */
+/** Analysis stage system prompt: plays the "extraction planner", produces only structured analysis, writes no pages. */
 export function buildAnalysisSystemPrompt(template: WikiTemplate): string {
   return `You are a knowledge base analyst. Your job is to read a source document and plan how to integrate it into
 the existing wiki. You do NOT write final pages — you only produce a structured "extraction plan" for the
@@ -72,7 +72,7 @@ Decide whether a subject deserves its own page by asking:
 Output only the analysis itself — no FILE blocks, no final page content. Match the source document's primary language.`;
 }
 
-/** 构造分析阶段用户提示词。 */
+/** Build the analysis stage user prompt. */
 export function buildAnalysisPrompt(args: {
   sourceName: string;
   sourceText: string;
@@ -91,9 +91,9 @@ ${sourceText}
 Produce the structured extraction plan following the rules above.`;
 }
 
-// ─── 系统提示词（生成阶段共用：格式契约 + 输出协议） ──────────
+// ─── System prompt (shared by the generation stage: format contract + output protocol) ──────────
 
-/** 构造系统提示词：角色、格式契约、输出协议。 */
+/** Build the system prompt: role, format contract, output protocol. */
 export function buildSystemPrompt(template: WikiTemplate): string {
   return `You are a meticulous knowledge base (wiki) maintainer. Your job is to read source documents
 provided by the user and integrate their knowledge into a persistent, cumulative markdown wiki —
@@ -152,7 +152,7 @@ Rules:
 - Do NOT output any explanatory text outside of FILE blocks.`;
 }
 
-/** 构造生成提示词（单阶段）：源全文 + 已有页清单 + 待更新页原文。 */
+/** Build the generation prompt (single stage): full source + existing page list + original text of pages to update. */
 export function buildGeneratePrompt(args: {
   sourceName: string;
   sourceText: string;
@@ -194,11 +194,11 @@ Read the source, follow the format and protocol in the system prompt, and output
 Output ONLY FILE blocks — no extra commentary.`;
 }
 
-// ─── 阶段 B：基于分析的生成（OQ-4） ──────────────────────────
+// ─── Stage B: analysis-based generation (OQ-4) ──────────────────────────
 
 /**
- * 构造"生成阶段"用户提示词（两阶段流程）：以分析结果为主输入，
- * 仍附源全文供查证细节。让 LLM 据此产出 FILE 块。
+ * Build the "generation stage" user prompt (two-stage flow): the analysis result is the main input,
+ * while still attaching the full source for verifying details. Lets the LLM produce FILE blocks from it.
  */
 export function buildGenerateFromAnalysisPrompt(args: {
   sourceName: string;

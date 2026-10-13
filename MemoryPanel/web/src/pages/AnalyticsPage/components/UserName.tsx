@@ -1,15 +1,15 @@
 /**
- * UserName — 统一「user_id → 用户名」的展示与兜底。
+ * UserName -- unified display and fallback for "user_id -> username".
  *
- * user/list 批量解析（useUserNames）对个别 id 可能解析不到（代理层过滤的内部
- * 账号 / 已删除用户等），旧逻辑会把裸 user_id 当文本直接渲染，观感上像"漏了
- * name"。这里统一处理：
- *   - 解析成功 → 渲染用户名（tooltip 带完整 user_id，便于与同 id 短串区分）
- *   - 解析失败 → 渲染弱化「未识别用户」占位 + tooltip 带完整 user_id，
- *     让调用方/用户能拿到 id，又不把 id 当名字展示。
+ * Batch resolution via user/list (useUserNames) may fail to resolve some ids (internal accounts
+ * filtered by the proxy layer / deleted users, etc.); the old logic rendered the bare user_id as text, which looked like
+ * a "missing name". This handles it uniformly:
+ *   - resolved -> render the username (tooltip carries the full user_id, to distinguish ids with the same short prefix)
+ *   - unresolved -> render a muted "Unrecognized user" placeholder + tooltip with the full user_id,
+ *     so callers/users can still get the id without showing the id as a name.
  *
- * 用法：放在调用方已有容器内即可（纯文本单元格 / link 按钮均可），
- * 本组件自带省略与 tooltip，不再依赖外层。
+ * Usage: place it inside the caller's existing container (plain text cell / link button both work);
+ * this component has its own ellipsis and tooltip and no longer depends on the outer container.
  */
 import { useTranslation } from 'react-i18next';
 import { Text } from 'tea-component';
@@ -18,9 +18,9 @@ export function UserName({
   userId,
   displayName,
 }: {
-  /** 原始 user_id（tooltip 展示 / 兜底判断用）。 */
+  /** Raw user_id (used for tooltip display / fallback logic). */
   userId: string;
-  /** useUserNames 解析出的展示名；解析失败时内部回退为 user_id。 */
+  /** Display name resolved by useUserNames; internally falls back to user_id when resolution fails. */
   displayName: string;
 }) {
   const { t } = useTranslation();

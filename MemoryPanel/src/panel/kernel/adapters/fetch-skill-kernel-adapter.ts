@@ -3,11 +3,11 @@ import type { SkillKernelPort } from '../ports/skill-kernel-port.js';
 import { toKernelCredentials, type MetaCallContext } from '../types.js';
 
 /**
- * 基于 fetch 的 skill 数据面适配器：POST /v3/skill/{action}。
+ * fetch-based adapter for the skill data plane: POST /v3/skill/{action}.
  *
- * skill body 使用嵌套 pagination（不是顶层 limit/offset），故不做 meta 的
- * sanitizeBody 裁剪，原样透传。凭证与 meta 共用同一套（instance + api_key +
- * user_key），user_key 始终透传（skill 无 auth/verify 这类免鉴权动作）。
+ * The skill body uses nested pagination (not top-level limit/offset), so meta's sanitizeBody
+ * trimming is not applied and it is passed through as-is. Credentials are shared with meta (instance + api_key +
+ * user_key), and user_key is always passed through (skill has no auth-exempt action like auth/verify).
  */
 export class FetchSkillKernelAdapter implements SkillKernelPort {
   constructor(

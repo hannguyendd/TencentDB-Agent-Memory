@@ -1,7 +1,7 @@
 /**
- * conversation-add 模块公开入口。
+ * Public entry point of the conversation-add module.
  *
- * 使用方（gateway server.ts）可以直接
+ * Consumers (gateway server.ts) can directly
  *   import { wireConversationAdd, SkillConversationAddHandler, ... } from "core/skill/conversation-add/index.js";
  */
 

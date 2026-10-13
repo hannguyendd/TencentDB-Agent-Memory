@@ -36,21 +36,21 @@ const TAG = "[memory-tdai] [standalone-runner]";
 const MAX_TOOL_ITERATIONS = 20;
 
 // ============================
-// experimental_telemetry.metadata 组装
+// experimental_telemetry.metadata assembly
 // ============================
 
 /**
- * 组装传给 Vercel AI SDK 的 experimental_telemetry.metadata。
+ * Assemble the experimental_telemetry.metadata passed to the Vercel AI SDK.
  *
- * 字段策略：
- *   - instanceId  : 始终写入（未传时降级为 "unknown"）
- *   - traceName   : 存在时 → 写入 langfuseTraceName + langfuseUpdateParent=true
- *                  （让 Langfuse 用业务语义命名 trace，覆盖默认的 Unnamed）
- *   - tags        : 非空数组才写入（避免空 tag 污染 Langfuse 索引）
- *   - sessionId   : 非空字符串才写入（Langfuse UI 顶级筛选字段）
- *   - userId      : 非空字符串才写入（Langfuse UI 顶级筛选字段）
+ * Field policy:
+ *   - instanceId  : always written (falls back to "unknown" when not passed)
+ *   - traceName   : when present → write langfuseTraceName + langfuseUpdateParent=true
+ *                  (lets Langfuse name the trace with business semantics, overriding the default Unnamed)
+ *   - tags        : written only for a non-empty array (avoids empty tags polluting the Langfuse index)
+ *   - sessionId   : written only for a non-empty string (top-level filter field in the Langfuse UI)
+ *   - userId      : written only for a non-empty string (top-level filter field in the Langfuse UI)
  *
- * 未传对应字段时，metadata 里也不出现该键 —— 保持与旧行为完全一致。
+ * When the corresponding field is not passed, the key does not appear in metadata either — fully consistent with the old behavior.
  */
 function buildTelemetryMetadata(params: LLMRunParams): Record<string, unknown> {
   const meta: Record<string, unknown> = {
@@ -58,7 +58,7 @@ function buildTelemetryMetadata(params: LLMRunParams): Record<string, unknown> {
   };
   if (params.traceName) {
     meta.langfuseTraceName = params.traceName;
-    // langfuseUpdateParent=true 让子 span 的 name/attrs 传播到 Langfuse trace 根
+    // langfuseUpdateParent=true makes the child span's name/attrs propagate to the Langfuse trace root
     meta.langfuseUpdateParent = true;
   }
   if (Array.isArray(params.tags) && params.tags.length > 0) {
@@ -89,24 +89,24 @@ export interface StandaloneLLMConfig {
   /** Request timeout in milliseconds (default: 120_000). */
   timeoutMs?: number;
   /**
-   * LLM 访问模式（gateway 层解释；runner 拿到的是已解析后的 baseUrl/apiKey）：
-   *   - "openai": 直连通用 OpenAI 兼容服务（默认，向后兼容）
-   *   - "proxy":  走 context_proxy，运行时会自动把 baseUrl 拼成
-   *               `${baseUrl}/proxy/<instanceId>/v1`，apiKey 用 metadata.systemUser.memory.userKey
+   * LLM access mode (interpreted by the gateway layer; the runner receives the already-resolved baseUrl/apiKey):
+   *   - "openai": connect directly to a generic OpenAI-compatible service (default, backward compatible)
+   *   - "proxy":  go through context_proxy; at runtime baseUrl is automatically assembled into
+   *               `${baseUrl}/proxy/<instanceId>/v1`, and apiKey uses metadata.systemUser.memory.userKey
    */
   provider?: "openai" | "proxy";
-  /** provider=proxy 时的可选配置。 */
+  /** Optional config when provider=proxy. */
   proxy?: {
-    /** 是否用 memory systemUser.userKey 作为 Authorization（默认 true）。 */
+    /** Whether to use the memory systemUser.userKey as Authorization (default true). */
     useMemorySystemUserKey?: boolean;
   };
   /**
-   * 是否用流式请求(streamText)调用上游。默认 false(generateText 非流式)。
-   * 个别 OpenAI 兼容上游只接受流式请求时置 true。
+   * Whether to call the upstream with a streaming request (streamText). Default false (non-streaming generateText).
+   * Set to true when an individual OpenAI-compatible upstream only accepts streaming requests.
    *
-   * ⚠️ 仅 StandaloneLLMRunner(含 gateway/local/knowledge-ingest)路径生效;
-   * OpenClaw host runner 不使用此 runner,该开关被忽略。不会把增量 token
-   * 透传给调用方,只是"以流式协议请求上游后等待完整文本"的兼容层。
+   * ⚠️ Effective only on the StandaloneLLMRunner path (including gateway/local/knowledge-ingest);
+   * the OpenClaw host runner does not use this runner, so this switch is ignored. It does not pass incremental
+   * tokens through to the caller; it is merely a compatibility layer that "requests the upstream via the streaming protocol and then waits for the complete text".
    */
   stream?: boolean;
 }
@@ -260,9 +260,9 @@ export class StandaloneLLMRunner implements LLMRunner {
   private logger?: Logger;
 
   /**
-   * Side-channel: 最近一次 run() 调用的 token usage。
-   * 由 MetricTrackingRunner 装饰器读取，用于精确上报 credit。
-   * 不改变 LLMRunner 接口签名。
+   * Side-channel: token usage of the most recent run() call.
+   * Read by the MetricTrackingRunner decorator, for accurate credit reporting.
+   * Does not change the LLMRunner interface signature.
    */
   lastUsage?: LLMUsage;
 
@@ -355,10 +355,10 @@ export class StandaloneLLMRunner implements LLMRunner {
         },
       };
 
-      // stream=true → streamText(给只吃流式的上游);否则 generateText。
-      // 读 totalUsage 而不是单 step 的 usage —— tool-call 多 step 时后者只报最后一步,
-      // 会漏掉前序工具调用请求的用量,导致 credit 计费偏低。
-      // ai@6.0.164 的字段是 inputTokens/outputTokens/totalTokens。
+      // stream=true → streamText (for upstreams that only take streams); otherwise generateText.
+      // Read totalUsage instead of the single-step usage — with multi-step tool calls the latter reports only the last step,
+      // missing the usage of the earlier tool-call requests and making credit billing too low.
+      // The fields in ai@6.0.164 are inputTokens/outputTokens/totalTokens.
       const { text, usage, steps } = this.stream
         ? await (async () => {
             const streamResult = streamText(callParams);
@@ -379,9 +379,9 @@ export class StandaloneLLMRunner implements LLMRunner {
 
       const totalMs = Date.now() - runStartMs;
 
-      // 暴露 token usage 到 side-channel（供 MetricTrackingRunner 读取）
-      // AI SDK 用 inputTokens/outputTokens,我们的内部 LLMUsage 沿用旧命名
-      // promptTokens/completionTokens 以匹配 MetricTrackingRunner。
+      // Expose token usage to the side-channel (for MetricTrackingRunner to read)
+      // The AI SDK uses inputTokens/outputTokens; our internal LLMUsage keeps the old naming
+      // promptTokens/completionTokens to match MetricTrackingRunner.
       if (usage) {
         const promptTokens = usage.inputTokens ?? 0;
         const completionTokens = usage.outputTokens ?? 0;

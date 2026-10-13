@@ -1,13 +1,13 @@
 /**
- * SkillExtractor — 接受结构化 ExtractMessage[] 的抽取入口
+ * SkillExtractor — extraction entry point accepting structured ExtractMessage[]
  *
- * 与旧 SkillExtractor 的差异：
- *   - 入参 messages 必须是 `ExtractMessage[]`，不再接受裸字符串
- *   - 内部把 messages 串成 transcript（保留 role 标记）
- *   - 工具调用走 SkillToolsV2（操作 SkillCore）
- *   - 候选返回 ExtractedSkillCandidate 形态（含 skill_id / version）
+ * Differences from the old SkillExtractor:
+ *   - the input messages must be `ExtractMessage[]`; bare strings are no longer accepted
+ *   - internally joins the messages into a transcript (keeping role markers)
+ *   - tool calls go through SkillToolsV2 (operating on SkillCore)
+ *   - candidates are returned in the ExtractedSkillCandidate shape (including skill_id / version)
  *
- * 每次调用都走 LLM，不做任何对话级去重/缓存 —— 缓存机制已移除。
+ * Every call goes through the LLM, with no conversation-level dedup/caching — the caching mechanism has been removed.
  */
 
 import type { ExtractMessage } from "./types.js";
@@ -31,20 +31,20 @@ export interface ExtractorRunner {
     tools?: Record<string, unknown>;
     enableTools?: boolean;
     maxIterations?: number;
-    /** Output token 上限；不填由 runner 兜底 (标准 runner 走 llm.maxTokens)。 */
+    /** Output token cap; if omitted the runner falls back (the standard runner uses llm.maxTokens). */
     maxTokens?: number;
     taskId: string;
     timeoutMs?: number;
     signal?: AbortSignal;
-    /** Langfuse trace name（用于 UI 筛选与命名，见 core/types.ts LLMRunParams）。 */
+    /** Langfuse trace name (for UI filtering and naming, see LLMRunParams in core/types.ts). */
     traceName?: string;
-    /** Langfuse tags（用于 UI 筛选）。 */
+    /** Langfuse tags (for UI filtering). */
     tags?: string[];
-    /** Langfuse 顶级 sessionId。 */
+    /** Langfuse top-level sessionId. */
     sessionId?: string;
-    /** Langfuse 顶级 userId。 */
+    /** Langfuse top-level userId. */
     userId?: string;
-    /** 实例 id；透传成 telemetry 的 instanceId（缺失时 runner 侧兜底 "unknown"）。 */
+    /** Instance id; passed through as the telemetry instanceId (when missing the runner falls back to "unknown"). */
     instanceId?: string;
   }): Promise<string>;
 }
@@ -54,10 +54,10 @@ export interface ExtractorOptions {
   runner?: ExtractorRunner;
   systemPrompt?: string;
   /**
-   * 冷启动 / 批量导入使用的严格版 systemPrompt (SKILL_REVIEW_PROMPT_STRICT)。
-   * 仅当 extract() 的 input.mode==='strict' 且本字段已注入时启用; 否则一律
-   * 走 systemPrompt (向后兼容)。生产 wiring (tdai-core / server) 已默认注入
-   * SKILL_REVIEW_PROMPT_STRICT; 测试环境不注入 → 老行为完全不变。
+   * Strict systemPrompt used for cold start / bulk import (SKILL_REVIEW_PROMPT_STRICT).
+   * Enabled only when extract()'s input.mode==='strict' and this field has been injected; otherwise always
+   * uses systemPrompt (backward compatible). Production wiring (tdai-core / server) injects
+   * SKILL_REVIEW_PROMPT_STRICT by default; the test environment does not inject it → old behavior completely unchanged.
    */
   strictSystemPrompt?: string;
   maxIterations?: number;
@@ -66,16 +66,16 @@ export interface ExtractorOptions {
   /** Transcript head-tail truncation: chars to keep from the end (default 32000). */
   tailChars?: number;
   /**
-   * Skill review 单次 LLM 调用输出 token 上限。不填 → 由 runner 继承 llm.maxTokens。
-   * 与 llm.maxTokens 独立配置：skill review 输出（含 tool-call 参数里的 SKILL.md
-   * 全文）通常比其它 stage 大，可能需要单独调高。
+   * Output token cap for a single Skill review LLM call. If omitted → the runner inherits llm.maxTokens.
+   * Configured independently of llm.maxTokens: skill review output (including the full SKILL.md
+   * text inside tool-call parameters) is usually larger than other stages and may need to be raised separately.
    */
   maxTokens?: number;
   /**
-   * 预检索 skill 列表条数上限 (relevant BM25 search & recent 兜底共用)。
-   * 构造器默认 0 (关闭); 生产 wiring 层 (tdai-core / server) 从 skill-config
-   * 拿 resolved.extraction.prefixSkillsLimit (默认 20) 显式传入。测试构造无参
-   * 时不触发额外的 query-gen LLM 调用。
+   * Cap on the number of pre-retrieved skill list entries (shared by relevant BM25 search & the recent fallback).
+   * Constructor default 0 (disabled); the production wiring layer (tdai-core / server) explicitly passes in
+   * resolved.extraction.prefixSkillsLimit (default 20) from skill-config. When tests construct it with no arguments,
+   * no extra query-gen LLM call is triggered.
    */
   prefixSkillsLimit?: number;
   logger?: { info(msg: string): void; warn(msg: string): void; error(msg: string): void };
@@ -87,22 +87,22 @@ export interface ExtractInput {
   agent_id: string;
   task_id?: string;
   session_id?: string;
-  /** 实例 id（= space_id）；透传成 runner telemetry 的 instanceId。 */
+  /** Instance id (= space_id); passed through as the runner telemetry's instanceId. */
   space_id?: string;
   messages: ExtractMessage[];
   options?: {
     max_iterations?: number;
   };
-  /** 主 Agent 的抽取提示，有值时注入到抽取 LLM 的 user prompt 最前面。 */
+  /** The main Agent's extraction hint; when present it is injected at the very front of the extraction LLM's user prompt. */
   reason?: string;
   /**
-   * 抽取模式:
-   *   - 缺省 / 'default': 走 systemPrompt (SKILL_REVIEW_PROMPT v2 宽松版)
-   *   - 'strict'        : 走 strictSystemPrompt (SKILL_REVIEW_PROMPT_STRICT
-   *                       v1 严格 gate); 若 strictSystemPrompt 未注入则退回
-   *                       systemPrompt (不崩)。
-   * 冷启动 / 批量导入场景 (agents/asset-import.ts) 应传 'strict';日常实时
-   * 抽取不传即可,行为跟历史版本一致。
+   * Extraction mode:
+   *   - omitted / 'default': uses systemPrompt (SKILL_REVIEW_PROMPT v2 lenient version)
+   *   - 'strict'        : uses strictSystemPrompt (SKILL_REVIEW_PROMPT_STRICT
+   *                       v1 strict gate); if strictSystemPrompt was not injected, falls back to
+   *                       systemPrompt (no crash).
+   * Cold start / bulk import scenarios (agents/asset-import.ts) should pass 'strict'; everyday real-time
+   * extraction can omit it, and behavior matches the historical version.
    */
   mode?: 'default' | 'strict';
 }
@@ -116,7 +116,7 @@ export class SkillExtractor {
   private readonly core: SkillCore;
   private readonly runner?: ExtractorRunner;
   private readonly systemPrompt: string;
-  /** 冷启动/批量导入用的严格 prompt; undefined 时 mode==='strict' 也退回 systemPrompt。 */
+  /** Strict prompt for cold start / bulk import; when undefined, mode==='strict' also falls back to systemPrompt. */
   private readonly strictSystemPrompt?: string;
   private readonly maxIterations: number;
   private readonly headChars: number;
@@ -134,10 +134,10 @@ export class SkillExtractor {
     this.headChars = opts.headChars ?? 8000;
     this.tailChars = opts.tailChars ?? 32000;
     this.maxTokens = opts.maxTokens;
-    // 构造器默认 0 (关闭前缀注入 → 不会触发额外的 query-gen LLM 调用);
-    // 生产 wiring 会显式传入 resolved.extraction.prefixSkillsLimit (默认 20)。
-    // <0 或非数字回落到 0 (等价于关闭), 而不是静默改到 20 —— 不想让配置错误
-    // 变成"意外多花一次 LLM"。
+    // Constructor default 0 (disables prefix injection → no extra query-gen LLM call is triggered);
+    // production wiring explicitly passes resolved.extraction.prefixSkillsLimit (default 20).
+    // <0 or non-numeric falls back to 0 (equivalent to disabled), rather than silently changing to 20 — we do not want a config error
+    // to turn into "an unexpected extra LLM call".
     const rawLimit = opts.prefixSkillsLimit;
     this.prefixSkillsLimit = rawLimit === undefined
       ? 0
@@ -150,27 +150,27 @@ export class SkillExtractor {
     if (!Array.isArray(messages) || messages.length === 0) {
       throw new Error("ExtractV2: messages must be a non-empty array of ExtractMessage");
     }
-    // [obs] 一次抽取一条汇总事件；LLM 内部 iteration 走 langfuse trace（trace.report
-    // → OTel Span → Langfuse SpanProcessor 过滤上报），这里只做「入口→出口」
-    // 的耗时 / 候选数量汇总，用 task_id 做 anchor 跟 worker 段对齐。obsLogger
-    // 内部 try/catch + FileLogger + 后端降级，logger 挂了也不影响抽取本身。
+    // [obs] one summary event per extraction; the LLM's internal iterations go through the langfuse trace (trace.report
+    // → OTel Span → Langfuse SpanProcessor filtered reporting); here only an "entry → exit"
+    // summary of duration / candidate count is recorded, using task_id as the anchor to align with the worker segment. obsLogger
+    // has internal try/catch + FileLogger + backend degradation; even if the logger dies, the extraction itself is unaffected.
     const t0 = Date.now();
     const transcript = formatTranscript(messages);
 
     const truncated = truncateHeadTail(transcript, this.headChars, this.tailChars);
 
-    // 预检索 skill 列表, 塞在 user prompt 前面, 让 review agent 一进场就能看到
-    // agent 自己已经拥有哪些 skill (避免盲目 skill_create 撞 SKILL_NAME_DUPLICATE)。
+    // Pre-retrieve the skill list and put it in front of the user prompt, so the review agent sees right from the start
+    // which skills the agent already owns (avoiding blind skill_create hitting SKILL_NAME_DUPLICATE).
     //
-    // 三种模式, 由 prefixSkillsLimit + 该 agent 拥有的 skill 总数联合决定:
-    //   full     — total ≤ limit: 全部注入; 不花 query-gen LLM。
-    //   relevant — total > limit + query-gen 成功 + BM25 命中 ≥1: 相关性优先。
-    //   recent   — total > limit + relevant 失败 (query-gen 抛 / 空 / 命中 0):
-    //              退回按 updated_at DESC 的 top-N + "还有 X 条未显示" 提示。
-    //   none     — prefixSkillsLimit=0 或 total=0。
+    // Three modes, determined jointly by prefixSkillsLimit + the total number of skills the agent owns:
+    //   full     — total ≤ limit: inject all; no query-gen LLM spend.
+    //   relevant — total > limit + query-gen succeeds + BM25 hits ≥1: relevance first.
+    //   recent   — total > limit + relevant failed (query-gen threw / empty / 0 hits):
+    //              fall back to the top-N by updated_at DESC + an "X more not shown" hint.
+    //   none     — prefixSkillsLimit=0 or total=0.
     //
-    // 关键: 一次 core.list({ limit }) 同时拿到 items + total, 之后所有分支复用,
-    // 不再二次查库; total ≤ limit 的场景直接跳过 query-gen, 覆盖率反而更高。
+    // Key: a single core.list({ limit }) gets both items + total, reused by all later branches,
+    // with no second DB query; the total ≤ limit scenario skips query-gen directly, so coverage is actually higher.
     let prefixBlock = "";
     let prefixMode: "full" | "relevant" | "recent" | "none" = "none";
     let prefixQuery: string | undefined;
@@ -184,16 +184,16 @@ export class SkillExtractor {
           pagination: { limit: this.prefixSkillsLimit },
         });
       } catch (e) {
-        // list 挂 → 后续分支也没数据可用, 直接进 none 分支。
+        // if list fails → no data is available for later branches either; go straight to the none branch.
         this.logger?.warn(`${TAG} prefix list failed: ${(e as Error).message}`);
       }
       if (recentPage && recentPage.items.length > 0) {
         if (recentPage.total <= this.prefixSkillsLimit) {
-          // Case full: 拿到全部, 直接铺开; query-gen 完全省掉。
+          // Case full: got everything, spread it out directly; query-gen is skipped entirely.
           prefixBlock = renderFullSkillsBlock(recentPage.items);
           prefixMode = "full";
         } else {
-          // Case relevant: total 超 limit, 花一次 LLM query-gen + BM25 找最相关的。
+          // Case relevant: total exceeds limit; spend one LLM query-gen + BM25 to find the most relevant ones.
           try {
             const relevant = await this.buildRelevantSkillsBlock(input, truncated);
             if (relevant) {
@@ -205,8 +205,8 @@ export class SkillExtractor {
             this.logger?.warn(`${TAG} buildRelevantSkillsBlock failed: ${(e as Error).message}`);
           }
           if (!prefixBlock) {
-            // Case recent: relevant 失败, 用一开始拿到的 top-N 兜底, 附带
-            // "还有 X 条未显示" 提示让 LLM 知道自己可以 skill_list 手动补拉。
+            // Case recent: relevant failed; fall back to the top-N obtained at the start, with an
+            // "X more not shown" hint so the LLM knows it can pull more manually via skill_list.
             prefixBlock = renderRecentSkillsBlock(recentPage.items, recentPage.total);
             prefixMode = "recent";
           }
@@ -215,11 +215,11 @@ export class SkillExtractor {
     }
     let prompt = prefixBlock ? `${prefixBlock}\n\n---\n\n${truncated}` : truncated;
 
-    // 主 Agent 注入抽取提示（reason 非空时放在 prompt 最前面）
+    // inject the main Agent's extraction hint (placed at the very front of the prompt when reason is non-empty)
     if (input.reason && input.reason.trim().length > 0) {
       const hintBlock = [
-        "## 主 Agent 的抽取提示",
-        "以下是主 Agent 对本次对话的说明，请重点参考其意图进行抽取：",
+        "## Extraction hint from the main Agent",
+        "The following is the main Agent's description of this conversation; please refer mainly to its intent when extracting:",
         input.reason,
       ].join("\n");
       prompt = `${hintBlock}\n\n---\n\n${prompt}`;
@@ -227,23 +227,23 @@ export class SkillExtractor {
 
     const auditSink: ExtractedSkillCandidate[] = [];
 
-    // 选择 systemPrompt: 冷启动/批量导入模式走 strict, 否则走默认 v2。
-    // 关键向后兼容:
-    //   - input.mode 缺省 / 'default'   → 恒用 this.systemPrompt (老流量零回归)
-    //   - input.mode === 'strict' 但构造器没注入 strictSystemPrompt (测试环境 /
-    //     未升级 wiring) → 退回 this.systemPrompt (不崩、不静默改行为)
+    // Choose the systemPrompt: cold-start/bulk-import mode goes strict, otherwise the default v2.
+    // Key backward compatibility:
+    //   - input.mode omitted / 'default'   → always use this.systemPrompt (zero regression for old traffic)
+    //   - input.mode === 'strict' but the constructor did not inject strictSystemPrompt (test environment /
+    //     un-upgraded wiring) → fall back to this.systemPrompt (no crash, no silent behavior change)
     const effectiveSystemPrompt = input.mode === 'strict' && this.strictSystemPrompt
       ? this.strictSystemPrompt
       : this.systemPrompt;
-    // 观测用: 记录实际生效的模式 (相对 input 判定, 而非"是否真启用 strict prompt")。
-    //   requested_strict = 上游是否要求走严格模式
-    //   effective_mode   = 实际用了哪一个 prompt (strict / default)
-    // 便于统计 wiring 是否漏注入 strictSystemPrompt (二者不一致就是漏)。
+    // For observability: record the mode actually in effect (judged against input, rather than "whether the strict prompt was truly enabled").
+    //   requested_strict = whether upstream requested strict mode
+    //   effective_mode   = which prompt was actually used (strict / default)
+    // Makes it easy to count whether wiring missed injecting strictSystemPrompt (a mismatch between the two means it was missed).
     const effectiveMode: 'strict' | 'default' =
       input.mode === 'strict' && this.strictSystemPrompt ? 'strict' : 'default';
 
     if (!this.runner) {
-      // No runner injected (test environment / disabled) → 返回空候选
+      // No runner injected (test environment / disabled) → return empty candidates
       this.logger?.info(`${TAG} no runner provided; returning empty candidates`);
       obsLogger.info("skill.extractor.extract", {
         task_id: input.task_id,
@@ -277,8 +277,8 @@ export class SkillExtractor {
         maxIterations: input.options?.max_iterations ?? this.maxIterations,
         maxTokens: this.maxTokens,
         taskId: `skill-extract-${input.task_id ?? "unknown"}`,
-        // Langfuse trace 语义：让此次抽取在 Langfuse UI 有稳定 name / 可筛选 tags。
-        // 详见 core/types.ts LLMRunParams 的 traceName/tags/sessionId/userId 注释。
+        // Langfuse trace semantics: give this extraction a stable name / filterable tags in the Langfuse UI.
+        // See the traceName/tags/sessionId/userId comments of LLMRunParams in core/types.ts for details.
         traceName: "skill.extract",
         tags: [
           "skill-extract",
@@ -290,8 +290,8 @@ export class SkillExtractor {
         instanceId: input.space_id,
       });
     } catch (e) {
-      // 一条 warn 汇总失败，包含 task_id / err_name / dur —— Worker 侧再按分类
-      // (transient / permanent) 决定 requeue 还是 DLQ。这里不吞异常。
+      // One warn summarizes the failure, including task_id / err_name / dur — the Worker side then decides by classification
+      // (transient / permanent) whether to requeue or DLQ. The exception is not swallowed here.
       const dur = Date.now() - t0;
       obsLogger.warn("skill.extractor.extract", {
         task_id: input.task_id,
@@ -331,7 +331,7 @@ export class SkillExtractor {
       candidates: auditSink.length,
       prompt_chars: prompt.length,
       prefix_mode: prefixMode,
-      // 只截前 60 字符 (够识别关键词; 长了对 obs 无用)。
+      // Take only the first 60 characters (enough to identify keywords; longer is useless for obs).
       prefix_query: prefixQuery ? prefixQuery.slice(0, 60) : undefined,
       requested_mode: input.mode ?? 'default',
       effective_mode: effectiveMode,
@@ -356,16 +356,16 @@ export class SkillExtractor {
   }
 
   /**
-   * "可能与本对话相关"的 skill 预检索: 让 runner 用一次轻量 LLM 调用从
-   * transcript 里挤 2-5 个 BM25 关键词, 再走 core.search 拿 top-N (受
-   * prefixSkillsLimit 限制)。成功且非空 → 返回 { block, query }; query 为空
-   * / search 空命中 / runner 缺失都返回 null 让上游走 recent 降级。
+   * Pre-retrieval of skills "possibly relevant to this conversation": have the runner use one lightweight LLM call to squeeze
+   * 2-5 BM25 keywords out of the transcript, then go through core.search to get the top-N (bounded by
+   * prefixSkillsLimit). On success and non-empty → returns { block, query }; if query is empty
+   * / search has no hits / the runner is missing, returns null so upstream takes the recent fallback.
    *
-   * 拆两步(而不是直接把 relevant 检索合进 review agent 的迭代里)的原因:
-   *   1. 让 review agent 一进场就有个具体的候选池, 而不是先摸黑扫一遍再检索;
-   *   2. query-gen 是短输出 (≤100 tokens), 不占 review agent 上下文;
-   *   3. 失败可精确降级; review agent 内跑 skill_list 只会退化到"全 owner",
-   *      本函数则可选 relevant 或 recent。
+   * Split into two steps (rather than merging the relevant retrieval directly into the review agent's iterations) because:
+   *   1. it gives the review agent a concrete candidate pool right from the start, instead of first groping through a scan and then retrieving;
+   *   2. query-gen is a short output (≤100 tokens), taking no review agent context;
+   *   3. failure can be degraded precisely; running skill_list inside the review agent would only degrade to "all owner",
+   *      whereas this function can choose relevant or recent.
    */
   private async buildRelevantSkillsBlock(
     input: ExtractInput,
@@ -402,9 +402,9 @@ export class SkillExtractor {
   }
 
   /**
-   * 让 runner 用一次无工具的短 LLM 调用从 transcript 里抽 2-5 个 BM25 关键词。
-   * 返回值经过 sanitize (换行 / FTS5 保留词打成空格, 空串视为失败)。runner
-   * 抛异常一律往外扔, 上游 (buildRelevantSkillsBlock) 会 catch 并降级。
+   * Have the runner use one tool-less short LLM call to extract 2-5 BM25 keywords from the transcript.
+   * The return value is sanitized (newlines / FTS5 reserved words turned into spaces; an empty string counts as failure). Any exception
+   * thrown by the runner is thrown outward; upstream (buildRelevantSkillsBlock) will catch it and degrade.
    */
   private async generateSearchQueryFromTranscript(
     input: ExtractInput,
@@ -424,20 +424,20 @@ export class SkillExtractor {
         "<<end-of-transcript>>",
       ].join("\n"),
       enableTools: false,
-      // 让 runner 别真跑 tool loop, 就当一次普通 completion 用。
+      // Keep the runner from actually running a tool loop; use it as a plain completion.
       maxIterations: 1,
-      // 关键词本身很短 (5 词 ×~6 CJK char), 但 A₂ 派 thinking 模型
-      // (minimax-m3 inline `<think>` / minimax-m2.7 独立 reasoning_content /
-      // GLM-4-thinking / qwq-32b / DeepSeek-R1) 会先花 100~500 token 走
-      // reasoning, 然后才吐 visible content。历史 maxTokens=64 会把 reasoning
-      // 卡死在 length, m2.7 拿到空 content 静默降级 recent, m3 拿到未闭合
-      // `<think>...` 走 sanitize 后成为脏 BM25 query 命中随机 skill。
-      // 给 8192 简单一刀切: A₁ 派 (o1/o3/deepseek-v4-pro/无 think) content
-      // 仍是短短几个词, 不会真吃到上限; A₂ 派 reasoning 段能完整走完再输出
-      // 关键词。query-gen 就一次调用, 成本可控。
+      // The keywords themselves are short (5 words × ~6 CJK chars), but the A₂ family of thinking models
+      // (minimax-m3 inline `<think>` / minimax-m2.7 separate reasoning_content /
+      // GLM-4-thinking / qwq-32b / DeepSeek-R1) first spend 100~500 tokens on
+      // reasoning before emitting visible content. The historical maxTokens=64 would have cut
+      // reasoning off at length, m2.7 got empty content and silently degraded to recent, and m3 got an unclosed
+      // `<think>...` that after sanitize became a dirty BM25 query hitting random skills.
+      // 8192 is a simple one-size-fits-all: the A₁ family (o1/o3/deepseek-v4-pro/no think) content
+      // is still just a few words and will never hit the cap; the A₂ family's reasoning segment can run to completion before outputting
+      // the keywords. query-gen is a single call, so the cost is controllable.
       maxTokens: 8192,
       taskId: `skill-extract-query-${input.task_id ?? "unknown"}`,
-      // Langfuse 上可按此 traceName 单独筛这类 query-gen call, 跟主 skill.extract 分开。
+      // This traceName lets you filter this kind of query-gen call separately on Langfuse, apart from the main skill.extract.
       traceName: "skill.extract.query-gen",
       tags: [
         "skill-extract",
@@ -458,21 +458,21 @@ export class SkillExtractor {
 // ═════════════════════════════════════════════════════════════════════
 
 /**
- * 把 ExtractMessage[] 序列化成给 Skill Review Agent 看的 transcript。
+ * Serialize ExtractMessage[] into a transcript for the Skill Review Agent to read.
  *
- * 关键设计（对齐 SKILL_REVIEW_PROMPT 的 "Role isolation" 段）：
- *   - role 前缀用非自然的 `<<past-xxx>>` 双尖括号 tag，而不是 `[user]` / `[assistant]`。
- *     后者是 chat completion 的原生 role signal，模型会本能把 transcript 尾部的
- *     `[assistant]` 当成"该我续写下一 turn"的锚点，直接接着写主 agent 的回复。
- *     `<<past-user>>` 这类非典型 tag 打破这个暗示，让模型明确知道"这些是我在
- *     review 的历史内容，不是我要扮演的角色"。
- *   - 末尾追加 `<<end-of-transcript>>` 锚点 + 一句"现在按 system prompt 里的
- *     output contract 决策"。没有这个锚点时，模型看到 transcript 直接结束在
- *     一段 assistant 长回复上，很容易走"再续写一段类似风格"的路径。
+ * Key design (aligned with the "Role isolation" section of SKILL_REVIEW_PROMPT):
+ *   - the role prefix uses an unnatural `<<past-xxx>>` double-angle-bracket tag, not `[user]` / `[assistant]`.
+ *     The latter are the native role signals of chat completion, and the model instinctively treats the trailing
+ *     `[assistant]` of the transcript as the anchor for "my turn to continue the next turn", directly continuing the main agent's reply.
+ *     Atypical tags like `<<past-user>>` break this hint, making the model clearly aware that "this is historical content I am
+ *     reviewing, not a role I should play".
+ *   - append an `<<end-of-transcript>>` anchor at the end + a sentence "now decide per the
+ *     output contract in the system prompt". Without this anchor, when the model sees the transcript end directly on
+ *     a long assistant reply, it easily takes the path of "continue writing another passage in a similar style".
  *
- * 相关背景：docs/2026-07-28 skill extractor role-capture 分析（trace
- * f546ab8c-c7c5-4598-a310-6b2162372e7c，抽取 LLM 完全忽略 SKILL_REVIEW_PROMPT
- * 契约，产出 1235 tokens 的主对话续写，零 tool call、零 "Nothing to save."）。
+ * Related background: docs/2026-07-28 skill extractor role-capture analysis (trace
+ * f546ab8c-c7c5-4598-a310-6b2162372e7c, the extraction LLM completely ignored the SKILL_REVIEW_PROMPT
+ * contract and produced a 1235-token continuation of the main conversation, with zero tool calls and zero "Nothing to save.").
  */
 function formatTranscript(messages: ExtractMessage[]): string {
   const body = messages.map((m) => `<<past-${m.role}>>\n${m.content}`).join("\n\n");
@@ -485,11 +485,11 @@ function truncateHeadTail(s: string, head: number, tail: number): string {
 }
 
 /**
- * "从对话里挤 2-5 个 BM25 关键词" 的 system prompt。
- * 关键点:
- *   1. 明确说这些关键词后面要塞进 BM25 → 让 LLM 挑高信号词, 别造完整句子;
- *   2. 中英都行, jieba 会正确切;
- *   3. 单行输出 + 无标点 + 无标签; 后置 sanitize 也会强制这个 shape。
+ * System prompt for "squeeze 2-5 BM25 keywords from the conversation".
+ * Key points:
+ *   1. state clearly that these keywords will be fed into BM25 → have the LLM pick high-signal words, not compose full sentences;
+ *   2. Chinese and English both work; jieba will segment correctly;
+ *   3. single-line output + no punctuation + no labels; post-hoc sanitize also enforces this shape.
  */
 const QUERY_GEN_SYSTEM_PROMPT = [
   "You are helping build a BM25 keyword query.",
@@ -506,31 +506,31 @@ const QUERY_GEN_SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * 生成的 query 有效化:
- *   - 只取第一行 (LLM 有时会先说 "Here are the keywords:" 再一行)
- *   - 去 FTS5 保留词 (AND/OR/NOT/NEAR) 直接删掉 (BM25 层再走 buildFtsQuery 兜底)
- *   - 去掉常见标点 (标点会让 BM25 tokenizer 抖动)
- *   - 折叠空白, trim
- *   - 保守长度: 上限 120 字符 (5 词 × ~24 char)
- * 输出空串 = 认为 LLM 没抽到; 上游走 recent 降级。
+ * Making the generated query valid:
+ *   - take only the first line (the LLM sometimes first says "Here are the keywords:" and then a line)
+ *   - strip FTS5 reserved words (AND/OR/NOT/NEAR) by deleting them directly (the BM25 layer falls back to buildFtsQuery)
+ *   - strip common punctuation (punctuation makes the BM25 tokenizer jitter)
+ *   - collapse whitespace, trim
+ *   - conservative length: cap of 120 characters (5 words × ~24 char)
+ * An empty string = considered that the LLM extracted nothing; upstream takes the recent fallback.
  */
 export function sanitizeGeneratedQuery(raw: string): string {
   if (typeof raw !== "string") return "";
-  // A₂ 派 thinking 模型 (minimax-m3 / GLM-4-thinking / qwq-32b / 部分 vLLM
-  // DeepSeek-R1) 会把 reasoning 内嵌为 `<think>…</think>` 塞在 content 里。
-  // 如果不先剥掉，`raw.split(/\r?\n/)` 的首个非空行会是 `<think>` 或 think 内容,
-  // 后续标点清洗会把 `<` `>` 打成空格 → BM25 拿到脏 query 命中 0 → 上游降级到
-  // recent。业务不断，但预检索静默失效。跟 l1-extractor.ts@ccaa5dc3 同一思路：
-  //   - 非贪婪 `*?` + 强制 </think> 闭合：截断的 think tag (max_tokens 卡住)
-  //     不 match → 保留原样 → sanitize 后续把它当噪声处理 → recent 降级
-  //   - `g` flag：多段 think 全剥
-  //   - A₁ 派 (minimax-m2.7 / deepseek-v4-pro / o1 / o3) content 无 <think>,
-  //     replace 是 no-op → byte-for-byte 等价，backward-compatible。
+  // The A₂ family of thinking models (minimax-m3 / GLM-4-thinking / qwq-32b / some vLLM
+  // DeepSeek-R1) embed reasoning as `<think>…</think>` inside content.
+  // If not stripped first, the first non-empty line of `raw.split(/\r?\n/)` would be `<think>` or the think content,
+  // and the later punctuation cleanup would turn `<` `>` into spaces → BM25 gets a dirty query, hits 0 → upstream degrades to
+  // recent. The business keeps running, but pre-retrieval silently stops working. Same idea as l1-extractor.ts@ccaa5dc3:
+  //   - non-greedy `*?` + mandatory </think> closing: a truncated think tag (stuck at max_tokens)
+  //     does not match → kept as is → sanitize later treats it as noise → recent fallback
+  //   - `g` flag: strip multiple think segments
+  //   - the A₁ family (minimax-m2.7 / deepseek-v4-pro / o1 / o3) content has no <think>,
+  //     so replace is a no-op → byte-for-byte equivalent, backward-compatible.
   raw = raw.replace(/<think>[\s\S]*?<\/think>\s*/g, "");
-  // 只取首个非空行 —— LLM 偶尔会在关键词前后加一行元数据。
+  // Take only the first non-empty line — the LLM occasionally adds a metadata line before/after the keywords.
   const firstLine = raw.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) ?? "";
   if (!firstLine) return "";
-  // 剔常见标点 / FTS5 保留词。用空格替换而非删除, 避免 "foo,bar" 变成 "foobar"。
+  // Strip common punctuation / FTS5 reserved words. Replace with spaces rather than deleting, to avoid "foo,bar" becoming "foobar".
   const noPunct = firstLine
     .replace(/[,;:!?"'`()\[\]{}<>|/\\*+=~@#$%^&]/g, " ")
     .replace(/[，。；：！？、（）【】《》「」『』]/g, " ")
@@ -541,8 +541,8 @@ export function sanitizeGeneratedQuery(raw: string): string {
 }
 
 /**
- * 拼一行 "- name — 描述截断到 100 char"。空描述回退到 "- name"。
- * 抽 recent / relevant / full 三个块共用, 避免行格式漂移。
+ * Build a line "- name — description truncated to 100 chars". An empty description falls back to "- name".
+ * Shared by the recent / relevant / full three blocks, to avoid line-format drift.
  */
 function formatSkillLine(name: string, description?: string): string {
   const desc = (description ?? "").trim().replace(/\s+/g, " ");
@@ -551,9 +551,9 @@ function formatSkillLine(name: string, description?: string): string {
 }
 
 /**
- * "全量" 前缀块 —— 该 agent 的 skill 总数 ≤ prefixSkillsLimit, 直接铺开。
- * 语义上告诉 LLM "这就是你所有的 skill, 无遗漏", 相比 recent 段更强的先验。
- * 复用时无 truncated 提示 (因为没截断)。
+ * "Full" prefix block — the agent's total skill count ≤ prefixSkillsLimit, spread out directly.
+ * Semantically tells the LLM "these are all your skills, with nothing missing", a stronger prior than the recent segment.
+ * No truncated hint on reuse (because nothing was truncated).
  */
 function renderFullSkillsBlock(items: Array<{ name: string; description?: string }>): string {
   const lines = items.map((s) => formatSkillLine(s.name, s.description));
@@ -565,8 +565,8 @@ function renderFullSkillsBlock(items: Array<{ name: string; description?: string
 }
 
 /**
- * "最近更新" 前缀块 —— relevant 分支失败时的兜底。附带 "还有 X 条未显示"
- * 提示, 让 LLM 知道可以主动 skill_list(query=...) 拉更多。
+ * "Recently updated" prefix block — the fallback when the relevant branch fails. Comes with an "X more not shown"
+ * hint, so the LLM knows it can proactively skill_list(query=...) to pull more.
  */
 function renderRecentSkillsBlock(
   items: Array<{ name: string; description?: string }>,
@@ -582,10 +582,10 @@ function renderRecentSkillsBlock(
 }
 
 // ═════════════════════════════════════════════════════════════════════
-//  ISkillExtractor adapter — 让 SkillConversationExtractWorker (agent 队列)
-//  可以驱动 V2 extractor。Worker 持有的 ISkillExtractor 接口接受
-//  conversation: ConversationMessage[] + agent_id；这里把它映射成 V2 的
-//  ExtractMessage[] 形态。
+//  ISkillExtractor adapter — lets SkillConversationExtractWorker (agent queue)
+//  drive the V2 extractor. The ISkillExtractor interface the Worker holds accepts
+//  conversation: ConversationMessage[] + agent_id; here it is mapped into the V2
+//  ExtractMessage[] shape.
 // ═════════════════════════════════════════════════════════════════════
 
 const ALLOWED_ROLES = new Set(["user", "assistant", "tool_call", "tool_result"]);
@@ -612,12 +612,12 @@ function toLegacyCandidates(items: ExtractedSkillCandidate[]): ExtractedCandidat
 }
 
 /**
- * 把 SkillExtractor 包装成 ISkillExtractor，方便 SkillConversationExtractWorker
- * (agent 队列) 直接驱动。
+ * Wrap SkillExtractor into an ISkillExtractor, making it easy for SkillConversationExtractWorker
+ * (agent queue) to drive it directly.
  *
- * 入参 input.agent_id 必须由调用方（trigger.archive 时）提供，来源是
- * SkillTaskEntry.agent_id。缺失时返回空候选并放一条 warn 日志——抽取依赖 owner
- * 校验，没有 agent_id 无法落库。
+ * The input.agent_id must be provided by the caller (at trigger.archive time), sourced from
+ * SkillTaskEntry.agent_id. When missing, returns empty candidates and emits a warn log — extraction depends on owner
+ * validation, and without an agent_id it cannot be persisted.
  */
 export function createExtractorAdapter(
   v2: SkillExtractor,
@@ -637,16 +637,16 @@ export function createExtractorAdapter(
         team_id: input.team_id,
         agent_id: agentId,
         task_id: input.task_id ?? input.taskId,
-        // Langfuse trace 绑定字段：Worker 从 SkillTaskEntry 读到后透传到这里，
-        // 缺失会让 trace sessionId=null / instanceId=unknown（按 session 筛不到）。
+        // Langfuse trace binding fields: the Worker reads them from SkillTaskEntry and passes them through to here;
+        // when missing, the trace gets sessionId=null / instanceId=unknown (cannot be filtered by session).
         session_id: input.session_id,
         space_id: input.space_id,
         messages: toExtractMessages(input.conversation),
         reason: (input as { reason?: string }).reason,
         options: (input as { options?: { max_iterations?: number } }).options,
-        // strict_mode 透传:Worker → adapter → SkillExtractor 三段链路完整,
-        // 缺任一环节冷启动的 strict_mode 就会被丢弃退回 default v2 prompt。
-        // 本行是 adff8768 遗漏的一环 (adapter 显式 map 字段, 未覆盖 mode)。
+        // strict_mode passthrough: the Worker → adapter → SkillExtractor three-segment chain is complete;
+        // if any link is missing, the cold-start strict_mode is dropped and falls back to the default v2 prompt.
+        // This line is the link missed by adff8768 (the adapter explicitly maps fields and did not cover mode).
         mode: (input as { mode?: 'default' | 'strict' }).mode,
       });
       return { candidates: toLegacyCandidates(r.candidates) };

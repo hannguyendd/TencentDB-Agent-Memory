@@ -1,18 +1,18 @@
 /**
- * safe-path.ts — 落盘路径的边界校验。
+ * safe-path.ts — boundary validation for on-disk paths.
  *
- * ingest 的落盘路径由 LLM 输出间接推导（FILE 块 path + frontmatter type），
- * 推导链上任何一环出错都可能产出逃出项目目录的相对路径。这里提供最后一道
- * 与推导逻辑无关的卡口：只认「解析成绝对路径后仍在 root 内」。
+ * The on-disk path for ingest is derived indirectly from LLM output (FILE block path + frontmatter type);
+ * an error at any link in the derivation chain could yield a relative path that escapes the project directory. This provides the last
+ * check, independent of the derivation logic: it only accepts "still inside root after resolving to an absolute path".
  */
 
 import { resolve, sep } from "node:path";
 
 /**
- * candidate 解析后是否仍落在 root 之内（root 自身算在内）。
+ * Whether candidate still falls within root after resolution (root itself counts).
  *
- * 比较前双方都过 resolve，因此 `..`、`.`、重复分隔符都已折叠；
- * 前缀比较额外带上分隔符，避免 `/data/proj-evil` 被判为在 `/data/proj` 内。
+ * Both sides go through resolve before comparison, so `..`, `.`, and duplicate separators are already collapsed;
+ * the prefix comparison additionally appends the separator, so `/data/proj-evil` is not judged to be inside `/data/proj`.
  */
 export function isInsideRoot(root: string, candidate: string): boolean {
   const resolvedRoot = resolve(root);

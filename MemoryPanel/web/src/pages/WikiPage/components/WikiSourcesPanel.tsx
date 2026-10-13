@@ -1,7 +1,7 @@
 /**
- * WikiSourcesPanel —— Wiki 资产页主面板（列表视图 + 详情/创建/分配组装）。
- * 列表视图渲染与组件组装；状态/数据逻辑在 useWikiSources，详情在 WikiDetailView，
- * 展示小组件 / 常量工具 / 共享 Markdown 分别独立收口。
+ * WikiSourcesPanel -- main panel of the Wiki asset page (list view + detail/create/allocate assembly).
+ * List view rendering and component assembly; state/data logic is in useWikiSources, details in WikiDetailView,
+ * and small display widgets / constants & utilities / shared Markdown are each consolidated separately.
  */
 import { useTranslation } from 'react-i18next';
 import { Button, Card, Form, Input, Justify, MetricsBoard, Modal, SearchBox, Segment, Select, StatusTip, Table, Text } from 'tea-component';
@@ -119,8 +119,8 @@ export default function WikiSourcesPanel() {
           ) : undefined
         }
         actions={
-          // 创建（新增团队池资产）与 memory/skill 对齐，放右上角 header；
-          // 仅「团队资产」tab 开放，固定资产 tab 只做绑定/查看。
+          // Create (add a team pool asset) is aligned with memory/skill, placed in the top-right header;
+          // only open on the "Team assets" tab; the fixed assets tab only does binding/viewing.
           scopeTab !== 'fixed' ? (
             <Button type="primary" onClick={openCreate} data-guide="create-wiki">
               {t('wiki.create')}
@@ -344,7 +344,7 @@ export default function WikiSourcesPanel() {
                 />
               </Form.Item>
 
-              {/* 来源选择：有启用来源时才显示 */}
+              {/* Source selection: shown only when there are enabled sources */}
               {sourceProviders.length > 0 && (
                 <>
                   <Form.Item label={t('wiki.register.source')}>
@@ -366,7 +366,7 @@ export default function WikiSourcesPanel() {
                     />
                   </Form.Item>
 
-                  {/* 凭据字段：按 provider.form_fields 动态渲染 */}
+                  {/* Credential fields: rendered dynamically per provider.form_fields */}
                   {formSourceType &&
                     (sourceProviders.find((p) => p.id === formSourceType)?.form_fields ?? []).map(
                       (
@@ -410,7 +410,7 @@ export default function WikiSourcesPanel() {
                       },
                     )}
 
-                  {/* 来源地址 */}
+                  {/* Source address */}
                   {formSourceType && (
                     <Form.Item
                       label={t('wiki.register.sourceUrl')}
@@ -428,7 +428,7 @@ export default function WikiSourcesPanel() {
                 </>
               )}
 
-              {/* 文档树只在详情页「添加」里出现：新建不再拉取列表（与手工新建一致） */}
+              {/* The document tree appears only under "Add" on the detail page: creating no longer fetches the list (consistent with manual creation) */}
             </Form>
           </Modal.Body>
           <Modal.Footer>
@@ -447,7 +447,7 @@ export default function WikiSourcesPanel() {
         </Modal>
       )}
 
-      {/* Allocate Wiki → Agent (固定资产) */}
+      {/* Allocate Wiki -> Agent (fixed asset) */}
       {allocateTarget && (
         <AllocateAssetDialog
           assetType="llm_wiki"

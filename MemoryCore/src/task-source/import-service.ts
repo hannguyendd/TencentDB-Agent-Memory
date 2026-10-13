@@ -1,12 +1,12 @@
 /**
- * Task 外部来源**导入**的业务编排。
+ * Business orchestration for **importing** Task external sources.
  *
- *   - 导入：逐条拉详情 → createTask（source_type + source_url 落库）→ 分流 created/failed
- *     → 「参与的 User」只同步 TAPD 处理人（不含导入人；查不到账号则跳过）
+ *   - Import: fetch details one by one -> createTask (source_type + source_url persisted) -> split into created/failed
+ *     -> "participating Users" only sync the TAPD handlers (not the importer; skipped if no account is found)
  *
- * 导入是**一次性快照**：不提供「同步远端变更」（无定时同步、无抽屉页手动同步）。
- * 远端后续变更不回流 —— 这也正是无需存储凭证的原因。
- * 只把既有的 source_type / source_url 用起来，不新增列、不建表。
+ * Import is a **one-time snapshot**: there is no "sync remote changes" (no scheduled sync, no manual sync from the drawer page).
+ * Later remote changes do not flow back -- which is exactly why no credentials need to be stored.
+ * It only makes use of the existing source_type / source_url; no new columns or tables.
  */
 
 import type { MetadataService } from "../metadata/service/metadata-service.js";
@@ -15,7 +15,7 @@ import type { TaskEntity } from "../metadata/types.js";
 import { TaskSourceError, type SourceCredential } from "./types.js";
 import { TaskSourceRegistry } from "./registry.js";
 
-/** 落在 metadata_json.external 的定位三元组。 */
+/** Locator triple stored in metadata_json.external. */
 export interface ExternalRef {
   provider: string;
   item_type: string;
@@ -35,26 +35,26 @@ export interface ImportResult {
 }
 
 /**
- * 导入产生的参与记录使用的 agent_id 哨兵值。
+ * Sentinel agent_id value used by participation records produced by import.
  *
- * participation_log 的 agent_id 必填（appendParticipationLog 内部
- * assertParticipationContext → getAgentById 不存在会抛 agent_not_found），
- * 而导入场景没有真实 agent，只能用固定哨兵值。
+ * participation_log's agent_id is required (appendParticipationLog internally calls
+ * assertParticipationContext -> getAgentById, which throws agent_not_found if it does not exist),
+ * while the import scenario has no real agent, so a fixed sentinel value must be used.
  *
- * **不含具体来源名**：所有来源共用这一个。若按来源拆成 `tapd-import` /
- * `jira-import`，每接一个源就要加一条假 agent 记录并同步前端过滤名单 ——
- * 来源标识应读参与记录的 metadata（记了 provider），不该编码进 agent_id。
+ * **Contains no specific source name**: all sources share this one. If it were split per source into `tapd-import` /
+ * `jira-import`, every new source would need another fake agent record and a synchronized frontend filter list --
+ * the source identity should be read from the participation record's metadata (which records the provider), not encoded into agent_id.
  *
- * ⚠️ 该哨兵必须在 meta_agents 里**真实存在**，否则每条参与记录都会被拒。
- * 现由 ensureImportAgent() 在导入时幂等补足。
+ * WARNING: this sentinel must **really exist** in meta_agents, otherwise every participation record is rejected.
+ * It is now idempotently ensured by ensureImportAgent() at import time.
  */
 export const IMPORT_AGENT_ID = "external-import";
 
 /**
- * 账号名查找时尝试的 auth_provider 顺序。
+ * The order of auth_provider values tried when looking up an account name.
  *
- * 实测同一 TAPD 账号可能落在不同认证域（如 local / api_key），
- * 单查一个域会漏。顺序按「最常见的外部映射域 → 本地域」排列。
+ * Empirically, the same TAPD account may live in different auth realms (e.g. local / api_key),
+ * and querying a single realm would miss it. The order is "most common external mapping realm -> local realm".
  */
 const USERNAME_LOOKUP_PROVIDERS = ["api_key", "local", "woa"] as const;
 
@@ -62,20 +62,20 @@ export class TaskSourceImportService {
   constructor(private readonly svc: MetadataService) {}
 
   /**
-   * 确保哨兵 agent 在 meta_agents 里存在（幂等）。
+   * Ensure the sentinel agent exists in meta_agents (idempotent).
    *
-   * appendParticipationLog 会校验 agent_id 对应记录存在，缺失则抛
-   * `agent_not_found` —— 而导入场景没有真实 agent，只能自建一条哨兵记录。
-   * 这里直接走 store.createAgent（绕过 createAgentForCaller 的「成员权限 +
-   * owner 本人」校验）：哨兵是系统级记账实体，不属于任何人的资产。
+   * appendParticipationLog validates that the record for agent_id exists, and throws
+   * `agent_not_found` if missing -- while the import scenario has no real agent, so a sentinel record must be created itself.
+   * This goes directly through store.createAgent (bypassing createAgentForCaller's "member permission +
+   * owner themselves" checks): the sentinel is a system-level bookkeeping entity that belongs to nobody's assets.
    *
-   * 失败不阻断导入，但**不能静默**：静默 catch 曾让「参与的 User 全空」
-   * 被掩盖数轮，必须留 warn 线索。
+   * Failure does not block import, but **must not be silent**: a silent catch once let "participating Users all empty"
+   * go unnoticed for several rounds; a warn trail must be left.
    */
   async ensureImportAgent(teamId: string, ownerUserId: string): Promise<void> {
     try {
-      // meta_agents.owner_user_id 是 NOT NULL；导入路径已确保 ctx.userId 有值
-      // （createTaskForCaller 用它作 creator），取不到时宁可不建也不要写脏数据。
+      // meta_agents.owner_user_id is NOT NULL; the import path has ensured ctx.userId has a value
+      // (createTaskForCaller uses it as the creator); if it can't be obtained, better not to create than to write dirty data.
       if (!ownerUserId) {
         console.warn("[task-source] ensureImportAgent skipped: missing owner user id");
         return;
@@ -86,8 +86,8 @@ export class TaskSourceImportService {
         agent_id: IMPORT_AGENT_ID,
         team_id: teamId,
         owner_user_id: ownerUserId,
-        name: "外部任务导入",
-        description: "第三方需求系统（TAPD）批量导入产生的参与记录归属方",
+        name: "External task import",
+        description: "Owner of the participation records produced by bulk import from third-party requirement systems (TAPD)",
         visibility: "team",
         status: "active",
       });
@@ -99,12 +99,12 @@ export class TaskSourceImportService {
   }
 
   /**
-   * 账号名 → user_id。
+   * Account name -> user_id.
    *
-   * auth_provider 未知（实测同一账号可能落在 local / api_key 等不同域），
-   * 因此按候选 provider 依次尝试，命中即返回；查不到返回 null ——
-   * **不自动建档**：TAPD 处理人可能是团队外账号（实测 aleronwang 就不在
-   * 用户表内），自动创建会凭空产生未经身份验证的账号。
+   * auth_provider is unknown (empirically the same account may live in different realms such as local / api_key),
+   * so candidate providers are tried in order and the first hit is returned; returns null if not found --
+   * **no automatic profile creation**: a TAPD handler may be an account outside the team (empirically aleronwang is not in
+   * the user table), and auto-creating would conjure unauthenticated accounts out of thin air.
    */
   private async lookupUserIdByUsername(username: string): Promise<string | null> {
     const store = this.svc.rawStore;
@@ -113,17 +113,17 @@ export class TaskSourceImportService {
         const user = await store.getUserByUsername(provider, username);
         if (user?.user_id) return user.user_id;
       } catch {
-        // 逐个 provider 尝试，失败继续。
+        // Try each provider in turn; continue on failure.
       }
     }
     return null;
   }
 
   /**
-   * 批量导入。
+   * Batch import.
    *
-   * 单条失败不阻断其余（逐条 try/catch 分流）—— 这是「批量」的核心承诺：
-   * 不能因为第 N 条挂了就让前面已成功的回滚或整体失败。
+   * A single failure does not block the rest (per-item try/catch routing) -- this is the core promise of "batch":
+   * the failure of item N must not roll back earlier successes or fail the whole batch.
    */
   async import(
     providerId: string,
@@ -142,8 +142,8 @@ export class TaskSourceImportService {
       );
     }
     const tctx = TaskSourceRegistry.contextFor(providerId, cred);
-    // 参与记录挂在哨兵 agent 下，而 appendParticipationLog 会校验该 agent 存在 ——
-    // 必须在写入前确保它已建好，否则每条都会被 agent_not_found 拒掉。
+    // Participation records hang under the sentinel agent, and appendParticipationLog validates that this agent exists --
+    // it must be created before writing, otherwise every item is rejected with agent_not_found.
     await this.ensureImportAgent(teamId, ctx.userId ?? "");
 
     const result: ImportResult = { created: [], failed: [] };
@@ -154,15 +154,15 @@ export class TaskSourceImportService {
           {
             team_id: teamId,
             creator_user_id: ctx.userId,
-            title: detail.title || "(无标题)",
+            title: detail.title || "(Untitled)",
             description: detail.body || null,
             /**
-             * source_type 只表达**大类**，不编码具体来源 ——
-             * 具体来源一律读 metadata_json.external.provider（见下方 metadata_json）。
+             * source_type only expresses the **broad category** and does not encode the specific source --
+             * the specific source is always read from metadata_json.external.provider (see metadata_json below).
              *
-             * 若把每个来源塞进 TaskSourceType 枚举，新增来源就要改类型定义 +
-             * 所有引用它的地方（types / schemas / gateway 生成物 / 前端），
-             * 抽象会被钉死在「已知来源列表」上；用大类则新增来源零改动。
+             * If every source were stuffed into the TaskSourceType enum, adding a source would require changing the type definition +
+             * everything that references it (types / schemas / gateway generated artifacts / frontend),
+             * pinning the abstraction to a "list of known sources"; with a broad category, adding a source needs zero changes.
              */
             source_type: "external",
             source_url: detail.url ?? null,
@@ -177,9 +177,9 @@ export class TaskSourceImportService {
           },
           ctx,
         );
-        // 「参与的 User」只同步 TAPD 处理人（**不含导入人**）：
-        // 处理人是条目的实际负责人，导入人只是搬运者，不该被记成参与者。
-        // 账号名查不到对应 user_id 则跳过（不自动建档、不阻断导入）。
+        // "Participating Users" only sync the TAPD handlers (**not the importer**):
+        // the handler is the item's actual owner; the importer is merely a carrier and should not be recorded as a participant.
+        // If the account name has no matching user_id, skip it (no auto profile creation, no blocking the import).
         if (detail.owner) {
           const ownerId = await this.lookupUserIdByUsername(detail.owner);
           if (ownerId) {
@@ -193,7 +193,7 @@ export class TaskSourceImportService {
                 metadata_json: JSON.stringify({ provider: providerId }),
               });
             } catch (err) {
-              // 参与记录失败不影响导入本身，但**不能静默**（历史教训）。
+              // A participation record failure does not affect the import itself, but **must not be silent** (historical lesson).
               console.warn(
                 `[task-source] appendParticipationLog failed (task=${task.task_id}, user=${ownerId}): ` +
                   `${err instanceof Error ? err.message : String(err)}`,
@@ -203,8 +203,8 @@ export class TaskSourceImportService {
         }
         result.created.push({ external_id: item.external_id, task_id: task.task_id });
       } catch (err) {
-        // 不去重：库上无 source_url 唯一索引，同一条目可重复导入。
-        // 因此也没有「已导入 → skipped」这一分支，失败一律进 failed。
+        // No dedup: there is no unique index on source_url in the DB, so the same item can be imported repeatedly.
+        // Hence there is also no "already imported -> skipped" branch; failures always go to failed.
         result.failed.push({ external_id: item.external_id, error: messageOf(err) });
       }
     }
@@ -213,7 +213,7 @@ export class TaskSourceImportService {
 
 }
 
-/** 从 metadata_json.external 读取定位三元组；缺失或不合法返回 null。 */
+/** Read the locator triple from metadata_json.external; returns null if missing or invalid. */
 export function readExternalRef(task: TaskEntity): ExternalRef | null {
   if (!task.metadata_json) return null;
   try {

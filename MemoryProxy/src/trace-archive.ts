@@ -1,14 +1,14 @@
 /**
- * Trace archive — 本地 JSONL 冷存储。
+ * Trace archive -- local JSONL cold storage.
  *
- * 每个 trace + span 以 JSONL 行写入本地文件，按日期分文件。
- * 可配合 crontab 脚本定时压缩上传到 COS/S3 归档存储。
+ * Each trace + span is written as a JSONL line to a local file, one file per date.
+ * Can be combined with a crontab script to periodically compress and upload to COS/S3 archive storage.
  *
- * 设计：
- *  - 使用 WriteStream 异步缓冲写入，不阻塞事件循环
- *  - 按 hostname 隔离多实例的归档文件
- *  - Backpressure 处理：缓冲区满时暂停写入，drain 后恢复
- *  - 通过配置项 `traceArchive.enabled` 控制开关，默认关闭
+ * Design:
+ *  - Uses WriteStream for async buffered writes, without blocking the event loop
+ *  - Isolates archive files of multiple instances by hostname
+ *  - Backpressure handling: pause writes when the buffer is full, resume after drain
+ *  - Controlled by the config option `traceArchive.enabled`, off by default
  */
 
 import { createWriteStream, mkdirSync, existsSync, type WriteStream } from "node:fs";
@@ -19,10 +19,10 @@ import { log } from "./report/log.js";
 /** Host identifier for multi-instance isolation. */
 const HOST_ID = hostname();
 
-/** 默认归档文件存放目录 */
+/** Default directory for archive files */
 const DEFAULT_ARCHIVE_DIR = "logs/traces";
 
-/** Shutdown timeout (ms) — 防止 end() 卡死 */
+/** Shutdown timeout (ms) -- prevents end() from hanging */
 const SHUTDOWN_TIMEOUT_MS = 5000;
 
 /** WriteStream highWaterMark (bytes) — 64KB buffer */
@@ -40,9 +40,9 @@ let droppedLines = 0;
 
 /** Configuration for trace archive. */
 export interface TraceArchiveConfig {
-  /** Master switch — 是否启用本地 JSONL 归档。默认 false（关闭）。 */
+  /** Master switch -- whether to enable local JSONL archiving. Defaults to false (off). */
   enabled: boolean;
-  /** 归档目录（相对于项目根目录或绝对路径）。默认 "logs/traces"。 */
+  /** Archive directory (relative to the project root or an absolute path). Defaults to "logs/traces". */
   dir: string;
 }
 
@@ -76,11 +76,11 @@ export interface ArchivedSpan {
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
 /**
- * initTraceArchive 初始化 trace 归档系统。
- * 仅当 config.enabled === true 时实际启用写入。
+ * initTraceArchive initializes the trace archive system.
+ * Writing is only actually enabled when config.enabled === true.
  *
- * @param baseDir 项目根目录（用于解析相对路径）
- * @param config  TraceArchive 配置
+ * @param baseDir project root directory (used to resolve relative paths)
+ * @param config  TraceArchive config
  */
 export function initTraceArchive(baseDir: string, config: TraceArchiveConfig): void {
   if (!config.enabled) {
@@ -98,8 +98,8 @@ export function initTraceArchive(baseDir: string, config: TraceArchiveConfig): v
 }
 
 /**
- * shutdownTraceArchive 关闭归档写入流，确保数据落盘。
- * 在 graceful shutdown 时调用。带 timeout 兜底防止卡死。
+ * shutdownTraceArchive closes the archive write stream, ensuring data is flushed to disk.
+ * Called on graceful shutdown. A timeout fallback prevents hanging.
  */
 export function shutdownTraceArchive(): Promise<void> {
   if (droppedLines > 0) {
@@ -116,7 +116,7 @@ export function shutdownTraceArchive(): Promise<void> {
     currentStream = null;
     enabled = false;
 
-    // Timeout 兜底：5 秒内没完成就强制 resolve
+    // Timeout fallback: force resolve if not finished within 5 seconds
     const timer = setTimeout(() => {
       log.warn("trace_archive.shutdown_timeout", { timeoutMs: SHUTDOWN_TIMEOUT_MS });
       stream.destroy();
@@ -138,15 +138,15 @@ export function shutdownTraceArchive(): Promise<void> {
 // ── Internal ─────────────────────────────────────────────────────────────────
 
 /**
- * getOrCreateStream 返回当前日期的写入流。
- * 跨天时自动关闭旧流并创建新流。
+ * getOrCreateStream returns the write stream for the current date.
+ * Automatically closes the old stream and creates a new one when the day rolls over.
  */
 function getOrCreateStream(): WriteStream | null {
   if (!enabled) return null;
 
   const today = new Date().toISOString().slice(0, 10);
   if (today !== currentDate) {
-    // 跨天：关闭旧流（fire-and-forget，旧流数据会异步刷盘）
+    // Day rollover: close the old stream (fire-and-forget; old stream data is flushed asynchronously)
     if (currentStream) {
       const oldStream = currentStream;
       oldStream.end();
@@ -170,20 +170,20 @@ function getOrCreateStream(): WriteStream | null {
 }
 
 /**
- * archiveLine 追加一行 JSON 到归档文件。
- * 使用 WriteStream 异步缓冲写入，不阻塞事件循环。
- * 处理 backpressure：缓冲区满时丢弃新数据并记录计数。
+ * archiveLine appends one JSON line to the archive file.
+ * Uses WriteStream for async buffered writes, without blocking the event loop.
+ * Handles backpressure: drops new data when the buffer is full and records a count.
  */
 function archiveLine(line: string): void {
   if (!enabled) {
     if (!warnedDisabled) {
       warnedDisabled = true;
-      // 如果调用方在未启用时调用，静默跳过（配置项默认关闭是正常情况）
+      // If the caller invokes this while disabled, skip silently (config default off is the normal case)
     }
     return;
   }
 
-  // Backpressure: 缓冲区满时丢弃（best-effort 归档）
+  // Backpressure: drop when the buffer is full (best-effort archive)
   if (backpressure) {
     droppedLines++;
     return;
@@ -201,9 +201,9 @@ function archiveLine(line: string): void {
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * archiveTrace 归档一条 trace 创建事件。
- * 异常安全：JSON.stringify 或写入失败不会抛出。
- * 当 traceArchive.enabled = false 时为 no-op。
+ * archiveTrace archives a trace creation event.
+ * Exception-safe: JSON.stringify or write failures never throw.
+ * No-op when traceArchive.enabled = false.
  */
 export function archiveTrace(trace: ArchivedTrace): void {
   if (!enabled) return;
@@ -218,9 +218,9 @@ export function archiveTrace(trace: ArchivedTrace): void {
 }
 
 /**
- * archiveSpan 归档一条 LLM span 事件。
- * 异常安全：JSON.stringify 或写入失败不会抛出。
- * 当 traceArchive.enabled = false 时为 no-op。
+ * archiveSpan archives an LLM span event.
+ * Exception-safe: JSON.stringify or write failures never throw.
+ * No-op when traceArchive.enabled = false.
  */
 export function archiveSpan(span: ArchivedSpan): void {
   if (!enabled) return;

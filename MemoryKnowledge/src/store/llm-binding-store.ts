@@ -35,8 +35,8 @@ export interface LlmBindingRow {
 }
 
 /** Upsert payload (service_id comes from the header, not the body).
- *  `api_key: undefined` 表示保留原值（用于只更新 proxy_base_url 的场景）；
- *  `api_key: null` 表示清空；`api_key: "xxx"` 表示更新。 */
+ *  `api_key: undefined` means keep the original value (for the case of updating only proxy_base_url);
+ *  `api_key: null` means clear; `api_key: "xxx"` means update. */
 export interface LlmBindingInput {
   mode: LlmBindingMode;
   proxy_base_url?: string | null;
@@ -75,7 +75,7 @@ export function createLlmBindingStore(db: Db): ILlmBindingStore {
     upsert(serviceId: string, input: LlmBindingInput): LlmBindingRow {
       const now = new Date().toISOString();
       const existing = this.get(serviceId);
-      // api_key: undefined → 保留原值（仅 upsert 已存在记录时）；null → 清空；string → 更新
+      // api_key: undefined → keep the original value (only when upserting an existing record); null → clear; string → update
       const apiKey = input.api_key !== undefined ? input.api_key : (existing?.api_key ?? null);
       const values = {
         serviceId,

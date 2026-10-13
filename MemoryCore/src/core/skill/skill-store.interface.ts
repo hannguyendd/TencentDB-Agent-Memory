@@ -1,11 +1,11 @@
 /**
- * ISkillStore — Skill 存储层抽象接口
+ * ISkillStore — Skill storage-layer abstract interface
  *
- * 用于解耦 SkillCore / SkillVersioning 与具体存储实现（SQLite / TCVDB）。
- * SqliteSkillStore（Standalone 模式）和 TcvdbSkillStore（Service 模式）
- * 各自实现本接口，消费者只依赖接口。
+ * Used to decouple SkillCore / SkillVersioning from concrete storage implementations (SQLite / TCVDB).
+ * SqliteSkillStore (Standalone mode) and TcvdbSkillStore (Service mode)
+ * each implement this interface, and consumers depend only on the interface.
  *
- * 设计文档：
+ * Design doc:
  *   - docs/design/2026-06-25-skill-service-mode-design.md §6.1
  *   - docs/design/2026-06-17-skill-redesign-v2.md
  */
@@ -23,8 +23,8 @@ import type {
 export type SkillErrorCode =
   | "SKILL_NAME_DUPLICATE"
   | "SKILL_NOT_FOUND"
-  // 并发 appendVersion 抢 head-flip CAS 失败（见 tcvdb/skill-store.ts）；
-  // 对齐 skill-core 层同名码，toCoreError 直接透传。
+  // Concurrent appendVersion calls losing the head-flip CAS (see tcvdb/skill-store.ts);
+  // aligned with the same-named code at the skill-core layer, toCoreError passes it through directly.
   | "SKILL_VERSION_STALE";
 
 export class SkillStoreError extends Error {
@@ -35,8 +35,8 @@ export class SkillStoreError extends Error {
 }
 
 /**
- * 当 appendVersion 的 content_hash 与当前 head 完全相同时抛出。
- * 由调用方决定如何处理（一般做幂等返回 head）。store 层不静默吞掉。
+ * Thrown when an appendVersion's content_hash is exactly identical to the current head.
+ * The caller decides how to handle it (generally an idempotent return of head). The store layer does not silently swallow it.
  */
 export class IdempotentNoOpError extends Error {
   constructor(public readonly head: Skill) {
@@ -47,15 +47,15 @@ export class IdempotentNoOpError extends Error {
 
 // ─── Capabilities ──────────────────────────────────────────────────────────
 
-/** Store 能力声明，用于检索降级判断 */
+/** Store capability declaration, used for retrieval-degradation decisions */
 export interface SkillStoreCapabilities {
-  /** 密集向量搜索可用 */
+  /** Dense vector search available */
   vectorSearch: boolean;
-  /** BM25 稀疏向量搜索可用 */
+  /** BM25 sparse vector search available */
   ftsSearch: boolean;
-  /** TCVDB 原生 hybridSearch 可用（本地模式 false） */
+  /** TCVDB native hybridSearch available (false in local mode) */
   nativeHybridSearch: boolean;
-  /** 稀疏向量支持 */
+  /** Sparse vector support */
   sparseVectors: boolean;
 }
 
@@ -69,7 +69,7 @@ export interface SkillSearchResult {
 
 // ─── TTL Cleanup Meta ──────────────────────────────────────────────────────
 
-/** TTL 清理用的过期版本元信息（轻量，不读 content/manifest）。 */
+/** Expired-version metadata for TTL cleanup (lightweight, does not read content/manifest). */
 export interface ExpiredVersionMeta {
   skill_id: string;
   version: number;
@@ -82,69 +82,69 @@ export interface ExpiredVersionMeta {
 // ─── Store Interface ───────────────────────────────────────────────────────
 
 export interface ISkillStore {
-  // ── 生命周期 ──
-  /** 初始化存储（建表/建 Collection 等）。 */
+  // ── Lifecycle ──
+  /** Initialize storage (create tables / create Collection, etc.). */
   init(): void;
-  /** 是否处于降级模式（不可用） */
+  /** Whether in degraded mode (unavailable) */
   isDegraded(): boolean;
-  /** 获取 store 能力声明 */
+  /** Get the store capability declaration */
   getCapabilities(): SkillStoreCapabilities;
-  /** 关闭存储（释放连接等） */
+  /** Close storage (release connections, etc.) */
   close(): void;
 
   // ── CRUD ──
-  /** 追加一个版本行。store 不负责幂等校验（由上层 SkillVersioning 处理）。 */
+  /** Append a version row. The store is not responsible for idempotency checks (handled by the upper-level SkillVersioning). */
   appendVersion(input: AppendVersionInput): Promise<Skill>;
   /**
-   * 获取当前 head 版本（is_head=1 且 status='active'）。
+   * Get the current head version (is_head=1 and status='active').
    *
-   * 语义：`archived` 视同"逻辑删除"，对外任何普通读接口都不可见——本方法一律返回 null。
-   * 需要看到 archived head 用 {@link getHeadIncludingArchived}（仅供 `SkillCore.delete`
-   * 幂等回读、TTL cleaner、管控台等内部路径使用）。
+   * Semantics: `archived` is treated as "logically deleted" and is invisible to any ordinary read interface — this method always returns null.
+   * To see an archived head use {@link getHeadIncludingArchived} (only for internal paths such as `SkillCore.delete`
+   * idempotent readback, the TTL cleaner, and the admin console).
    */
   getHead(skillId: string, teamId?: string): Promise<Skill | null>;
   /**
-   * 获取当前 head 版本，包含 archived。
+   * Get the current head version, including archived.
    *
-   * 仅供内部使用：
-   *   - `SkillCore.delete` 需要拿到 archived head 才能实现幂等 `{ archived: true }`
-   *   - 后台补偿任务扫描 archived skill 与 asset 漂移
-   *   - 管控台"回收站"视图
+   * For internal use only:
+   *   - `SkillCore.delete` needs the archived head to implement the idempotent `{ archived: true }`
+   *   - background compensation tasks scan archived skills vs asset drift
+   *   - the admin console "recycle bin" view
    *
-   * 普通读/写路径 **不应** 调用本方法——用 `getHead`。
+   * Ordinary read/write paths **should not** call this method — use `getHead`.
    */
   getHeadIncludingArchived(skillId: string, teamId?: string): Promise<Skill | null>;
-  /** 获取指定版本行 */
+  /** Get the row of the specified version */
   getByVersion(skillId: string, version: number, teamId?: string): Promise<Skill | null>;
-  /** 将 head 标记为 archived（软删） */
+  /** Mark the head as archived (soft delete) */
   archiveHead(skillId: string, teamId?: string): Promise<{ archived: boolean }>;
 
-  // ── 查询 ──
-  /** 列出 head 行，支持五元组过滤 + 分页 */
+  // ── Queries ──
+  /** List head rows, supporting 5-tuple filtering + pagination */
   listSkills(opts: ListSkillsOptions): Promise<{ items: Skill[]; total: number }>;
-  /** 搜索 skill（BM25 / embedding / hybrid，由实现决定） */
+  /** Search skills (BM25 / embedding / hybrid, decided by the implementation) */
   searchSkills(opts: SearchSkillsOptions): Promise<SkillSearchResult[]>;
-  /** 列出某 skill 的全部版本（DESC） */
+  /** List all versions of a skill (DESC) */
   listVersions(skillId: string, teamId?: string, pagination?: { limit?: number; offset?: number }): Promise<Skill[]>;
-  /** 某 skill 的版本总数 */
+  /** Total number of versions of a skill */
   countVersions(skillId: string, teamId?: string): Promise<number>;
 
   // ── TTL Cleanup ──
-  /** 查询 created_at_ms < cutoffMs 的过期非 head 版本（跨 team 全量扫描）。 */
+  /** Query expired non-head versions with created_at_ms < cutoffMs (full cross-team scan). */
   findExpiredVersions(cutoffMs: number): Promise<ExpiredVersionMeta[]>;
-  /** 物理删除指定版本行（仅 is_head=0）。返回是否实际删除了行。 */
+  /** Physically delete the specified version row (is_head=0 only). Returns whether a row was actually deleted. */
   deleteVersion(skillId: string, version: number): Promise<boolean>;
   /**
-   * 物理删除同 skill_id 下的**所有版本行**（含 head + archived）。
-   * 返回实际删除的行数（可能为 0：skill 不存在 / team 不匹配）。
+   * Physically delete **all version rows** under the same skill_id (including head + archived).
+   * Returns the number of rows actually deleted (may be 0: skill does not exist / team mismatch).
    *
-   * 用于 `SkillCore.delete` 的真删除路径，与 `deleteVersion` 的 head 保护相反：
-   * 这里承担"以 skill 为整体单位一次性清空"的语义，权限校验由调用方
-   * （SkillCore）先完成。
+   * Used for the true-delete path of `SkillCore.delete`, the opposite of `deleteVersion`'s head protection:
+   * this carries the semantics of "clear everything at once, with the skill as a whole unit", and permission checks are done first by the caller
+   * (SkillCore).
    *
-   * 语义：
-   *   - `teamId` 传入 → WHERE 强制过滤，跨 team 不生效（返回 0）
-   *   - `teamId` 省略 → 跨 team 删除（供管控台 / 后台补偿任务使用，业务路径不应调用）
+   * Semantics:
+   *   - `teamId` passed → WHERE forces filtering; no effect across teams (returns 0)
+   *   - `teamId` omitted → cross-team delete (for the admin console / background compensation tasks; business paths should not call it)
    */
   deleteAllVersions(skillId: string, teamId?: string): Promise<number>;
 }

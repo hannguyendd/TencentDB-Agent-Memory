@@ -24,7 +24,7 @@ export interface LocalLlmClientConfig {
   model: string;
   temperature?: number;
   timeoutMs?: number;
-  /** 流式请求开关,透传给 callLlm。默认 false。 */
+  /** Streaming request switch, passed through to callLlm. Default false. */
   stream?: boolean;
 }
 

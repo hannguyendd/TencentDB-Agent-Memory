@@ -1,27 +1,27 @@
 /**
- * ApiKeyPanel 样式补丁 — 仅保留 Tea 组件无法直接覆盖的细节样式。
- * 布局、排版、空态统一走 Tea `Justify` / `H3` / `Text` / `Table.addons.autotip`。
+ * ApiKeyPanel style patch -- keeps only detail styles that Tea components cannot override directly.
+ * Layout, typography and empty states all use Tea `Justify` / `H3` / `Text` / `Table.addons.autotip`.
  */
 
-/* 页面容器 */
+/* Page container */
 ._memory-apikey-body {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-/* 覆盖 Tea 全局 `.tea-card { margin: 0 auto }`（在 Card.js 自带样式中），
- * 那个样式会让 Card 收缩到内容宽度并水平居中——上方 Table Card 因为
- * 内部 Table 把 Card 撑满了所以看不出，但「客户端接入地址」这种
- * 内部只有少量内容的 Card 会被收缩到大约 1/3 屏宽，看起来很怪。
- * 这里强制让 ApiKey 页面所有 Card 都撑满父容器，行为与 Table Card 一致。 */
+/* Override Tea's global `.tea-card { margin: 0 auto }` (in Card.js's built-in styles),
+ * which shrinks a Card to its content width and centers it horizontally -- the Table Card above isn't affected because
+ * the inner Table fills the Card, but a Card like "Client access address" that
+ * holds little content would shrink to about 1/3 of the screen width and look odd.
+ * Here all Cards on the ApiKey page are forced to fill the parent container, matching the Table Card. */
 ._memory-apikey-body > .tea-card {
   width: 100%;
   margin-left: 0;
   margin-right: 0;
 }
 
-/* 刚创建 Key 的提示 */
+/* Notice for a just-created Key */
 ._memory-apikey-fresh-desc {
   margin: 0 0 8px;
   font: var(--tea-typography-body-sm);
@@ -48,20 +48,20 @@
   user-select: all;
 }
 
-/* 接入指引端点卡片
- * 用 grid 而不是 flex 的原因：
- *   flex 的 `align-items: stretch` 理论默认会让两个 endpoint 等高，
- *   但这里 Card.Body 内部又嵌了一层 .tea-card__content block div，
- *   实际渲染中偶尔出现两个端点高度不齐（左框单行 URL、右框 URL 换行
- *   成两行时，底部 baseline 不在同一水平线）。改用 grid 后，
- *   同一行内的 grid item 高度天然一致（grid row 高度取该行最大值），
- *   行为更稳定，不依赖 Tea Card 内部布局细节。
+/* Access guide endpoint cards
+ * Why grid instead of flex:
+ *   flex's `align-items: stretch` should in theory make the two endpoints equal height,
+ *   but Card.Body nests another .tea-card__content block div inside,
+ *   so in actual rendering the two endpoints are occasionally uneven in height (when the left box has a single-line URL and the right box's URL wraps
+ *   into two lines, the bottom baselines are not on the same line). With grid,
+ *   grid items in the same row are naturally the same height (the grid row height is the row's maximum),
+ *   which is more stable and does not depend on Tea Card's internal layout details.
  *
- * 用 `1fr 1fr` 而不是 `repeat(auto-fit, minmax(280px, 1fr))` 的原因：
- *   auto-fit + minmax(280, 1fr) 在父容器 < 2×280+gap=572px 时会自动
- *   堆叠成单列（在 Card 收窄的场景下会触发，两个 endpoint 上下排列、
- *   宽度也不一致）。这里期望两个端点始终并排且等宽，所以强制 `1fr 1fr`，
- *   URL 过长时由 endpoint 内的 `wordBreak: break-all` 换行承载。 */
+ * Why `1fr 1fr` instead of `repeat(auto-fit, minmax(280px, 1fr))`:
+ *   auto-fit + minmax(280, 1fr) automatically stacks into a single column when the parent container is < 2x280+gap=572px
+ *   (triggered when the Card narrows; the two endpoints stack vertically
+ *   with unequal widths). Here the two endpoints should always sit side by side with equal width, so `1fr 1fr` is forced,
+ *   and when a URL is too long the `wordBreak: break-all` inside the endpoint handles wrapping. */
 ._memory-apikey-endpoints {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -69,7 +69,7 @@
 }
 
 ._memory-apikey-endpoint {
-  min-width: 0; /* grid item 默认 min-width:auto 会拒绝被 URL 撑爆，必须显式置 0 */
+  min-width: 0; /* A grid item's default min-width:auto refuses to be squeezed by a long URL; it must be explicitly set to 0 */
   padding: 8px 12px;
   border: 1px solid var(--tea-color-border-primary-default);
   border-radius: 4px;

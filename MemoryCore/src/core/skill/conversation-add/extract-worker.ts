@@ -1,19 +1,19 @@
 /**
  * SkillConversationExtractWorker — §9。
  *
- * 常驻循环：
+ * Resident loop:
  *   ① BRPOP agent
- *   ② 抢 extract-lock；拿不到 → requeue + sleep
- *   ③ 抢 tasks-mutex 读队首 task
- *   ④ 读 archive:
- *        404 → 幽灵 task → 抢 mutex filter 删 task, 跳过
- *        成功 → SkillExtractor.extract → sink.applyCandidates → 抢 mutex filter 删 task
- *   ⑤ 判断是否重入队 (还有 task → requeue, 否则 removeAgent)
- *   ⑥ 释放 extract-lock
+ *   ② grab the extract-lock; if not obtained → requeue + sleep
+ *   ③ grab the tasks-mutex and read the head task
+ *   ④ read the archive:
+ *        404 → phantom task → grab the mutex, filter-delete the task, skip
+ *        success → SkillExtractor.extract → sink.applyCandidates → grab the mutex, filter-delete the task
+ *   ⑤ decide whether to re-enqueue (tasks remain → requeue, otherwise removeAgent)
+ *   ⑥ release the extract-lock
  *
- * 并发保护：
- *   - agent 级 extract-lock 保证同一 agent 只有一个 Worker 抽取
- *   - tasks-mutex 保护 _tasks.json 读改写（跟 Handler 归档段的 mutex 是同一把）
+ * Concurrency protection:
+ *   - the agent-level extract-lock guarantees only one Worker extracts for the same agent
+ *   - the tasks-mutex protects the _tasks.json read-modify-write (the same lock as the Handler archive segment's mutex)
  */
 
 import type {
@@ -36,14 +36,14 @@ import { obsLogger } from "../../report/obs-logger.js";
 import { trace } from "../../report/trace.js";
 
 /**
- * 把 candidates 落到业务侧（例如调 SkillCore.create/patch，或者直接写 SkillStore）。
- * 由 wiring 层注入，Worker 不关心具体实现。必须幂等（Client 重试可能导致 task 被抽多次）。
+ * Land the candidates on the business side (e.g. call SkillCore.create/patch, or write directly to SkillStore).
+ * Injected by the wiring layer; the Worker does not care about the concrete implementation. Must be idempotent (a Client retry may cause a task to be extracted multiple times).
  */
 export interface SkillCandidatesSink {
   applyCandidates(input: {
     task: SkillTaskEntry;
     candidates: ExtractedCandidate[];
-    /** trace / logging 用途 */
+    /** For trace / logging purposes */
     workerId: string;
   }): Promise<void>;
 }
@@ -56,59 +56,59 @@ export interface SkillConversationExtractWorkerOptions {
   sink: SkillCandidatesSink;
   logger: ExtractorLogger;
 
-  /** BRPOP 阻塞时长 ms，默认 5000。 */
+  /** BRPOP blocking duration in ms, default 5000. */
   brpopBlockMs?: number;
-  /** extract-lock TTL ms，默认 600_000 (10 min)。 */
+  /** extract-lock TTL in ms, default 600_000 (10 min). */
   extractLockTtlMs?: number;
   /**
-   * extract-lock 续约间隔 ms，默认 extractLockTtlMs / 4。
+   * extract-lock renewal interval in ms, default extractLockTtlMs / 4.
    *
-   * 处理 skill extract 走 LLM tool-calling review agent，可能跨多轮 iteration，
-   * 累计耗时接近或超过 lockTtl。续约保证 Worker 忙着抽的时候不会被别的 Worker
-   * 抢锁。默认 lockRenewIntervalMs = ttl/4 (跟历史 V2 worker 参数对齐)。
+   * Skill extract goes through an LLM tool-calling review agent, which may span multiple iterations,
+   * with cumulative time approaching or exceeding lockTtl. Renewal ensures that while the Worker is busy extracting, the lock is not
+   * grabbed by another Worker. Default lockRenewIntervalMs = ttl/4 (aligned with the historical V2 worker parameters).
    */
   extractLockRenewIntervalMs?: number;
-  /** tasks-mutex 锁 TTL ms（进程崩溃兜底），默认 10000。 */
+  /** tasks-mutex lock TTL in ms (crash safety net), default 10000. */
   tasksMutexLockTtlMs?: number;
-  /** tasks-mutex 争抢等待最长时间，默认 30000。 */
+  /** Max wait time for contending the tasks-mutex, default 30000. */
   tasksMutexWaitDeadlineMs?: number;
-  /** 抢 extract-lock 失败后重入队，睡多少 ms 再 dequeue。默认 2000 + 抖动。 */
+  /** How many ms to sleep before dequeue after failing to grab the extract-lock and re-enqueuing. Default 2000 + jitter. */
   lockContentionSleepMs?: number;
   lockContentionSleepJitterMs?: number;
   /**
-   * agent 一轮处理最多抽多少条 task 就 requeue 让位（保证公平），默认 1。
-   * 设计文档里 Worker 每次处理一条 task 就把 agent 塞回队头。
+   * The max number of tasks to extract in one agent round before requeuing to yield (ensures fairness), default 1.
+   * In the design doc the Worker pushes the agent back to the queue head after processing each task.
    */
   tasksPerRound?: number;
-  /** 时间源，测试注入。 */
+  /** Time source, injected in tests. */
   now?: () => number;
 
-  // ── 失败处理（transient / permanent 分级 + DLQ） ────────────────────────
+  // ── Failure handling (transient / permanent tiers + DLQ) ────────────────────────
   //
-  // 对齐设计文档 §3.6 (7) P0 修复：抽取失败原来 catch 里直接 requeue+break，
-  // runLoop 立刻 dequeue 同 agent 形成 ~100 次/秒 的 hot retry，浪费 LLM
-  // 额度、灌爆日志。现在按错误性质分两类：
+  // Aligned with design doc §3.6 (7) P0 fix: extraction failures used to requeue+break directly in the catch,
+  // and runLoop would immediately dequeue the same agent, forming a ~100 times/second hot retry, wasting LLM
+  // quota and flooding the logs. Now errors are divided into two classes by nature:
   //
-  //   A) transient (401/403/429/5xx/网络/timeout/fetch)
+  //   A) transient (401/403/429/5xx/network/timeout/fetch)
   //      → sleep(failureRequeueSleepMs) → requeue
-  //      → retry_count 不变，不入 DLQ，无限重试等外部恢复
-  //      → warn 采样：每 transientLogSampleEvery 次打一条 warn
+  //      → retry_count unchanged, not put into the DLQ, retry indefinitely until the external system recovers
+  //      → warn sampling: emit one warn every transientLogSampleEvery occurrences
   //   B) permanent (400/422/JSON parse/schema)
-  //      → sleep → retry_count++ 回写 _tasks.json → requeue
-  //      → retry_count >= permanentMaxRetries 时移到 _tasks_dlq.json
-  //      → 无法分类的错误按 A 处理（兜底不丢数据）
+  //      → sleep → retry_count++ written back to _tasks.json → requeue
+  //      → when retry_count >= permanentMaxRetries, move to _tasks_dlq.json
+  //      → errors that cannot be classified are handled as A (safety net, no data loss)
   /**
-   * 失败后 requeue 前 sleep 多少 ms，固定值（不做指数退避、不做 jitter）。
-   * 默认 2000。
+   * How many ms to sleep before requeue after a failure; a fixed value (no exponential backoff, no jitter).
+   * Default 2000.
    */
   failureRequeueSleepMs?: number;
   /**
-   * permanent 错累计多少次进 DLQ，默认 3。
+   * How many cumulative permanent errors before going into the DLQ, default 3.
    */
   permanentMaxRetries?: number;
   /**
-   * transient 错误按 task_id 采样打 warn 的间隔（次）。第 1 次打 error，
-   * 之后每 N 次打一条 warn，防日志刷屏。默认 60。
+   * Interval (in occurrences) for sampling warns of transient errors by task_id. The 1st emits an error,
+   * then every N occurrences emit a warn, to prevent log flooding. Default 60.
    */
   transientLogSampleEvery?: number;
 }
@@ -120,9 +120,9 @@ export class SkillConversationExtractWorker {
   private started = false;
   private loopPromise: Promise<void> | null = null;
   /**
-   * per-task_id transient 失败计数（进程内计数，不落盘）。用于 warn 采样：
-   * 首次失败打 error，之后每 transientLogSampleEvery 次打一条 warn。进程重启
-   * 后重新计数没关系——采样目的只是限日志频次，不是审计。
+   * Per-task_id transient failure counter (in-process count, not persisted). Used for warn sampling:
+   * the first failure emits an error, then every transientLogSampleEvery occurrences emit a warn. It does not matter if the process restarts and
+   * the count restarts — the purpose of sampling is only to limit log frequency, not to audit.
    */
   private readonly transientFailStreak = new Map<string, number>();
 
@@ -139,15 +139,15 @@ export class SkillConversationExtractWorker {
       `[skill-conv-worker] start id=${this.opts.workerId} brpopBlockMs=${this.opts.brpopBlockMs ?? 5000} ` +
         `extractLockTtlMs=${this.opts.extractLockTtlMs ?? 600_000}`,
     );
-    // 关键：把 runLoop 放到 OTel ROOT_CONTEXT 里启动。
+    // Key: start runLoop inside the OTel ROOT_CONTEXT.
     //
-    // 本 worker 常在某个 HTTP 请求 handler 里被懒启动（resolveConversationAdd →
-    // wireConversationAdd → start()）。若不脱离上下文，永不退出的 runLoop 会
-    // 永久继承"启动那一刻"的 active span，导致之后每次抽取的 LLM span 都挂进
-    // 那条请求 trace，被 Langfuse 合并成一条（tags 跨多 agent、sessionId 混乱）。
-    // 详见 report/otel-context.ts。
+    // This worker is often lazily started inside some HTTP request handler (resolveConversationAdd →
+    // wireConversationAdd → start()). Without detaching from the context, the never-exiting runLoop would
+    // permanently inherit the active span "at the moment of startup", causing the LLM spans of every later extraction to hang under
+    // that request's trace, merged by Langfuse into one (tags across multiple agents, confused sessionId).
+    // See report/otel-context.ts for details.
     this.loopPromise = runInRootContext(() => this.runLoop());
-    // 静默 unhandled rejection
+    // silence unhandled rejection
     this.loopPromise.catch(() => { /* logged inside */ });
   }
 
@@ -161,17 +161,17 @@ export class SkillConversationExtractWorker {
   }
 
   /**
-   * 单次消费一个 agent。测试专用（同步跑通）。返回处理结果，方便断言。
+   * Consume one agent at a time. For tests only (runs synchronously to completion). Returns the processing result to ease assertions.
    *
-   * 2026-08-03 crash-recovery §4.1: 取队用 peekAgent (RPOP+LPUSH 原子, LMOVE 语义),
-   * agent 从取到那一刻起始终在 List 里, worker 中途崩溃下一轮 peek 仍能拿到。
-   * 详见 docs/design/2026-07-21-skill-worker-crash-recovery.md §4。
+   * 2026-08-03 crash-recovery §4.1: dequeue uses peekAgent (RPOP+LPUSH atomic, LMOVE semantics);
+   * from the moment it is obtained the agent always stays in the List, and if the worker crashes midway the next peek can still get it.
+   * See docs/design/2026-07-21-skill-worker-crash-recovery.md §4.
    */
   async runOnce(): Promise<{
     agent?: AgentTuple;
     processedTaskIds: string[];
     lockContended?: boolean;
-    dropped?: string[]; // 幽灵 / 抽取失败被丢弃的 task
+    dropped?: string[]; // phantom / tasks dropped due to extraction failure
   }> {
     const agent = await this.opts.queue.peekAgent(this.opts.brpopBlockMs ?? 5000);
     if (!agent) return { processedTaskIds: [] };
@@ -200,9 +200,9 @@ export class SkillConversationExtractWorker {
   }
 
   /**
-   * 消费一个 agent 的完整 8 步流程。默认走 runLoop 内部调用; 也对外暴露给
-   * SkillWorkerPool 复用 —— pool 里的每条 workerLoop 只承担调度 (dequeue +
-   * resolver + legacy 兜底), 具体抽取仍走这里, 避免重复实现。
+   * The complete 8-step flow of consuming one agent. By default called internally from runLoop; also exposed externally for
+   * SkillWorkerPool to reuse — each workerLoop in the pool only handles scheduling (dequeue +
+   * resolver + legacy fallback), and the concrete extraction still goes through here, to avoid duplicate implementations.
    */
   async consumeAgent(agent: AgentTuple): Promise<{
     agent: AgentTuple;
@@ -220,27 +220,27 @@ export class SkillConversationExtractWorker {
     const processedTaskIds: string[] = [];
     const dropped: string[] = [];
 
-    // 2026-08-03 crash-recovery: peek 策略决定失败/成功分支行为。
-    //   - lmove / evalsha / eval  → 原子路径, agent 已在 List, 各分支不再显式 requeue,
-    //     成功路径也不再 remove, 靠下一轮 peek 到空 tasks 时懒删除。
-    //   - rpop_lpush_downgrade    → 非原子 v1 语义: 失败/成功分支照旧 requeue / remove,
-    //     配合 pool 侧周期 selfHealScan 兜底。
-    // 详见 docs/design/2026-07-21-skill-worker-crash-recovery.md §5.3。
+    // 2026-08-03 crash-recovery: the peek strategy decides the failure/success branch behavior.
+    //   - lmove / evalsha / eval  → atomic path, the agent is already in the List, the branches no longer explicitly requeue,
+    //     the success path no longer removes either, relying on lazy deletion when the next peek sees empty tasks.
+    //   - rpop_lpush_downgrade    → non-atomic v1 semantics: the failure/success branches requeue / remove as before,
+    //     combined with the pool-side periodic selfHealScan as a safety net.
+    // See docs/design/2026-07-21-skill-worker-crash-recovery.md §5.3.
     const isDowngrade =
       (typeof q.getPeekStrategy === "function" ? q.getPeekStrategy() : "lmove") ===
       "rpop_lpush_downgrade";
 
     const instanceId = agent.instance_id;
-    // agentKey 保持 4 段 (space|user|team|agent) 语义, 不加 instance_id 段 ——
-    // 兼容老观测面板按 agent_key 做过滤/聚合的 SQL。instance_id 单独作为字段带上,
-    // 供后端按 instance 维度分组过滤 (对应池化重构后的排障需要)。
+    // agentKey keeps the 4-segment (space|user|team|agent) semantics, without adding an instance_id segment —
+    // compatible with old observability-panel SQL that filters/aggregates by agent_key. instance_id is carried separately as a field,
+    // for the backend to group and filter by instance dimension (corresponding to the troubleshooting needs after the pooling refactor).
     const agentKey = `${agent.space_id}|${agent.user_id}|${agent.team_id}|${agent.agent_id}`;
-    // [obs] worker 段结构化事件：consume_start → acquire_lock → read_head →
+    // [obs] worker-segment structured events: consume_start → acquire_lock → read_head →
     //   read_archive → extractor → apply_candidates → delete_task → consume_done。
-    // 拿到 task_id 之前用 agent_key + worker_id 定位；拿到 task_id 之后每条事件
-    // 都带 task_id —— handler 侧 skill.trigger.enqueue_agent 事件已带同一 task_id，
-    // 后端按 task_id 就能拉全 handler + worker 双段。
-    // obsLogger 内部 try/catch + 后端降级，不需要额外防御。
+    // before task_id is obtained, locate by agent_key + worker_id; after task_id is obtained every event
+    // carries task_id — the handler-side skill.trigger.enqueue_agent event already carries the same task_id,
+    // so the backend can pull both the handler + worker segments by task_id.
+    // obsLogger has internal try/catch + backend degradation; no extra defense is needed.
     const workerId = this.opts.workerId;
     const t0Consume = Date.now();
     obsLogger.info("skill.worker.consume_start", {
@@ -248,7 +248,7 @@ export class SkillConversationExtractWorker {
     });
     this.logger.info(`[skill-conv-worker] dequeued agent=${agentKey}`);
 
-    // ② 抢 extract-lock
+    // ② grab the extract-lock
     const t0Lock = Date.now();
     const handle = await q.acquireExtractLock(agent, extractLockTtl);
     obsLogger.info("skill.worker.acquire_lock", {
@@ -256,8 +256,8 @@ export class SkillConversationExtractWorker {
       dur_ms: Date.now() - t0Lock, acquired: !!handle,
     });
     if (!handle) {
-      // 2026-08-03: 原子路径下 agent 已在 List (peek 保证), 不需要 requeue;
-      // 降级路径下走 v1 语义, mutex 外 requeue 保证 agent 不丢。
+      // 2026-08-03: on the atomic path the agent is already in the List (guaranteed by peek), so no requeue is needed;
+      // on the degraded path, v1 semantics apply: requeue outside the mutex to ensure the agent is not lost.
       if (isDowngrade) {
         this.logger.info(`[skill-conv-worker] extract-lock contended agent=${agentKey}, requeue+sleep (downgrade)`);
         await q.requeueAgent(agent);
@@ -274,7 +274,7 @@ export class SkillConversationExtractWorker {
     }
     this.logger.info(`[skill-conv-worker] acquired extract-lock agent=${agentKey}`);
 
-    // ②.5 启动续约定时器 —— 保证 LLM 长跑时锁不掉
+    // ②.5 start the renewal timer — ensures the lock does not drop during long LLM runs
     const renewInterval = this.opts.extractLockRenewIntervalMs ?? Math.floor(extractLockTtl / 4);
     let renewTimer: ReturnType<typeof setInterval> | undefined;
     if (renewInterval > 0) {
@@ -300,16 +300,16 @@ export class SkillConversationExtractWorker {
 
     try {
       for (let round = 0; round < perRound; round++) {
-        // ③ 抢 mutex 读队首 task。
+        // ③ grab the mutex and read the head task.
         //
-        // 关键修复（幽灵任务 root cause）：判空之后的 removeAgent 必须在
-        // 同一个 tasks-mutex 临界区内完成，不能等 mutex 释放后再调——否则
-        // TriggerService.archive() 可能在这个无锁窗口里抢到 mutex 写入新
-        // task，但此时 Redis Set 里 agent 还没被摘除（本函数的 removeAgent
-        // 还没跑），enqueueAgent 的 SADD 会因为「Set 已存在」返回 0 而跳过
-        // LPUSH——新 task 落地了但 Redis 队列毫无记录，永久卡死成幽灵任务。
-        // 把 removeAgent 收进同一把锁，跟 trigger-service.ts 的 fix
-        // （enqueueAgent 挪进写 task 的临界区）配合，保证两侧互斥。
+        // Key fix (root cause of phantom tasks): the removeAgent after the emptiness check must be done inside
+        // the same tasks-mutex critical section, and cannot wait until the mutex is released — otherwise
+        // TriggerService.archive() might grab the mutex in this lock-free window and write a new
+        // task, but at that moment the agent has not yet been removed from the Redis Set (this function's removeAgent
+        // has not run yet), and enqueueAgent's SADD would return 0 because "the Set already has it" and skip
+        // the LPUSH — the new task lands but the Redis queue has no record of it, stuck forever as a phantom task.
+        // Pulling removeAgent into the same lock, together with the trigger-service.ts fix
+        // (moving enqueueAgent into the critical section that writes the task), guarantees mutual exclusion on both sides.
         const t0Head = Date.now();
         const head = await q.withTasksMutex(agent, mutexOpts, async () => {
           const doc = await this.opts.buffer.readTasks(agent);
@@ -325,7 +325,7 @@ export class SkillConversationExtractWorker {
         });
 
         if (!head) {
-          // tasks 空 → agent 已在上面的临界区内下线，跳出
+          // tasks empty → the agent was already taken offline inside the critical section above; break out
           obsLogger.info("skill.worker.consume_done", {
             worker_id: workerId, agent_key: agentKey, instance_id: instanceId,
             outcome: "empty", dur_ms: Date.now() - t0Consume,
@@ -333,8 +333,8 @@ export class SkillConversationExtractWorker {
           return { agent, processedTaskIds, dropped };
         }
 
-        // task_id 就位：从此往下所有事件都带 task_id，跟 handler 侧同 task_id
-        // 关联（handler 的 skill.trigger.enqueue_agent 已经带过一次）。
+        // task_id is in place: from here on every event carries task_id, correlating with the handler side's same task_id
+        // (the handler's skill.trigger.enqueue_agent already carried it once).
         const t0Task = Date.now();
         obsLogger.info("skill.worker.task_start", {
           worker_id: workerId,
@@ -347,7 +347,7 @@ export class SkillConversationExtractWorker {
           archive_key: head.archive_key,
         });
 
-        // ④ 读 archive
+        // ④ read the archive
         let candidates: ExtractedCandidate[] | null = null;
         let isGhost = false;
         try {
@@ -385,20 +385,20 @@ export class SkillConversationExtractWorker {
               team_id: head.team_id,
               user_id: head.user_id,
               agent_id: head.agent_id,
-              // Langfuse trace 绑定字段：不透传的话 skill.extract 的 trace
-              // sessionId=null / instanceId=unknown，页面按 session 过滤就找不到。
+              // Langfuse trace binding fields: if not passed through, the skill.extract trace has
+              // sessionId=null / instanceId=unknown, and filtering by session on the page would not find it.
               session_id: head.session_id,
               space_id: head.space_id,
               conversation,
-              // direct-trigger (`/v3/skill/extract`) 独占字段透传；conversation/add 归档
-              // 的 task 不带这两个字段, undefined 不影响 extractor (走默认)。
+              // Pass through the fields exclusive to direct-trigger (`/v3/skill/extract`); tasks archived by conversation/add
+              // do not carry these two fields, and undefined does not affect the extractor (it takes the default).
               reason: head.reason,
               options: head.max_iterations != null
                 ? { max_iterations: head.max_iterations }
                 : undefined,
-              // strict_mode 透传:老 task (未升级前入队) mode 字段不存在,undefined 透
-              // 给 extractor 恒走 SKILL_REVIEW_PROMPT (v2 宽松) — 零回归; 冷启动写入的
-              // task mode='strict' 才切到 SKILL_REVIEW_PROMPT_STRICT (v1 严格 gate)。
+              // strict_mode passthrough: for old tasks (enqueued before the upgrade) the mode field does not exist, and undefined is passed
+              // to the extractor, always taking SKILL_REVIEW_PROMPT (v2 lenient) — zero regression; only tasks written by cold start with
+              // mode='strict' switch to SKILL_REVIEW_PROMPT_STRICT (v1 strict gate).
               mode: head.mode,
             });
             candidates = result.candidates ?? [];
@@ -424,29 +424,29 @@ export class SkillConversationExtractWorker {
             });
           }
         } catch (err) {
-          // 失败分级（对齐设计文档 §3.6 (7) P0 修复）：
-          //   transient → sleep + requeue，retry_count 不变
-          //   permanent → sleep + retry_count++ 回写；达阈值移进 DLQ
-          //   分类兜底 → 按 transient 处理（保守不丢数据）
+          // Failure tiering (aligned with design doc §3.6 (7) P0 fix):
+          //   transient → sleep + requeue, retry_count unchanged
+          //   permanent → sleep + retry_count++ written back; move into the DLQ when the threshold is reached
+          //   classification fallback → handled as transient (conservative, no data loss)
           const errMsg = (err as Error).message ?? String(err);
           const category = classifyError(err as Error);
           if (category === "transient") {
             this.logTransientFailure(head.task_id, errMsg);
-            // 注意：outcome 用 `retry_transient` 简写，不含 "transient" 关键字 ——
-            // DLQ 单测用 .includes("transient") 判定 transient 采样计数，
-            // 避免 obsLogger 事件也被算进去。
+            // Note: outcome uses the shorthand `retry_transient` without the "transient" keyword —
+            // the DLQ unit test uses .includes("transient") to count transient samples,
+            // avoiding obsLogger events being counted as well.
             obsLogger.info("skill.worker.task_done", {
               worker_id: workerId, task_id: head.task_id, instance_id: instanceId,
               outcome: "retry_transient", dur_ms: Date.now() - t0Task,
             });
             await sleep(this.opts.failureRequeueSleepMs ?? 2000);
-            // 2026-08-03: 原子 peek 路径下 agent 仍在 List, task.json 也未动,
-            // 下一轮 peek 直接拿到同一 head 重跑; 降级路径显式 requeue。
+            // 2026-08-03: on the atomic peek path the agent is still in the List and task.json is untouched,
+            // so the next peek directly gets the same head and reruns; the degraded path requeues explicitly.
             if (isDowngrade) await q.requeueAgent(agent);
             break;
           }
           // permanent
-          // 清掉 transient 计数器，避免历史 transient 干扰后续采样。
+          // clear the transient counter, to prevent historical transients from interfering with later sampling.
           this.transientFailStreak.delete(head.task_id);
           obsLogger.info("skill.worker.task_done", {
             worker_id: workerId, task_id: head.task_id, instance_id: instanceId,
@@ -457,14 +457,14 @@ export class SkillConversationExtractWorker {
           break;
         }
 
-        // ⑤ 抽取成功 or 幽灵 task → CAS filter 删 task（按 task_id）。
+        // ⑤ extraction succeeded or phantom task → CAS filter-delete the task (by task_id).
         //
-        // 2026-08-03 crash-recovery §4.1: 原子 peek 路径下不再判定剩余 tasks
-        // 也不再 requeue/remove — agent 一直在 List, 靠下一轮 peek 读到空 tasks
-        // 时同 mutex 内懒删除 (见步骤 ③ tasks 空分支)。
+        // 2026-08-03 crash-recovery §4.1: on the atomic peek path, the remaining tasks are no longer judged
+        // and there is no requeue/remove — the agent stays in the List, relying on the next peek reading empty tasks
+        // to lazily delete within the same mutex (see the tasks-empty branch of step ③).
         //
-        // 降级路径 (peekAgent 只 pop 不 push) 走 v1 语义: 判定剩余 → requeue/remove,
-        // 跟 trigger-service.archive() 通过同一把 mutex 保序。
+        // The degraded path (peekAgent only pops without pushing) uses v1 semantics: judge the remainder → requeue/remove,
+        // ordered via the same mutex as trigger-service.archive().
         const t0Del = Date.now();
         let remainingTasks = 0;
         await q.withTasksMutex(agent, mutexOpts, async () => {
@@ -483,7 +483,7 @@ export class SkillConversationExtractWorker {
               await q.removeAgent(agent);
             }
           }
-          // 原子路径: 什么都不做, agent 已在 List, 下一轮 peek 触发懒删除。
+          // atomic path: do nothing; the agent is already in the List, and the next peek triggers lazy deletion.
         });
         obsLogger.info("skill.worker.delete_task", {
           worker_id: workerId, task_id: head.task_id, instance_id: instanceId,
@@ -491,8 +491,8 @@ export class SkillConversationExtractWorker {
           remaining: remainingTasks,
         });
 
-        // trace.report 后端 span：跟 skill.extract / skill.conversation_add 对齐，
-        // 按 task_id 就能在 clickhouse / langfuse 里拉到 handler + worker 双段。
+        // trace.report backend span: aligned with skill.extract / skill.conversation_add,
+        // so both the handler + worker segments can be pulled in clickhouse / langfuse by task_id.
         try {
           trace.report("skill.worker.task_done", {
             task_id: head.task_id,
@@ -528,7 +528,7 @@ export class SkillConversationExtractWorker {
       });
       return { agent, processedTaskIds, dropped };
     } finally {
-      // ⑥ 停续约 + 释放 extract-lock
+      // ⑥ stop renewal + release the extract-lock
       if (renewTimer) {
         clearInterval(renewTimer);
         renewTimer = undefined;
@@ -544,8 +544,8 @@ export class SkillConversationExtractWorker {
   }
 
   /**
-   * transient 失败日志采样：首次以 error 级别打印，之后每 N 次以 warn 级
-   * 打一条摘要，防日志刷屏。N 由 `transientLogSampleEvery` 控制（默认 60）。
+   * transient failure log sampling: the first is printed at error level, then every N occurrences a summary is printed at warn level,
+   * to prevent log flooding. N is controlled by `transientLogSampleEvery` (default 60).
    */
   private logTransientFailure(taskId: string, errMsg: string): void {
     const prev = this.transientFailStreak.get(taskId) ?? 0;
@@ -564,15 +564,15 @@ export class SkillConversationExtractWorker {
   }
 
   /**
-   * permanent 失败：抢 tasks-mutex 读改写 `_tasks.json`。
+   * permanent failure: grab the tasks-mutex and read-modify-write `_tasks.json`.
    *
-   *   - retry_count+1 < permanentMaxRetries：写回 task 条目、requeue agent
-   *   - retry_count+1 >= permanentMaxRetries：从 `_tasks.json` 移除该 task、
-   *     追加到 `_tasks_dlq.json`，剩余 task 决定 requeue / remove
+   *   - retry_count+1 < permanentMaxRetries: write back the task entry, requeue the agent
+   *   - retry_count+1 >= permanentMaxRetries: remove the task from `_tasks.json`,
+   *     append it to `_tasks_dlq.json`, and the remaining tasks decide requeue / remove
    *
-   * 关键：读改写 `_tasks.json` 必须在同一临界区里，跟成功路径同 pattern（避免
-   * 和 trigger-service.archive() 竞态）。DLQ 写不占 mutex：Worker 已持
-   * extract-lock，同一 agent 只有一个写者。
+   * Key: the `_tasks.json` read-modify-write must be in the same critical section, following the same pattern as the success path (to avoid
+   * racing with trigger-service.archive()). The DLQ write does not take the mutex: the Worker already holds
+   * the extract-lock, so each agent has only one writer.
    */
   private async handlePermanentFailure(
     agent: AgentTuple,
@@ -592,11 +592,11 @@ export class SkillConversationExtractWorker {
       const doc = await this.opts.buffer.readTasks(agent);
       const idx = doc.tasks.findIndex((t) => t.task_id === head.task_id);
       if (idx < 0) {
-        // task 已被别处清掉（幽灵回收 / DLQ 重跑），本次 permanent 视为无效。
+        // the task was already cleared elsewhere (phantom reclamation / DLQ rerun); this permanent failure is treated as invalid.
         this.logger.warn(
           `[skill-conv-worker] permanent failure but task gone task=${head.task_id}`,
         );
-        // 2026-08-03: 原子路径不 requeue/remove, 靠下一轮懒删除; 降级路径 v1 语义。
+        // 2026-08-03: the atomic path does not requeue/remove, relying on next-round lazy deletion; the degraded path uses v1 semantics.
         if (isDowngrade) {
           if (doc.tasks.length > 0) await q.requeueAgent(agent);
           else await q.removeAgent(agent);
@@ -606,7 +606,7 @@ export class SkillConversationExtractWorker {
       const cur = doc.tasks[idx]!;
       const nextRetry = (cur.retry_count ?? 0) + 1;
       if (nextRetry >= maxRetries) {
-        // → DLQ：从 _tasks.json 摘除
+        // → DLQ: remove from _tasks.json
         deadTask = { ...cur, retry_count: nextRetry, last_error: truncated };
         doc.tasks.splice(idx, 1);
         doc.updated_at_ms = nowMs();
@@ -630,7 +630,7 @@ export class SkillConversationExtractWorker {
       }
     });
 
-    // 写 DLQ 放在 mutex 外：Worker 持 extract-lock 独占该 agent，DLQ 没有别的写者。
+    // the DLQ write is outside the mutex: the Worker holds the extract-lock exclusively for that agent, and the DLQ has no other writers.
     if (deadTask) {
       const dead: SkillDeadTaskEntry = {
         ...(deadTask as SkillTaskEntry),
@@ -648,22 +648,22 @@ export class SkillConversationExtractWorker {
 }
 
 /**
- * 把 extract/sink 抛出的 Error 分成 transient (会自愈) 或 permanent (数据/schema)
- * 两类。规则简单，按错误消息里的 HTTP 状态码 + 关键字匹配；识别不出的按 transient
- * 兜底 —— 保守，不丢数据。
+ * Classify the Error thrown by extract/sink into transient (self-healing) or permanent (data/schema)
+ * two classes. The rules are simple, matching by the HTTP status code in the error message + keywords; unrecognized ones fall back to
+ * transient — conservative, no data loss.
  *
- * 完整分类矩阵见 docs/design/2026-07-21-memorycore-standalone-e2e.md §3.6 (7)。
+ * See docs/design/2026-07-21-memorycore-standalone-e2e.md §3.6 (7) for the full classification matrix.
  */
 export function classifyError(err: Error): "transient" | "permanent" {
   const raw = `${err?.name ?? ""} ${err?.message ?? ""}`;
   const msg = raw.toLowerCase();
-  // AbortError（LLM 请求被 signal cancel / timeout）视为 transient
+  // AbortError (LLM request cancelled by signal / timeout) is treated as transient
   if ((err?.name ?? "") === "AbortError") return "transient";
 
-  // ── permanent 优先匹配：显式的 4xx 数据/schema 错 ──
+  // ── permanent matched first: explicit 4xx data/schema errors ──
   // HTTP 400 / 422
   if (/(^|[^\d])(400|422)([^\d]|$)/.test(msg)) return "permanent";
-  // JSON 解析错 / schema 校验错 / "invalid response" 类
+  // JSON parse error / schema validation error / "invalid response" class
   if (
     msg.includes("json.parse") ||
     msg.includes("unexpected token") ||
@@ -676,10 +676,10 @@ export function classifyError(err: Error): "transient" | "permanent" {
     return "permanent";
   }
 
-  // ── transient 识别 ──
+  // ── transient recognition ──
   // HTTP 401/403/429/5xx
   if (/(^|[^\d])(401|403|429|5\d{2})([^\d]|$)/.test(msg)) return "transient";
-  // 网络错误常见错误码 / fetch 层
+  // common network error codes / fetch layer
   if (
     msg.includes("econnrefused") ||
     msg.includes("etimedout") ||
@@ -695,7 +695,7 @@ export function classifyError(err: Error): "transient" | "permanent" {
     return "transient";
   }
 
-  // 兜底：识别不出的按 transient 处理（不丢数据）
+  // fallback: unrecognized errors are handled as transient (no data loss)
   return "transient";
 }
 

@@ -1,15 +1,15 @@
 /**
- * 将 Gateway yaml `taskSource` 段回填到 process.env（**仅当 env 未设置时**）。
+ * Backfill the Gateway yaml `taskSource` section into process.env (**only when env is not set**).
  *
- * 解析优先级：process.env > yaml —— 与 metadata-env.ts / config.ts 全局约定一致。
- * task-source 的 registry / provider 仍只读 env，无需改调用签名。
+ * Resolution priority: process.env > yaml -- consistent with the global convention in metadata-env.ts / config.ts.
+ * The task-source registry / provider still only read env, so no call signature changes are needed.
  *
- * 为什么走「回填 env」而不是「把 config 传进 registry」：
- *   provider 的 env 名由 `TASK_SOURCE_<ID>_<后缀>` 动态拼成，后缀由 provider
- *   自己声明，通用层不预设。传结构化 config 下去等于把「env 名拼接规则」复制
- *   一份到 registry，两处规则容易漂移；回填 env 让 registry 保持唯一规则。
+ * Why "backfill env" rather than "pass config into the registry":
+ *   the env name of a provider is dynamically assembled as `TASK_SOURCE_<ID>_<SUFFIX>`, and the suffix is declared by the provider
+ *   itself, with no presets in the generic layer. Passing structured config down would copy the "env name assembly rule"
+ *   into the registry, and two copies of the rule can easily drift; backfilling env keeps a single rule in the registry.
  *
- * yaml 用驼峰（与 metadata / skill 等段一致），这里负责驼峰 → env 名的转换：
+ * The yaml uses camelCase (consistent with sections such as metadata / skill); this file converts camelCase -> env names:
  *
  *   taskSource:
  *     enabled: tapd                      → TASK_SOURCE_ENABLED
@@ -28,7 +28,7 @@ function setEnvIfEmpty(key: string, value: string | undefined): void {
   }
 }
 
-/** 驼峰键 → env 后缀。`mcpUrl` → `MCP_URL`；`siteBaseUrl` → `SITE_BASE_URL`。 */
+/** camelCase key -> env suffix. `mcpUrl` -> `MCP_URL`; `siteBaseUrl` -> `SITE_BASE_URL`. */
 function toEnvSuffix(key: string): string {
   return key
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -38,9 +38,9 @@ function toEnvSuffix(key: string): string {
 }
 
 /**
- * 在 TdaiGateway.start() 早期（任何 task-source 路由 / provider 调用之前）调用。
+ * Called early in TdaiGateway.start() (before any task-source route / provider call).
  *
- * 未配置 `taskSource` 时是 no-op —— 纯 env 部署不受影响。
+ * A no-op when `taskSource` is not configured -- pure-env deployments are unaffected.
  */
 export function applyTaskSourceEnvFromGatewayConfig(taskSource: GatewayTaskSourceConfig): void {
   setEnvIfEmpty("TASK_SOURCE_ENABLED", taskSource.enabled);

@@ -1,11 +1,11 @@
 /**
- * wiki 导入执行器 —— 拉取远端文档 → 写盘（不触发 ingest）。
+ * wiki import runner — fetch remote documents → write to disk (does not trigger ingest).
  *
- * 文档 §3.1 第 ⑤ 步规约：
- *   - 分批拉取：每批 20 个（fetchPages 批量优先，不支持则逐个降级）
- *   - 落盘文件名 `<标题>.md`：可读优先；标题重复/为空时去重或回退外部 id（见 buildFilename）
- *   - 分批写盘：≤10 文件 / ≤5MB（受 wikiService.rawWriteMany 约束）
- *   - 文档间延迟：WIKI_IMPORT_PAGE_DELAY_MS（默认 200ms，防外部 API 限流）
+ * Doc §3.1 step ⑤ spec:
+ *   - Batched fetching: 20 per batch (fetchPages batch preferred; fall back to one by one if unsupported)
+ *   - On-disk filename `<title>.md`: readability first; on duplicate/empty titles, dedupe or fall back to the external id (see buildFilename)
+ *   - Batched writes: ≤10 files / ≤5MB (constrained by wikiService.rawWriteMany)
+ *   - Delay between documents: WIKI_IMPORT_PAGE_DELAY_MS (default 200ms, to guard against external API rate limits)
  */
 
 import type { WikiSourceRegistry } from "./registry.js";
@@ -13,16 +13,16 @@ import type { RemotePageContent, SourceContext, WikiSourceProvider } from "./typ
 import type { RawWriteManyItem, WriteOutcome } from "../store/wiki-service.js";
 
 /**
- * 落盘的 wiki 服务最小接口（便于测试替身）。
+ * Minimal interface of the wiki service that writes to disk (easy to substitute in tests).
  *
- * 真实实现 WikiService.rawWriteMany 返回 WriteOutcome<RawWriteManyItem[]>：
- *   - 成功 → 写入项数组（长度即写入文件数）
- *   - wiki 不存在 → null
- *   - 正在处理中 → "processing"
+ * The real implementation WikiService.rawWriteMany returns WriteOutcome<RawWriteManyItem[]>:
+ *   - success → array of written items (length = number of files written)
+ *   - wiki does not exist → null
+ *   - currently processing → "processing"
  */
 /**
- * 复用真实 WriteOutcome，避免本地枚举遗漏失败态
- * （真实定义含 null / "processing" / "invalid_path" / "forbidden_path" / "too_large"）。
+ * Reuse the real WriteOutcome to avoid a local enum missing failure states
+ * (the real definition includes null / "processing" / "invalid_path" / "forbidden_path" / "too_large").
  */
 export type RawWriteOutcome = WriteOutcome<RawWriteManyItem[]>;
 
@@ -35,14 +35,14 @@ export interface WikiServiceLike {
   ): RawWriteOutcome | Promise<RawWriteOutcome>;
 
   /**
-   * 稳定文件名映射（可选）。由 WikiService 实现：把 externalId → filename
-   * 持久化到 wiki 目录，使**跨轮导入**复用同一文件名。
+   * Stable filename mapping (optional). Implemented by WikiService: persists externalId → filename
+   * to the wiki directory so that **cross-round imports** reuse the same filename.
    *
-   * 为什么需要：落盘文件名取自标题，而标题会变。定时同步每轮全量重拉、
-   * usedNames 去重只在单轮内有效，远端改名会导致：
-   *   新标题 → 新建文件；另一篇仍用旧标题 → 复用旧名并覆盖 → 内容串档 + 残留。
+   * Why needed: the on-disk filename is taken from the title, and titles change. Scheduled sync re-pulls everything each round,
+   * and usedNames dedupe is only valid within a single round, so a remote rename leads to:
+   *   new title → new file; another doc still using the old title → reuses the old name and overwrites → content mix-up + leftovers.
    *
-   * 未实现（测试替身/旧实现）→ 退化为按标题生成的旧行为。
+   * Not implemented (test stubs / old implementations) → degrades to the old behavior of generating by title.
    */
   readImportNameMap?(
     serviceId: string,
@@ -83,7 +83,7 @@ export interface ImportParams {
   teamId: string;
   wikiId: string;
   sourceUrl: string;
-  /** 指定导入的页；省略 → 全部非目录节点。 */
+  /** Pages to import; omitted → all non-directory nodes. */
   pageIds?: string[];
 }
 
@@ -100,7 +100,7 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
   const root = await provider.resolveRoot(ctx, p.sourceUrl);
   const all = await provider.listPages(ctx, root);
 
-  // 目录节点不可下载
+  // Directory nodes cannot be downloaded
   const targets = p.pageIds?.length
     ? all.filter((n) => !n.isDir && p.pageIds!.includes(n.externalId))
     : all.filter((n) => !n.isDir);
@@ -111,14 +111,14 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
   const failed: Array<{ id: string; error: string }> = [];
   const warnings: string[] = [];
   let imported = 0;
-  // 整轮导入内保持，避免不同批次产出同名文件互相覆盖
+  // Kept across the whole import round, to avoid different batches producing same-named files that overwrite each other
   const usedNames = new Set<string>();
-  // 列表阶段（listPages）的标题是可靠的，而 fetchPage 拿到的内容常无 title
-  // （不少平台的内容接口只回正文、不带标题），故落盘优先用这里的标题兜底。
+  // Titles from the listing stage (listPages) are reliable, whereas content from fetchPage often has no title
+  // (many platforms' content APIs return only the body, without a title), so on-disk naming prefers the title here as a fallback.
   const titleById = new Map(targets.map((t) => [t.externalId, t.title]));
 
-  // ── 稳定文件名：externalId → filename（跨轮复用）──
-  // 标题会变，不能当身份；已导入过的文档一律复用历史文件名。
+  // ── Stable filename: externalId → filename (reused across rounds) ──
+  // Titles change and can't serve as identity; documents already imported always reuse their historical filename.
   const canUseMap =
     typeof p.wikiService.readImportNameMap === "function" &&
     typeof p.wikiService.writeImportNameMap === "function";
@@ -126,7 +126,7 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
     ? p.wikiService.readImportNameMap!(p.serviceId, p.teamId, p.wikiId, p.providerId)
     : null;
   if (nameByExternalId) {
-    // 历史文件名先占座：防止新文档生成同名文件，顶掉旧文档的位置
+    // Historical filenames claim their seats first: prevent new documents from generating same-named files that displace the old document's slot
     for (const fn of Object.values(nameByExternalId)) {
       if (fn) usedNames.add(fn);
     }
@@ -140,7 +140,7 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
       try {
         contents = await provider.fetchPages(ctx, ids);
       } catch (err) {
-        // 批量失败 → 降级逐个
+        // Batch failed → fall back to one by one
         warnings.push(
           `batch fetch failed, falling back to per-page: ${
             err instanceof Error ? err.message : String(err)
@@ -156,13 +156,13 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
       if (c.fidelity === "lossy") warnings.push(`${c.externalId}: content lossy`);
     }
 
-    // 落盘：文件名用标题（可读），外部 id 仅用于重名兜底
+    // Write to disk: filename uses the title (readable); the external id is only used as a fallback for name collisions
     const files = contents
       .filter((c) => c.markdown)
       .map((c) => {
-        // c.title 可能为空（provider 只回正文），用列表阶段标题兜底
+        // c.title may be empty (the provider returns only the body); fall back to the listing-stage title
         const title = c.title || titleById.get(c.externalId);
-        // 已导入过 → 复用历史文件名：远端改名也不串档、不新建垃圾文件
+        // Already imported → reuse the historical filename: a remote rename neither mixes up files nor creates junk files
         const known = nameByExternalId?.[c.externalId];
         const filename = known || buildFilename(title, c.externalId, usedNames);
         if (nameByExternalId) nameByExternalId[c.externalId] = filename;
@@ -176,7 +176,7 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
         p.wikiId,
         writeBatch,
       );
-      // WriteOutcome：数组=成功；其余为失败态（null / processing / invalid_path / forbidden_path / too_large）
+      // WriteOutcome: array = success; the rest are failure states (null / processing / invalid_path / forbidden_path / too_large)
       if (!Array.isArray(res)) {
         if (res === "processing") {
           warnings.push(`wiki ${p.wikiId} is processing, batch skipped`);
@@ -188,7 +188,7 @@ export async function runImport(p: ImportParams): Promise<ImportResult> {
     }
   }
 
-  // 映射落盘：文件已写完，保存失败不阻断本轮结果（只影响下一轮复用）
+  // Mapping persistence: the file is already written; a save failure does not block this round's result (only affects next-round reuse)
   if (canUseMap && nameByExternalId) {
     p.wikiService.writeImportNameMap!(
       p.serviceId,
@@ -222,15 +222,15 @@ async function fetchOneByOne(
 }
 
 /**
- * 生成落盘文件名：`<标题>.md`（可读，便于用户在 raw 列表里识别）。
+ * Generate the on-disk filename: `<title>.md` (readable, so users can recognize it in the raw list).
  *
- * 相比"用外部 id 命名"的可读性优势，代价是标题变更会产生新文件名。
- * 这里做三层防护，避免改名/重名导致丢文件或互相覆盖：
- *   1. 净化：去掉路径分隔符与控制字符，防目录穿越与非法文件名
- *   2. 截断：过长的标题截到 120 字符（文件系统常见 255 字节上限，留足中文余量）
- *   3. 去重：同名追加 -2 / -3…；标题为空则回退该页的外部 id
+ * Compared with the readability advantage of "naming by external id", the cost is that a title change produces a new filename.
+ * Three layers of protection here, to avoid renames/duplicate names causing lost files or mutual overwrites:
+ *   1. Sanitize: strip path separators and control characters, guarding against directory traversal and illegal filenames
+ *   2. Truncate: cut overly long titles to 120 characters (filesystems commonly cap at 255 bytes; leave ample margin for CJK)
+ *   3. Dedupe: append -2 / -3… on same names; if the title is empty, fall back to the page's external id
  *
- * `usedNames` 由调用方跨批次持有，保证整轮导入内唯一。
+ * `usedNames` is held across batches by the caller, ensuring uniqueness within the whole import round.
  */
 function buildFilename(
   title: string | undefined,
@@ -238,14 +238,14 @@ function buildFilename(
   usedNames: Set<string>,
 ): string {
   const cleaned = (title ?? "")
-    // 去掉路径分隔符与 Windows 保留字符，防目录穿越
+    // Strip path separators and Windows reserved characters, guarding against directory traversal
     .replace(/[/\\:*?"<>|]/g, "")
-    // 去掉控制字符（换行/制表符等），避免文件名混入不可见字符
+    // Strip control characters (newlines/tabs etc.), to avoid invisible characters in filenames
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .trim()
-    .replace(/^\.+/, "") // 避免 . / .. 这类特殊名
-    .slice(0, 120) // 文件系统常见 255 字节上限，留足中文余量
+    .replace(/^\.+/, "") // avoid special names like . / ..
+    .slice(0, 120) // filesystems commonly cap at 255 bytes; leave ample margin for CJK
     .trim();
 
   const base = cleaned || externalId;
@@ -259,7 +259,7 @@ function buildFilename(
   return name;
 }
 
-/** 按「文件数 + 字节数」双上限分包。 */
+/** Split into packages by dual limits of "file count + byte count". */
 function packByLimit(
   files: Array<{ filename: string; content: string }>,
   maxFiles: number,

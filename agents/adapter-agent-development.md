@@ -1,237 +1,237 @@
-# 新客户端二开适配指南
+# New Client Adaptation Guide
 
-> **定位**：如果你要给 Memory Proxy 接入一个当前**未适配**的新 AI Agent 客户端（Aider / Cursor / 某新桌面 IDE / 自研 CLI / 某未来 harness），按本指南从"抓包摸底 → 列适配范围 → 20 步代码 → e2e 通过"一路做下来。已经实证过 5 家客户端（Claude Code / CodeBuddy / Codex / Workbuddy / dsh），把每次踩过的通用坑和适配点固化下来，避免下一个客户端再全部重踩一遍。
+> **Purpose**: If you want to integrate a new AI Agent client that Memory Proxy does **not yet support** (Aider / Cursor / a new desktop IDE / a home-grown CLI / some future harness), follow this guide all the way from "packet capture reconnaissance -> define the adaptation scope -> 20 code steps -> e2e passing". Five clients have already been verified in practice (Claude Code / CodeBuddy / Codex / Workbuddy / dsh); the common pitfalls and adaptation points hit each time are codified here so the next client does not have to step on all of them again.
 >
-> **别偷懒跳步骤**——每一步都是从踩坑中抽出来的。遇到坑先查[§3 常见坑速查](#阶段-3-常见坑速查)。
+> **Don't skip steps** — every step was distilled from a pitfall. When you hit a problem, check [Phase 3: Common Pitfalls Quick Reference](#phase-3-common-pitfalls-quick-reference) first.
 >
-> **参考实现**：dsh 是目前踩坑最完整的接入案例，代码全在本仓库内，见文末[参考实现：dsh（按功能分组）](#参考实现dsh按功能分组)一节——里面**按适配范围逐项**列出 dsh 是在哪一处改的，可以对着自己的客户端照抄。
+> **Reference implementation**: dsh is currently the most complete integration case in terms of pitfalls hit, and all of its code is in this repo. See the section at the end, [Reference Implementation: dsh (Grouped by Capability)](#reference-implementation-dsh-grouped-by-capability) — it lists, **item by item per adaptation scope**, where dsh was changed, so you can copy it for your own client.
 
 ---
 
-## 阶段 0：抓包摸底（30–60 分钟，不改代码）
+## Phase 0: Packet Capture Reconnaissance (30–60 minutes, no code changes)
 
-**为什么先抓包**：假设跨客户端等价 = 每次都踩坑。5 家客户端**每一家**的 body shape / session_id header / 元数据 wrapper / options 数量上限 / ask-user tool 名都不一样。**先摸清 5 处差异**再动代码。
+**Why capture first**: assuming clients are equivalent = stepping on a pitfall every time. For **each** of the 5 clients, the body shape / session_id header / metadata wrapper / options count limit / ask-user tool name are all different. **Pin down the 5 differences first**, then touch the code.
 
-### 0.1 抓 3–5 条真实请求
+### 0.1 Capture 3–5 real requests
 
-用 **mitmproxy**：
+Use **mitmproxy**:
 
 ```bash
-pip3 install --user mitmproxy    # 已装则跳
+pip3 install --user mitmproxy    # skip if already installed
 mitmdump -p 8888 -s /tmp/capture.py --set stream_large_bodies=100m
 ```
 
-`/tmp/capture.py` 里的 addon 只做一件事：按 `user-agent` grep 出目标客户端的请求，把 request/response body 各存一份 JSON。把 grep 关键字换成新客户端指纹即可。
+The addon in `/tmp/capture.py` does only one thing: grep requests of the target client by `user-agent` and save each request/response body as JSON. Just swap the grep keyword for the new client's fingerprint.
 
-**关键**：Node ≥18 客户端要加 `NODE_OPTIONS='--use-env-proxy'` 才认 `HTTPS_PROXY`（undici 默认不认）。见[§3 坑 G](#坑-g抓包-node-22-https_proxy-无效)。
+**Key**: Node >=18 clients need `NODE_OPTIONS='--use-env-proxy'` to honor `HTTPS_PROXY` (undici ignores it by default). See [Pitfall G in Phase 3](#pitfall-g-https_proxy-has-no-effect-when-capturing-on-node-22).
 
-### 0.2 抓完对着 5 处差异填表
+### 0.2 Fill in the table for the 5 differences after capturing
 
-新建 `<client>-recon/` 目录（放本仓库外部或本地）存 fixture + 分析，按下表逐项对照：
+Create a `<client>-recon/` directory (outside this repo or local) to store fixtures + analysis, and compare item by item against the table below:
 
-| 维度 | 抓包看什么 |
+| Dimension | What to look at in the capture |
 |---|---|
-| **body shape** | body 主字段 = `messages[]`（OpenAI/Anthropic）还是 `input[]`（OpenAI Responses）？用户文本在 `messages[i].content[j].text` 还是 `messages[i].content`（str）还是 `input[i].content[j].text`？ |
-| **session_id header** | 有哪些 header，哪个是 sid？有没有 body 里的备份字段？ |
-| **首帧元数据 role=user** | 数一下客户端在 `messages[]` 里塞几条 role=user，识别每条的稳定签名（如 `<system-reminder>` / runtime context / available_skills 等前缀）——只有真用户输入那条应该被 proxy 当"用户消息"处理，其它元数据条目要过滤 |
-| **ask-user tool 名 + shape** | 找客户端源码 `packages/*/tool-ask-user/**` 或类似，拿 tool 名 + 参数 schema（必填字段 / snake vs camel case） |
-| **options 数量上限** | 打开客户端 UI 源码搜 `options.length` / `maxOptions` / `slice`；无截断 = 不需要分页 |
+| **body shape** | Is the main body field `messages[]` (OpenAI/Anthropic) or `input[]` (OpenAI Responses)? Is the user text in `messages[i].content[j].text`, in `messages[i].content` (str), or in `input[i].content[j].text`? |
+| **session_id header** | Which headers exist, and which one is the sid? Is there a backup field in the body? |
+| **First-frame metadata role=user** | Count how many role=user messages the client stuffs into `messages[]`, and identify a stable signature for each (such as prefixes like `<system-reminder>` / runtime context / available_skills) — only the one that is the real user input should be treated by the proxy as the "user message"; the other metadata entries must be filtered out |
+| **ask-user tool name + shape** | Find the client source `packages/*/tool-ask-user/**` or similar, and get the tool name + parameter schema (required fields / snake vs camel case) |
+| **options count limit** | Open the client UI source and search `options.length` / `maxOptions` / `slice`; no truncation = no pagination needed |
 
-**这 5 处差异决定后续代码改动**。漏一个都会踩坑。
+**These 5 differences determine the subsequent code changes**. Missing any one will lead to a pitfall.
 
-### 0.3 判断需不需要 aux 短路
+### 0.3 Decide whether an aux short-circuit is needed
 
-看客户端会不会发**独立类型请求**（compaction / title-gen / memgen 等）。判据：
+Check whether the client sends **independent types of requests** (compaction / title-gen / memgen, etc.). Criteria:
 
-- 有独立 endpoint 路径？（codex 有 `/responses/compact`，workbuddy 类似）
-- 有独立 header？（dsh 有 `x-deepseek-harness-compact:1`）
-- 靠 body 特征？（dsh title-gen 靠 tools 缺 + `thinking.disabled` + `max_tokens ≤ 128` + system prompt 前缀）
+- Does it have a separate endpoint path? (codex has `/responses/compact`, workbuddy is similar)
+- Does it have a separate header? (dsh has `x-deepseek-harness-compact:1`)
+- Does it rely on body characteristics? (dsh title-gen relies on missing tools + `thinking.disabled` + `max_tokens <= 128` + a system prompt prefix)
 
-**任一有 aux 请求的客户端，adapter `classifyRequest` 必须能判**。CC/CB 全 main 无 aux，codex/workbuddy/dsh 都有。
+**For any client that has aux requests, the adapter `classifyRequest` must be able to classify them**. CC/CB are all main with no aux; codex/workbuddy/dsh all have aux.
 
 ---
 
-## 阶段 1：适配范围一览（先明确要做什么）
+## Phase 1: Adaptation Scope Overview (Clarify What to Do First)
 
-Memory Proxy 对一个客户端**至少**做以下 10 件事。别一上来就 diff dsh、抄代码——**先对着下表勾一勾**：哪些能力**必须**在新客户端上跑起来，哪些**可选**，哪些**不适用**。列表勾完再进阶段 2 写代码，工作量心里有数。
+Memory Proxy does the following 10 things for a client **at minimum**. Don't start by diffing dsh and copying code — **first tick through the table below**: which capabilities **must** run on the new client, which are **optional**, and which are **not applicable**. Once the list is ticked, move on to Phase 2 and write code, and you will have a feel for the workload.
 
-| # | 适配能力 | 解决什么问题 | 必需? | 关联模块 |
+| # | Adaptation capability | Problem it solves | Required? | Related modules |
 |---|---|---|---|---|
-| 1 | **路由 & 白名单** | 让 proxy 认识 `/<client>/<spaceId>/...` 这条路径、把 `<client>` 加进各种正则白名单，否则 auth 401 / 请求走 404 fall-through | ✅ 必需 | `MemoryProxy/src/server.ts`、`MemoryProxy/src/credit-reporter.ts` |
-| 2 | **Session ID 解析** | 从客户端 header/body 里找出稳定的"会话唯一标识"，让同一次对话所有请求落到同一个 sessionKey；漏了 → 所有会话撞成同一个 key，session-init 状态错乱 | ✅ 必需 | `MemoryProxy/src/session/session-key.ts::resolveConversationId` |
-| 3 | **请求分类（main / aux / headless）** | 区分"真用户对话"和"客户端后台辅助请求"（title-gen / compaction / memgen）；aux 必须**全部跳过** session-init / mem / injection / L0 / skill trigger，直接透传 | ✅ 必需 | `MemoryProxy/src/agent-adapters/<client>.ts::classifyRequest`、`MemoryProxy/src/handler.ts` 顶部 |
-| 4 | **用户文本提取** | 从 body 里挑出"真用户输入"字符串（给 mem 命令识别 / L0 归档 / skill 抽取用），跳过元数据 role=user | ✅ 必需 | `MemoryProxy/src/agent-adapters/<client>.ts::extractUserText`、`MemoryProxy/src/session/store.ts::tryHistoryScan`、`MemoryProxy/src/session/codebuddy/init.ts::isFreshCBConversation` |
-| 5 | **Session Init Form** | 首次对话弹一个 4 步表单让用户选 team / agent / task（`asset_confirm → team → agent → task`）；载体是客户端 preset 里挂的 `ask_user_question`（或同类）tool_call | ⚠️ 客户端有交互能力 = 必需；纯 CLI headless = 可选（走坑 C 的 bypass） | `MemoryProxy/src/session/<client>/form.ts`、`MemoryProxy/src/session/index.ts` dispatch、`MemoryProxy/src/session/codebuddy/init.ts` split-stage gate |
-| 6 | **Header 预选（跳过 form）** | CI/CD / 自动化 / 无法响应 form 的客户端可以直接携带 `x-team-id` + `x-agent-id` + `x-task-id` + `x-conversation-id` header 一步注册 session；已通用支持，多数客户端**不用改代码** | ➖ 可选（已通用） | 无需改动，由 `MemoryProxy/src/session/registrar.ts` 通用处理 |
-| 7 | **资产注入（Injection）** | 每轮主对话都在 system message 里塞 `<agent_skills>` / `<user_memory>` / `<session_context>` / `<tdai_profile_memory>` 等资产块，把团队记忆送到 LLM | ✅ 必需 | 用现成 `MemoryProxy/src/injection/adapters/{openai,anthropic}.ts`；若客户端 wire 有特殊字段（如 dsh `reasoning_content`）要加 metadata round-trip |
-| 8 | **Wire 兼容 / 特殊字段透传** | 客户端可能硬校验某些非标字段必须往返带（dsh 的 `reasoning_content` / DeepSeek thinking chain），injection pipeline 的 parse→serialize 不能抹掉 | ⚠️ 客户端有特殊字段才需要 | `MemoryProxy/src/injection/adapters/openai.ts` 或 `anthropic.ts` 的 `parseMessage` / `serializeMessage` 用 `ContextMessage.metadata` 存 |
-| 9 | **Mem 命令拦截** | 用户在对话里发 `mem:help` / `mem:sync` / `mem:create-skill` / `mem:session-reset` 时，proxy 拦截并返回短路响应（打开面板 / 刷新资产 / 触发抽取 / 重置状态），不走上游 LLM | ✅ 客户端有 form 能力时全部生效；headless bypass 客户端只支持部分 | `MemoryProxy/src/handler.ts` mem-command 段（通用，只要 `agentSource` 认得就自动生效） |
-| 10 | **L0 归档 / Skill 抽取** | 主对话双向消息落 `tdai-recorder:write-l0`；对话超阈值或用户 force-archive 时触发 `skill/conversation/add` 让 core 抽 skill | ✅ 必需 | `MemoryProxy/src/handler.ts` 尾部（通用，只要 aux/headless 判据正确就自动生效） |
-| 11 | **观测埋点 / Langfuse** | trace 带 `agent_source:<client>` tag、session-init 各阶段 log、tool_call 埋点，方便线上排查 | ✅ 必需（一行 tag，几乎零成本） | `agentAdapter.agentKind` 通用注入；确认 langfuse trace tag 里能看到新 `agent_source` |
+| 1 | **Routing & allowlist** | Make the proxy recognize the path `/<client>/<spaceId>/...` and add `<client>` to the various regex allowlists; otherwise auth returns 401 / requests fall through to 404 | ✅ Required | `MemoryProxy/src/server.ts`, `MemoryProxy/src/credit-reporter.ts` |
+| 2 | **Session ID resolution** | Find a stable "unique conversation identifier" in the client header/body so that all requests of the same conversation land on the same sessionKey; if missed → all sessions collide into the same key and the session-init state gets corrupted | ✅ Required | `MemoryProxy/src/session/session-key.ts::resolveConversationId` |
+| 3 | **Request classification (main / aux / headless)** | Distinguish "real user conversation" from "client background auxiliary requests" (title-gen / compaction / memgen); aux must **entirely skip** session-init / mem / injection / L0 / skill trigger and pass straight through | ✅ Required | `MemoryProxy/src/agent-adapters/<client>.ts::classifyRequest`, top of `MemoryProxy/src/handler.ts` |
+| 4 | **User text extraction** | Pick the "real user input" string out of the body (used for mem command recognition / L0 archiving / skill extraction), skipping metadata role=user | ✅ Required | `MemoryProxy/src/agent-adapters/<client>.ts::extractUserText`, `MemoryProxy/src/session/store.ts::tryHistoryScan`, `MemoryProxy/src/session/codebuddy/init.ts::isFreshCBConversation` |
+| 5 | **Session Init Form** | On the first conversation, pop up a 4-step form for the user to pick team / agent / task (`asset_confirm → team → agent → task`); the carrier is the `ask_user_question` (or similar) tool_call hung on the client preset | ⚠️ Client has interactive capability = required; pure CLI headless = optional (use the bypass from Pitfall C) | `MemoryProxy/src/session/<client>/form.ts`, `MemoryProxy/src/session/index.ts` dispatch, `MemoryProxy/src/session/codebuddy/init.ts` split-stage gate |
+| 6 | **Header preselection (skip the form)** | CI/CD / automation / clients that cannot respond to a form can directly carry the `x-team-id` + `x-agent-id` + `x-task-id` + `x-conversation-id` headers to register a session in one step; already generically supported, most clients **need no code changes** | ➖ Optional (already generic) | No changes needed; handled generically by `MemoryProxy/src/session/registrar.ts` |
+| 7 | **Asset injection (Injection)** | On every main conversation turn, stuff asset blocks such as `<agent_skills>` / `<user_memory>` / `<session_context>` / `<tdai_profile_memory>` into the system message, delivering team memory to the LLM | ✅ Required | Use the existing `MemoryProxy/src/injection/adapters/{openai,anthropic}.ts`; if the client wire has special fields (such as dsh `reasoning_content`), add a metadata round-trip |
+| 8 | **Wire compatibility / special field passthrough** | The client may strictly validate that certain non-standard fields are round-tripped (dsh's `reasoning_content` / DeepSeek thinking chain); the injection pipeline's parse→serialize must not erase them | ⚠️ Only needed if the client has special fields | `parseMessage` / `serializeMessage` in `MemoryProxy/src/injection/adapters/openai.ts` or `anthropic.ts`, stored via `ContextMessage.metadata` |
+| 9 | **Mem command interception** | When the user sends `mem:help` / `mem:sync` / `mem:create-skill` / `mem:session-reset` in the conversation, the proxy intercepts and returns a short-circuit response (open the panel / refresh assets / trigger extraction / reset state) without going to the upstream LLM | ✅ All take effect when the client has form capability; headless bypass clients support only some | The mem-command section of `MemoryProxy/src/handler.ts` (generic; takes effect automatically as long as `agentSource` is recognized) |
+| 10 | **L0 archiving / Skill extraction** | Both directions of main-conversation messages are written to `tdai-recorder:write-l0`; when the conversation exceeds a threshold or the user force-archives, `skill/conversation/add` is triggered to let core extract skills | ✅ Required | Tail of `MemoryProxy/src/handler.ts` (generic; takes effect automatically as long as the aux/headless criteria are correct) |
+| 11 | **Observability / Langfuse** | The trace carries the `agent_source:<client>` tag, session-init stage logs, and tool_call instrumentation, to ease online troubleshooting | ✅ Required (one-line tag, nearly zero cost) | `agentAdapter.agentKind` is injected generically; confirm the new `agent_source` is visible in the langfuse trace tags |
 
-**判定原则**：
+**Decision principles**:
 
-- 一行"必需"的能力**全部做完**才能算基本可用
-- "可选"的按客户端场景决定（CLI-only 客户端可以跳 5、9，只保留 6 header 预选）
-- 客户端有独特的 wire 字段（如 DeepSeek 思维链）→ 8 号能力必做，否则上游 400
-- 客户端会发 title-gen / compact 等 aux → 3 号能力必做，否则 aux 请求误弹 form / 误写 L0
+- Capabilities marked "Required" must **all be done** for it to count as basically usable
+- "Optional" ones are decided by the client scenario (CLI-only clients can skip 5 and 9 and keep only 6, header preselection)
+- If the client has unique wire fields (such as DeepSeek's thinking chain) → capability 8 is a must, otherwise the upstream returns 400
+- If the client sends aux requests such as title-gen / compact → capability 3 is a must, otherwise aux requests wrongly pop up a form / wrongly write L0
 
-**估工时**：一次完整适配（覆盖 1–11）在有实证 dsh 参考的前提下，抓包 + 编码 + 单测 + e2e 大约 3–4 个工作日；踩到未见过的坑另算。
+**Effort estimate**: a complete adaptation (covering 1–11), given the verified dsh reference, takes about 3–4 working days for capture + coding + unit tests + e2e; pitfalls never seen before are extra.
 
 ---
 
-## 阶段 2：代码改动（20 步 checklist，按顺序）
+## Phase 2: Code Changes (20-step checklist, in order)
 
-对着阶段 1 表格勾出来的能力，落到具体文件。每步都有对应的能力编号（能力 #1 = "路由 & 白名单"，以此类推）。
+Take the capabilities ticked in the Phase 1 table and land them in concrete files. Each step has a corresponding capability number (capability #1 = "Routing & allowlist", and so on).
 
-### 2.1 骨架 4 步（30 分钟）—— 对应能力 #1、#3、#4
+### 2.1 Skeleton, 4 steps (30 minutes) — maps to capabilities #1, #3, #4
 
-| # | 文件 | 改动 | 对应能力 |
+| # | File | Change | Capability |
 |---|---|---|---|
-| 1 | `MemoryProxy/src/agent-adapters/<client>.ts` | 新建 —— `classifyRequest` 三重信号 + `extractUserText` | #3 #4 |
-| 2 | `MemoryProxy/src/agent-adapters/types.ts` | `AgentKind` 联合加 `"<client>"` | #3 |
-| 3 | `MemoryProxy/src/agent-adapters/index.ts` | factory switch 加 case | #3 |
-| 4 | `MemoryProxy/src/server.ts` | 加 9 条路由（带/不带 `v1` × 主端点/aux/cost-guard/analyse marker），对照 dsh 段抄 | #1 |
+| 1 | `MemoryProxy/src/agent-adapters/<client>.ts` | New — `classifyRequest` triple signal + `extractUserText` | #3 #4 |
+| 2 | `MemoryProxy/src/agent-adapters/types.ts` | Add `"<client>"` to the `AgentKind` union | #3 |
+| 3 | `MemoryProxy/src/agent-adapters/index.ts` | Add a case to the factory switch | #3 |
+| 4 | `MemoryProxy/src/server.ts` | Add 9 routes (with/without `v1` × main endpoint/aux/cost-guard/analyse marker), copy from the dsh section | #1 |
 
-### 2.2 白名单 & Session 识别 3 步 —— 对应能力 #1、#2、#7
+### 2.2 Allowlist & Session identification, 3 steps — maps to capabilities #1, #2, #7
 
-| # | 文件 | 改动 | 对应能力 |
+| # | File | Change | Capability |
 |---|---|---|---|
-| 5 | `MemoryProxy/src/credit-reporter.ts::extractSpaceIdFromPath` | 正则加 `\|<client>` —— **漏了会返 auth 401 `missing service_id`** | #1 |
-| 6 | `MemoryProxy/src/session/session-key.ts::resolveConversationId` | header fallback 链加客户端专属 session header | #2 |
-| 7 | 无独立 profile 需要时跳过；有的话 `MemoryProxy/src/injection/agents/<client>/*` 一套（参考 `MemoryProxy/src/injection/agents/workbuddy/`） | #7 |
+| 5 | `MemoryProxy/src/credit-reporter.ts::extractSpaceIdFromPath` | Add `\|<client>` to the regex — **if missed it returns auth 401 `missing service_id`** | #1 |
+| 6 | `MemoryProxy/src/session/session-key.ts::resolveConversationId` | Add the client-specific session header to the header fallback chain | #2 |
+| 7 | Skip if no standalone profile is needed; otherwise a set under `MemoryProxy/src/injection/agents/<client>/*` (see `MemoryProxy/src/injection/agents/workbuddy/`) | #7 |
 
-### 2.3 Session Init Form 载体 4 步 —— 对应能力 #5
+### 2.3 Session Init Form carrier, 4 steps — maps to capability #5
 
-| # | 文件 | 改动 | 对应能力 |
+| # | File | Change | Capability |
 |---|---|---|---|
-| 8 | `MemoryProxy/src/session/<client>/form.ts` | 新建 —— tool 名 / 参数 shape 完全按客户端 preset 定，别复用别家 | #5 |
-| 9 | `MemoryProxy/src/session/index.ts` | 加 dispatch 分支（参考 workbuddy 那段：CB 状态机产 `formData` 后外层重渲染） | #5 |
-| 10 | `MemoryProxy/src/session/codebuddy/init.ts` split-stage gate | 5 处 gate 加 `\|\| agentSource === "<client>"` —— 漏了会一次同问 agent+task 直接 bypass | #5 |
-| 11 | `MemoryProxy/src/session/codebuddy/cleaner.ts` `tool_call_id` 正则 | 加 `\|<client>_` 前缀识别 | #5 |
+| 8 | `MemoryProxy/src/session/<client>/form.ts` | New — tool name / parameter shape strictly follow the client preset; don't reuse another client's | #5 |
+| 9 | `MemoryProxy/src/session/index.ts` | Add a dispatch branch (see the workbuddy section: the CB state machine produces `formData` and the outer layer re-renders) | #5 |
+| 10 | `MemoryProxy/src/session/codebuddy/init.ts` split-stage gate | Add `\|\| agentSource === "<client>"` at 5 gates — if missed, agent+task are asked together and it bypasses directly | #5 |
+| 11 | `MemoryProxy/src/session/codebuddy/cleaner.ts` `tool_call_id` regex | Add the `\|<client>_` prefix recognition | #5 |
 
-### 2.4 元数据过滤 & Wire 兼容 3 步 —— 对应能力 #4、#8
+### 2.4 Metadata filtering & Wire compatibility, 3 steps — maps to capabilities #4, #8
 
-| # | 文件 | 改动 | 对应能力 |
+| # | File | Change | Capability |
 |---|---|---|---|
-| 12 | `MemoryProxy/src/session/codebuddy/init.ts::isFreshCBConversation` | 按客户端首帧元数据签名跳过 user 计数 —— 漏了会误判"有历史"直接 skip session-init | #4 |
-| 13 | `MemoryProxy/src/session/store.ts::tryHistoryScan` | 同款过滤逻辑 | #4 |
-| 14 | wire 特殊字段 round-trip（如 dsh 的 `reasoning_content`） —— `MemoryProxy/src/injection/adapters/openai.ts` 或 `anthropic.ts` 的 parse/serialize 用 metadata 保留；必须用 debug env 双向 body dump 对比验证 | #8 |
+| 12 | `MemoryProxy/src/session/codebuddy/init.ts::isFreshCBConversation` | Skip user counting by the client's first-frame metadata signature — if missed it wrongly judges "has history" and skips session-init | #4 |
+| 13 | `MemoryProxy/src/session/store.ts::tryHistoryScan` | Same filtering logic | #4 |
+| 14 | Wire special field round-trip (such as dsh's `reasoning_content`) — preserve via metadata in the parse/serialize of `MemoryProxy/src/injection/adapters/openai.ts` or `anthropic.ts`; must be verified with a debug env bidirectional body dump comparison | #8 |
 
-### 2.5 Handler 短路 2 步 —— 对应能力 #3、#5、#9、#10
+### 2.5 Handler short-circuit, 2 steps — maps to capabilities #3, #5, #9, #10
 
-| # | 文件 | 改动 | 对应能力 |
+| # | File | Change | Capability |
 |---|---|---|---|
-| 15 | `MemoryProxy/src/handler.ts` 顶部 | 调 `agentAdapter.classifyRequest(body, path, headers)` 分类；`isAuxiliary=true` 时 session-init / mem / injection / L0 / skill trigger **全部跳过**，直接透传 | #3 #9 #10 |
-| 16 | `MemoryProxy/src/handler.ts` 顶部 | 若客户端有 CLI headless 场景（preset 少 tools 里无 ask-user），加类似 dsh 的 `_headless` 判据，同 aux 一样跳过 form；mem 命令给出提示或降级到 header 预选 | #5 #9 |
+| 15 | Top of `MemoryProxy/src/handler.ts` | Call `agentAdapter.classifyRequest(body, path, headers)` to classify; when `isAuxiliary=true`, session-init / mem / injection / L0 / skill trigger are **all skipped** and the request passes straight through | #3 #9 #10 |
+| 16 | Top of `MemoryProxy/src/handler.ts` | If the client has a CLI headless scenario (the preset lacks tools, no ask-user among them), add a `_headless` criterion like dsh's, skipping the form like aux; mem commands give a hint or degrade to header preselection | #5 #9 |
 
-### 2.6 测试 & 验证 4 步 —— 对应能力 #5、#9、#10、#11
+### 2.6 Testing & verification, 4 steps — maps to capabilities #5, #9, #10, #11
 
-| # | 内容 | 对应能力 |
+| # | Content | Capability |
 |---|---|---|
-| 17 | 单测：adapter `classifyRequest` + form builder shape + real-capture fixture 端到端 —— 落到 `MemoryProxy/src/__tests__/agent-adapters/<client>.test.ts` + `MemoryProxy/src/session/<client>/__tests__/form.test.ts` | #3 #5 |
-| 18 | curl smoke：直接打 `/<client>/default/*` 触发 form，验证 session-init 三态转移（`asset_confirm → team → agent → task`） | #5 |
-| 19 | web e2e（推荐 playwright）：**真跑一遍客户端 web UI**（session-init 4 步 + 1 轮真对话，验证注入 + 归档 + langfuse trace） | #5 #7 #10 #11 |
-| 20 | mem / L0 / skill 端到端：已初始化 session 里发 `mem:help` / `mem:sync` / `mem:create-skill` / 长对话触发 skill 提取 / grep proxy log 验 L0 写入 | #9 #10 |
+| 17 | Unit tests: adapter `classifyRequest` + form builder shape + real-capture fixture end-to-end — placed in `MemoryProxy/src/__tests__/agent-adapters/<client>.test.ts` + `MemoryProxy/src/session/<client>/__tests__/form.test.ts` | #3 #5 |
+| 18 | curl smoke: hit `/<client>/default/*` directly to trigger the form, and verify the three-state transitions of session-init (`asset_confirm → team → agent → task`) | #5 |
+| 19 | web e2e (playwright recommended): **actually run the client web UI** (session-init 4 steps + 1 real conversation turn, verifying injection + archiving + langfuse trace) | #5 #7 #10 #11 |
+| 20 | mem / L0 / skill end-to-end: in an already-initialized session send `mem:help` / `mem:sync` / `mem:create-skill` / a long conversation to trigger skill extraction / grep the proxy log to verify L0 writes | #9 #10 |
 
 ---
 
-## 阶段 3：常见坑速查
+## Phase 3: Common Pitfalls Quick Reference
 
-前 5 家客户端每一家都踩过至少 3 个坑。**先查这里再自己 debug**。
+Each of the first 5 clients hit at least 3 pitfalls. **Check here first before debugging on your own**.
 
-### 坑 A：`missing service_id (spaceId not in request path)` 401
+### Pitfall A: `missing service_id (spaceId not in request path)` 401
 
-**根因**：`credit-reporter.ts::extractSpaceIdFromPath` 白名单正则没含新客户端名。
+**Root cause**: the allowlist regex in `credit-reporter.ts::extractSpaceIdFromPath` does not include the new client name.
 
-**修**：加进 `^(claude-code|codebuddy|codex|cursor|hermes|openclaw|workbuddy|dsh|<new-client>)$`。
+**Fix**: add it to `^(claude-code|codebuddy|codex|cursor|hermes|openclaw|workbuddy|dsh|<new-client>)$`.
 
-### 坑 B：session-init form 弹了 / 或者永远不弹
+### Pitfall B: the session-init form pops up / or never pops up
 
-- **永远不弹** = `resolveConversationId` fallback 没识别客户端 session header → sessionKey 落到 keyId 兜底，或者 `isFreshCBConversation` 把首帧元数据 user 当"有历史" → 走 markerless bypass。
-  - 修 `session-key.ts` fallback 链 + `codebuddy/init.ts::isFreshCBConversation` + `store.ts::tryHistoryScan` 加元数据签名过滤
-- **弹了但选完 agent 没弹 task** = split-stage gate 没加新客户端 → 走 CB 老一次同问 pending_agent_task → task 空直接 bypass。
-  - 修 `codebuddy/init.ts` 5 处 gate 加 `|| agentSource === "<client>"`
-- **翻页无限循环 / default 任务每页开头都出现** = 沿用了 CC 的 4-per-page 分页但没写 MORE 拦截。
-  - 修：客户端 UI 无 options 上限时**直接关掉分页，全量渲染**（dsh 就走这条）
+- **Never pops up** = the `resolveConversationId` fallback does not recognize the client's session header → sessionKey falls back to keyId, or `isFreshCBConversation` treats the first-frame metadata user as "has history" → goes to the markerless bypass.
+  - Fix the `session-key.ts` fallback chain + `codebuddy/init.ts::isFreshCBConversation` + `store.ts::tryHistoryScan` to add metadata signature filtering
+- **Pops up but the task is not asked after picking the agent** = the split-stage gate was not added for the new client → goes through CB's old ask-both-at-once pending_agent_task → task is empty and bypasses directly.
+  - Fix the 5 gates in `codebuddy/init.ts` by adding `|| agentSource === "<client>"`
+- **Pagination infinite loop / the default task appears at the start of every page** = reused CC's 4-per-page pagination but did not write MORE interception.
+  - Fix: when the client UI has no options limit, **turn off pagination directly and render everything** (dsh takes this route)
 
-### 坑 C：上游 400 `unknown tool ""`
+### Pitfall C: upstream 400 `unknown tool ""`
 
-**根因**：客户端 preset 没挂 `ask_user_question`（或本客户端的 UI tool），proxy 塞的 fake `tool_call` 校验拒。
+**Root cause**: the client preset does not hang `ask_user_question` (or this client's UI tool), and the fake `tool_call` stuffed in by the proxy is rejected by validation.
 
-**修**：加 headless bypass —— `body.tools` 非空但无该 tool 时，直接透传不弹 form。
+**Fix**: add a headless bypass — when `body.tools` is non-empty but lacks that tool, pass through directly without popping a form.
 
-### 坑 D：上游 400 `The reasoning_content in the thinking mode must be passed back to the API`
+### Pitfall D: upstream 400 `The reasoning_content in the thinking mode must be passed back to the API`
 
-**根因**（两个坑一起踩）：
+**Root cause** (two pitfalls hit together):
 
-1. fake session-init assistant 消息不带 `reasoning_content` 字段
-2. 塞了空串 `""` → 客户端 translate.ts 用 `length > 0` 判据吃掉
+1. The fake session-init assistant message carries no `reasoning_content` field
+2. An empty string `""` was stuffed in → the client's translate.ts swallows it with a `length > 0` criterion
 
-**修**：fake response 塞**非空**占位串（如 `[proxy session-init form]`）。
+**Fix**: stuff the fake response with a **non-empty** placeholder string (such as `[proxy session-init form]`).
 
-**次生坑**：塞了非空占位，客户端也 replay 回 proxy 了，但**injection pipeline parse→serialize 抹了字段**。
+**Secondary pitfall**: a non-empty placeholder was stuffed in and the client also replays it back to the proxy, but the **injection pipeline's parse→serialize erased the field**.
 
-- 用 `PROXY_DEBUG_DUMP_INBOUND` + `PROXY_DEBUG_DUMP_BODY` 两个 env 抓入站/出站 body 对比。
-- 修 `MemoryProxy/src/injection/adapters/openai.ts` / `anthropic.ts` 的 `parseMessage`/`serializeMessage`，用 `ContextMessage.metadata` 存透传字段。
+- Use the two env vars `PROXY_DEBUG_DUMP_INBOUND` + `PROXY_DEBUG_DUMP_BODY` to capture inbound/outbound bodies for comparison.
+- Fix `parseMessage`/`serializeMessage` in `MemoryProxy/src/injection/adapters/openai.ts` / `anthropic.ts`, storing passthrough fields in `ContextMessage.metadata`.
 
-### 坑 E：aux 请求（compaction / title）误走 session-init 弹 form
+### Pitfall E: aux requests (compaction / title) wrongly go through session-init and pop a form
 
-**根因**：`handler.ts` 顶部没 `classifyRequest`，所有请求全当 main。
+**Root cause**: there is no `classifyRequest` at the top of `handler.ts`, so all requests are treated as main.
 
-**修**：`handler.ts` 顶部调 `agentAdapter.classifyRequest(body, path, headers)`，`isAuxiliary=true` 时 session-init / mem / injection / L0 / skill trigger **全部跳过**。
+**Fix**: call `agentAdapter.classifyRequest(body, path, headers)` at the top of `handler.ts`; when `isAuxiliary=true`, session-init / mem / injection / L0 / skill trigger are **all skipped**.
 
-### 坑 F：客户端特色 wire 字段（如 `reasoning_content`）round-trip 丢失
+### Pitfall F: client-specific wire fields (such as `reasoning_content`) lost in the round-trip
 
-见坑 D 次生坑。**通用做法**：`PROXY_DEBUG_DUMP_INBOUND` + `PROXY_DEBUG_DUMP_BODY` 对比入站/出站字段，任一丢失就补 adapter。
+See the secondary pitfall of Pitfall D. **General approach**: compare inbound/outbound fields with `PROXY_DEBUG_DUMP_INBOUND` + `PROXY_DEBUG_DUMP_BODY`, and patch the adapter whenever any is lost.
 
-### 坑 G：抓包 Node 22 HTTPS_PROXY 无效
+### Pitfall G: HTTPS_PROXY has no effect when capturing on Node 22
 
-**修**：加 `NODE_OPTIONS='--use-env-proxy'`。undici experimental，但目前唯一手段。
+**Fix**: add `NODE_OPTIONS='--use-env-proxy'`. undici is experimental, but it is currently the only way.
 
-### 坑 H：用 headless 抓包，以为 tool 不存在
+### Pitfall H: capturing with headless and assuming the tool does not exist
 
-**教训**：preset 系统决定 tools，不同 profile 挂的 tool 差异是常态。**web / tui 场景的 tools 数组一定比 headless 全**。抓包最好抓 web，或者两种都抓一次。
+**Lesson**: the preset system decides the tools, and it is normal for different profiles to hang different tools. **The tools array in web / tui scenarios is always more complete than headless**. It is best to capture web, or capture both once.
 
 ---
 
-## 完成标准
+## Completion Criteria
 
-以下**全部**验证过才算适配完成（左侧标注对应的能力编号）：
+The adaptation counts as complete only when **all** of the following are verified (the corresponding capability number is marked on the left):
 
-| 能力 | 完成标准 |
+| Capability | Completion criteria |
 |---|---|
-| #1 路由 | `curl -X POST /<client>/default/chat/completions` 不返 404、不返 401 `missing service_id` |
-| #2 sessionKey | 同一 session_id 的多次请求在 proxy log 里 `sessionKey=` 一致 |
-| #3 请求分类 | aux 请求（compaction / title-gen）proxy log 显示 `[request-classify] → auxiliary (skip ...)` 直接透传 |
-| #5 Session Init | 首帧返 form（role=assistant + `tool_call` 是客户端 preset 的 ask-user tool 名）；playwright 走完 `asset_confirm → team → agent → task` 4 步 |
-| #7 注入 | 主对话上游返 200，且上游看到的 system message 里含 `<agent_skills>` / `<user_memory>` 等资产块 |
-| #8 wire 兼容 | 主对话上游 **不返** 400（`reasoning_content` / `unknown tool` / `invalid_request_error`） |
-| #9 mem 命令 | `mem:help` / `mem:sync` / `mem:create-skill` 三命令拦截返短路响应 |
-| #10 L0 & skill | proxy log 有 `tdai-recorder:write-l0` 表示 L0 落盘；有 `[skill-conversation-add] archived reason=tool_calls` 表示 skill 提取触发 |
-| #11 观测 | Langfuse trace 带 `agent_source:<client>` tag |
-| — 单测 | `npx vitest run src/session/<client> src/__tests__/agent-adapters/<client>.test.ts` 全绿 |
-| — 全量测试 | `npx vitest run` 零回归 |
+| #1 Routing | `curl -X POST /<client>/default/chat/completions` returns neither 404 nor 401 `missing service_id` |
+| #2 sessionKey | Multiple requests with the same session_id show a consistent `sessionKey=` in the proxy log |
+| #3 Request classification | Aux requests (compaction / title-gen) show `[request-classify] → auxiliary (skip ...)` in the proxy log and pass straight through |
+| #5 Session Init | The first frame returns a form (role=assistant + `tool_call` is the client preset's ask-user tool name); playwright completes the 4 steps `asset_confirm → team → agent → task` |
+| #7 Injection | The main conversation upstream returns 200, and the system message seen upstream contains asset blocks such as `<agent_skills>` / `<user_memory>` |
+| #8 Wire compatibility | The main conversation upstream **does not return** 400 (`reasoning_content` / `unknown tool` / `invalid_request_error`) |
+| #9 Mem commands | The three commands `mem:help` / `mem:sync` / `mem:create-skill` are intercepted and return short-circuit responses |
+| #10 L0 & skill | `tdai-recorder:write-l0` in the proxy log means L0 was persisted; `[skill-conversation-add] archived reason=tool_calls` means skill extraction was triggered |
+| #11 Observability | The Langfuse trace carries the `agent_source:<client>` tag |
+| — Unit tests | `npx vitest run src/session/<client> src/__tests__/agent-adapters/<client>.test.ts` all green |
+| — Full tests | `npx vitest run` has zero regressions |
 
 ---
 
-## 参考实现：dsh（按功能分组）
+## Reference Implementation: dsh (Grouped by Capability)
 
-dsh 是**目前踩坑最多、覆盖最完整**的接入案例。下表按[阶段 1 适配范围](#阶段-1适配范围一览先明确要做什么)的能力编号，列出 dsh **每项能力对应的代码位置**，可直接对着自己的客户端照抄改名。
+dsh is **currently the integration case with the most pitfalls hit and the most complete coverage**. The table below, by capability number from the [Phase 1 adaptation scope](#phase-1-adaptation-scope-overview-clarify-what-to-do-first), lists **the code location of each capability in dsh**, which you can copy and rename for your own client.
 
-| 能力 | dsh 实现位置 | 说明 |
+| Capability | dsh implementation location | Notes |
 |---|---|---|
-| #1 路由 & 白名单 | `MemoryProxy/src/server.ts` dsh 段（9 条路由）<br>`MemoryProxy/src/credit-reporter.ts::extractSpaceIdFromPath` | 主 `/chat/completions` × (带/不带 v1) × (main/aux/cost-guard/analyse marker) 组合 |
-| #2 Session ID 解析 | `MemoryProxy/src/session/session-key.ts::resolveConversationId`（`x-deepseek-harness-session-id` fallback） | dsh 只从 header 拿 sid，body 没 fallback |
-| #3 请求分类 | `MemoryProxy/src/agent-adapters/dsh.ts::classifyRequest`<br>`MemoryProxy/src/handler.ts` 顶部 aux short-circuit | 三重信号：compact header > title body-shape > main |
-| #4 用户文本 & 元数据过滤 | `MemoryProxy/src/agent-adapters/dsh.ts::extractUserText`<br>`MemoryProxy/src/session/codebuddy/init.ts::isFreshCBConversation`<br>`MemoryProxy/src/session/store.ts::tryHistoryScan` | dsh 首帧塞 3 条元数据 role=user，签名匹配跳过 |
-| #5 Session Init Form | `MemoryProxy/src/session/dsh/form.ts`（tool = `ask_user_question`，call_id 前缀 `call_dsh_session_init_`）<br>`MemoryProxy/src/session/index.ts` dsh dispatch 分支<br>`MemoryProxy/src/session/codebuddy/init.ts` 5 处 split-stage gate 加 `agentSource === "dsh"`<br>`MemoryProxy/src/session/codebuddy/cleaner.ts` `tool_call_id` 正则加 `dsh_` 前缀 | 状态机复用 CB，dsh UI 无 options 上限所以**不分页** |
-| #7 注入 | 复用 `MemoryProxy/src/injection/adapters/openai.ts`（无独立 profile） | dsh 是标准 OpenAI Chat，注入模板走 CB 那一套 |
-| #8 Wire 兼容 | `MemoryProxy/src/injection/adapters/openai.ts::parseMessage`/`serializeMessage`（`reasoning_content` 用 `ContextMessage.metadata` 保留） | DeepSeek thinking chain 硬校验必须往返带 |
-| #9 Mem 命令 | 通用 mem-command 段自动生效；仅在 dsh headless 时降级（`handler.ts::_dshHeadless` 判据） | headless bypass 客户端 `mem:session-reset` 有专门的降级提示 |
-| #10 L0 & Skill | 通用 handler 尾部自动生效；`_dshHeadless` 时跳过（`handler.ts` 相关 `if !_dshHeadless`） | aux 判据正确后无需 dsh 特殊处理 |
-| #11 观测 | `agentAdapter.agentKind = "dsh"` 通用注入到 langfuse trace tag | 无需额外埋点代码 |
-| — Headless Bypass（dsh 独有能力） | `MemoryProxy/src/handler.ts::_dshHeadless`（`body.tools` 非空但无 `ask_user_question` → bypass） | dsh CLI 场景无 preset，全流程跳过 form / mem / injection |
-| — 单测（39 个，最完整 fixture 集） | `MemoryProxy/src/__tests__/agent-adapters/dsh.test.ts`（19 adapter tests）<br>`MemoryProxy/src/session/dsh/__tests__/form.test.ts`（17 form tests）<br>`MemoryProxy/src/injection/adapters/__tests__/openai.test.ts`（3 openai round-trip tests） | 照抄改客户端名基本能用 |
+| #1 Routing & allowlist | dsh section of `MemoryProxy/src/server.ts` (9 routes)<br>`MemoryProxy/src/credit-reporter.ts::extractSpaceIdFromPath` | Main `/chat/completions` × (with/without v1) × (main/aux/cost-guard/analyse marker) combinations |
+| #2 Session ID resolution | `MemoryProxy/src/session/session-key.ts::resolveConversationId` (`x-deepseek-harness-session-id` fallback) | dsh gets the sid only from the header; no body fallback |
+| #3 Request classification | `MemoryProxy/src/agent-adapters/dsh.ts::classifyRequest`<br>aux short-circuit at the top of `MemoryProxy/src/handler.ts` | Triple signal: compact header > title body-shape > main |
+| #4 User text & metadata filtering | `MemoryProxy/src/agent-adapters/dsh.ts::extractUserText`<br>`MemoryProxy/src/session/codebuddy/init.ts::isFreshCBConversation`<br>`MemoryProxy/src/session/store.ts::tryHistoryScan` | dsh stuffs 3 metadata role=user messages in the first frame; matching signatures are skipped |
+| #5 Session Init Form | `MemoryProxy/src/session/dsh/form.ts` (tool = `ask_user_question`, call_id prefix `call_dsh_session_init_`)<br>dsh dispatch branch in `MemoryProxy/src/session/index.ts`<br>5 split-stage gates in `MemoryProxy/src/session/codebuddy/init.ts` add `agentSource === "dsh"`<br>`tool_call_id` regex in `MemoryProxy/src/session/codebuddy/cleaner.ts` adds the `dsh_` prefix | State machine reuses CB; the dsh UI has no options limit so it **does not paginate** |
+| #7 Injection | Reuses `MemoryProxy/src/injection/adapters/openai.ts` (no standalone profile) | dsh is standard OpenAI Chat; the injection template follows CB's |
+| #8 Wire compatibility | `MemoryProxy/src/injection/adapters/openai.ts::parseMessage`/`serializeMessage` (`reasoning_content` preserved via `ContextMessage.metadata`) | DeepSeek thinking chain strictly requires round-tripping |
+| #9 Mem commands | The generic mem-command section takes effect automatically; degrades only in dsh headless (`handler.ts::_dshHeadless` criterion) | For headless bypass clients, `mem:session-reset` has a dedicated degradation hint |
+| #10 L0 & Skill | The generic handler tail takes effect automatically; skipped when `_dshHeadless` (the relevant `if !_dshHeadless` in `handler.ts`) | Once the aux criteria are correct, no dsh-specific handling is needed |
+| #11 Observability | `agentAdapter.agentKind = "dsh"` is injected generically into the langfuse trace tag | No extra instrumentation code needed |
+| — Headless Bypass (dsh-only capability) | `MemoryProxy/src/handler.ts::_dshHeadless` (`body.tools` non-empty but lacks `ask_user_question` → bypass) | dsh CLI scenario has no preset, so the whole flow skips form / mem / injection |
+| — Unit tests (39, the most complete fixture set) | `MemoryProxy/src/__tests__/agent-adapters/dsh.test.ts` (19 adapter tests)<br>`MemoryProxy/src/session/dsh/__tests__/form.test.ts` (17 form tests)<br>`MemoryProxy/src/injection/adapters/__tests__/openai.test.ts` (3 openai round-trip tests) | Copying and renaming the client name basically works |
 
-对外配置文档（用户视角的 baseURL / 配置文件 / session-init 交互流程）见 [`agents/dsh/README.md`](./dsh/README.md)。
+For user-facing configuration docs (baseURL / config file / session-init interaction flow), see [`agents/dsh/README.md`](./dsh/README.md).

@@ -1,32 +1,32 @@
 /**
- * SkillBufferStorage — 封装 §4 中所有 COS 对象读写。
+ * SkillBufferStorage — wraps all COS object reads/writes in §4.
  *
- * 路径规则（挂在 memory 全局 PathPrefix 下，subPath 默认 "skill_buffer"）：
- *   Session 级:
+ * Path rules (hung under the memory global PathPrefix, subPath defaults to "skill_buffer"):
+ *   Session level:
  *     {subPath}/{space}/{user}/{team}/{agent}/{session}/data-current.jsonl
  *     {subPath}/{space}/{user}/{team}/{agent}/{session}/data-<ts>.jsonl
  *     {subPath}/{space}/{user}/{team}/{agent}/{session}/meta.json
- *   Agent 级:
+ *   Agent level:
  *     {subPath}/{space}/{user}/{team}/{agent}/_tasks.json
  *
- * 底层复用 memory 现有 StorageAdapter (Local 或 Cos)。
+ * Underneath it reuses the existing memory StorageAdapter (Local or Cos).
  *
- * 读写规则：
- *   - data-current: 明文 JSON（不做 append 语义；每次全量覆盖）
- *   - meta:         明文 JSON（session 串行，无 CAS）
- *   - archive:      明文 JSON（写入前 exists() 判定，已存在直接视为成功）
- *   - _tasks.json:  明文 JSON（读改写，由上层 SkillAgentTaskQueue 用 Redis 短锁保护）
+ * Read/write rules:
+ *   - data-current: plaintext JSON (no append semantics; fully overwritten each time)
+ *   - meta:         plaintext JSON (sessions are serial, no CAS)
+ *   - archive:      plaintext JSON (exists() check before writing; if it already exists, treated as success)
+ *   - _tasks.json:  plaintext JSON (read-modify-write, protected by the upper-level SkillAgentTaskQueue with a short Redis lock)
  */
 
 import type { StorageAdapter } from "../../storage/adapter.js";
 
 export interface SessionKey {
   /**
-   * 2026-07-30: 新增 instance_id, 为的是让 trigger.archive 构造 AgentTuple
-   * 时能塞进队列, worker 出队后按 instance_id 动态解析对应 instance 的
-   * CoS/VDB/LLM 资源。buffer-storage 内部 (sessionDir/agentDir/tasksKey)
-   * 不使用 instance_id (那部分由 CosStorageBackend 的 per-instance prefix
-   * 提供), 仅作为 tuple 归属信息透传。
+   * 2026-07-30: added instance_id so that trigger.archive can put it into the queue when constructing the AgentTuple;
+   * after the worker dequeues, it dynamically resolves the CoS/VDB/LLM resources of the corresponding instance by instance_id.
+   * buffer-storage internally (sessionDir/agentDir/tasksKey)
+   * does not use instance_id (that part is provided by CosStorageBackend's per-instance prefix),
+   * it is only passed through as tuple ownership information.
    */
   instance_id: string;
   space_id: string;
@@ -36,13 +36,13 @@ export interface SessionKey {
   session_id: string;
 }
 
-// AgentTuple 5 段类型从 agent-task-queue 单源导出, 这里 re-export 让老导入路径继续可用。
-// buffer-storage 里的 agentDir/tasksKey 只用 user/team/agent (instance/space 由上层
-// StorageAdapter 的 per-instance prefix 提供), 但类型保持一致以便跨模块传递。
+// The AgentTuple 5-segment type is exported from a single source in agent-task-queue; re-export here so old import paths keep working.
+// agentDir/tasksKey in buffer-storage only use user/team/agent (instance/space are provided by the upper-level
+// StorageAdapter's per-instance prefix), but the types are kept consistent for cross-module passing.
 export type { AgentTuple } from "./agent-task-queue.js";
 import type { AgentTuple } from "./agent-task-queue.js";
 
-/** meta.json 结构（§4.2）。只放计数器。 */
+/** meta.json structure (§4.2). Holds counters only. */
 export interface SessionMeta {
   session_id: string;
   space_id: string;
@@ -55,7 +55,7 @@ export interface SessionMeta {
   last_archived_at_ms?: number;
 }
 
-/** _tasks.json 单个 task 条目（§4.3）。 */
+/** A single task entry in _tasks.json (§4.3). */
 export interface SkillTaskEntry {
   task_id: string;
   session_id: string;
@@ -68,41 +68,41 @@ export interface SkillTaskEntry {
   archived_at_ms: number;
   enqueued_at_ms: number;
   /**
-   * direct-trigger (`/v3/skill/extract`) 独占：给 extractor prompt 注入的
-   * "主 Agent 抽取提示"。conversation/add 路径不写。Worker 消费时透传给
+   * Exclusive to direct-trigger (`/v3/skill/extract`): the "main Agent extraction hint"
+   * injected into the extractor prompt. Not written by the conversation/add path. The Worker passes it through when consuming
    * `ISkillExtractor.extract({ reason })`。
    */
   reason?: string;
   /**
-   * direct-trigger 独占：extractor LLM 迭代上限。conversation/add 路径不写。
-   * Worker 消费时透传成 `extractor.extract({ options: { max_iterations } })`。
+   * Exclusive to direct-trigger: extractor LLM iteration cap. Not written by the conversation/add path.
+   * The Worker passes it through as `extractor.extract({ options: { max_iterations } })` when consuming.
    */
   max_iterations?: number;
   /**
-   * 累计 **permanent** 失败次数（B 类：400/422/JSON parse/schema）。
-   * A 类 transient (401/403/429/5xx/网络/timeout) 不计数，避免和 B 类混淆。
-   * 达到 Worker 的 `permanentMaxRetries` 阈值（默认 3）后 task 会被移到
-   * `_tasks_dlq.json`（见下方 dlqKey）。
+   * Cumulative count of **permanent** failures (class B: 400/422/JSON parse/schema).
+   * Class A transient (401/403/429/5xx/network/timeout) is not counted, to avoid confusion with class B.
+   * After reaching the Worker's `permanentMaxRetries` threshold (default 3), the task is moved to
+   * `_tasks_dlq.json` (see dlqKey below).
    */
   retry_count?: number;
   /**
-   * 最近一次失败的 error.message（Worker 侧截断到 <=1024 字符），只用于
-   * 排查；对 Worker 调度逻辑无影响。
+   * error.message of the latest failure (truncated to <=1024 characters on the Worker side), used only for
+   * troubleshooting; no effect on the Worker's scheduling logic.
    */
   last_error?: string;
   /**
-   * 抽取模式;仅在归档时 Handler 侧显式收到 body.strict_mode:true 时才写入
-   * 'strict'。默认路径 (老 client / conversation-add 阈值归档)不写此字段,
-   * Worker 消费时 head.mode === undefined,透传给 SkillExtractor 也是 undefined,
-   * 恒走 SKILL_REVIEW_PROMPT (v2 宽松) — 老 task 反序列化零影响。
+   * Extraction mode; written as 'strict' only when the Handler side explicitly receives body.strict_mode:true at archive time.
+   * The default path (old clients / conversation-add threshold archiving) does not write this field,
+   * so when the Worker consumes it head.mode === undefined, and passing it through to SkillExtractor is also undefined,
+   * always taking SKILL_REVIEW_PROMPT (v2 lenient) — zero impact on deserialization of old tasks.
    *
-   * 冷启动 / 批量导入 (agents/asset-import.ts) 会传 strict_mode:true → 落
-   * mode:'strict' → SkillExtractor 用 SKILL_REVIEW_PROMPT_STRICT (v1 严格 gate)。
+   * Cold start / bulk import (agents/asset-import.ts) passes strict_mode:true → lands as
+   * mode:'strict' → SkillExtractor uses SKILL_REVIEW_PROMPT_STRICT (v1 strict gate).
    */
   mode?: 'strict';
 }
 
-/** _tasks.json 整体结构。 */
+/** Overall structure of _tasks.json. */
 export interface AgentTasksDoc {
   team_id: string;
   agent_id: string;
@@ -111,17 +111,17 @@ export interface AgentTasksDoc {
 }
 
 /**
- * `_tasks_dlq.json` 单条死信记录。
+ * A single dead-letter record in `_tasks_dlq.json`.
  *
- * DLQ 只落盘不做端点：人工用 `cat` / `mv` 救回来，或者 grafana 告警脚本直接
- * scan 文件。当前不做 TTL / 大小限制（每 agent 一份文件，量大时用户自己处理）。
+ * The DLQ is only written to disk and is not an endpoint: humans rescue entries with `cat` / `mv`, or a grafana alert script
+ * scans the file directly. There is currently no TTL / size limit (one file per agent; users handle it themselves when volume is large).
  */
 export interface SkillDeadTaskEntry extends SkillTaskEntry {
-  /** DLQ 追加时的 wall clock 时间戳。 */
+  /** Wall-clock timestamp when appended to the DLQ. */
   dead_lettered_at_ms: number;
 }
 
-/** `_tasks_dlq.json` 整体结构。 */
+/** Overall structure of `_tasks_dlq.json`. */
 export interface AgentDeadTasksDoc {
   team_id: string;
   agent_id: string;
@@ -129,14 +129,14 @@ export interface AgentDeadTasksDoc {
   tasks: SkillDeadTaskEntry[];
 }
 
-/** data-current / archive 缓存内容。使用 { messages: [...] } 而不是纯 JSONL，简化读写。 */
+/** data-current / archive cache content. Uses { messages: [...] } rather than plain JSONL, simplifying reads and writes. */
 export interface BufferedMessages {
   messages: Array<Record<string, unknown>>;
 }
 
 export interface SkillBufferStorageOptions {
   storage: StorageAdapter;
-  /** COS 子路径前缀。默认 "skill_buffer"。 */
+  /** COS sub-path prefix. Default "skill_buffer". */
   subPath?: string;
 }
 
@@ -153,10 +153,10 @@ export class SkillBufferStorage {
 
   // ── Path helpers ──────────────────────────────────────────────────────────
 
-  // 路径规则对齐设计文档 §15.3：SkillBufferStorage 只负责 subPath 之下的层级
-  // ({user}/{team}/{agent}/...)，space_id/instanceId 由上层 StorageAdapter 的
-  // per-instance prefix 提供。带 space_id 会导致 CosStorageBackend 的 prefix
-  // (`.../{instanceId}/`) 之后重复出现 `{space}/`。
+  // Path rules aligned with design doc §15.3: SkillBufferStorage is only responsible for the levels under subPath
+  // ({user}/{team}/{agent}/...); space_id/instanceId are provided by the upper-level StorageAdapter's
+  // per-instance prefix. Including space_id would cause `{space}/` to appear again after CosStorageBackend's prefix
+  // (`.../{instanceId}/`).
   private sessionDir(sess: SessionKey): string {
     return `${this.subPath}/${sess.user_id}/${sess.team_id}/${sess.agent_id}/${sess.session_id}`;
   }
@@ -195,7 +195,7 @@ export class SkillBufferStorage {
       if (!parsed.messages) return { messages: [] };
       return { messages: parsed.messages };
     } catch {
-      // 损坏 → 视为空
+      // corrupt → treated as empty
       return { messages: [] };
     }
   }
@@ -214,7 +214,7 @@ export class SkillBufferStorage {
       return {
         ...this.defaultMeta(sess),
         ...parsed,
-        // 强制关键字段一致（防止旧对象 session_id/space_id 被替换）
+        // force key fields to be consistent (prevents the session_id/space_id of an old object from being replaced)
         session_id: sess.session_id,
         space_id: sess.space_id,
         user_id: sess.user_id,
@@ -245,16 +245,16 @@ export class SkillBufferStorage {
   // ── archive ────────────────────────────────────────────────────────────
 
   /**
-   * 写归档文件；若 key 已存在直接视为成功（对齐设计 §7.4 ④）。
+   * Write the archive file; if the key already exists, treat it as success (aligned with design §7.4 ④).
    *
-   * 注：我们不用 If-None-Match: * 头（storage 抽象层未暴露），
-   * 而是 exists() → putObject 两步。同 session 由 proxy 保证串行，
-   * 且 archived_at_ms 递增（毫秒时间戳），实际不会撞。
+   * Note: we do not use the If-None-Match: * header (not exposed by the storage abstraction layer),
+   * but instead the two steps exists() → putObject. The same session is guaranteed serial by the proxy,
+   * and archived_at_ms is increasing (millisecond timestamp), so collisions do not actually occur.
    */
   async writeArchive(sess: SessionKey, archivedAtMs: number, buf: BufferedMessages): Promise<void> {
     const key = this.archiveKey(sess, archivedAtMs);
     if (await this.storage.exists(key)) {
-      // 视为成功，跳过写入
+      // treated as success; skip the write
       return;
     }
     await this.storage.writeFile(key, JSON.stringify(buf));
@@ -301,10 +301,10 @@ export class SkillBufferStorage {
     };
   }
 
-  // ── agent _tasks_dlq.json（死信队列） ─────────────────────────────────────
+  // ── agent _tasks_dlq.json (dead-letter queue) ─────────────────────────────────────
   //
-  // DLQ 只被 Worker 追加（且 Worker 已持 extract-lock，同一 agent 只有一个写者），
-  // 因此不需要 tasks-mutex 保护——但读改写仍要求先 read 再 write，避免旧内容被截。
+  // The DLQ is only appended to by the Worker (and the Worker already holds the extract-lock, so each agent has only one writer),
+  // so tasks-mutex protection is not needed — but read-modify-write still requires reading before writing, to avoid truncating old content.
 
   async readDlq(agent: AgentTuple): Promise<AgentDeadTasksDoc> {
     const raw = await this.storage.readFile(this.dlqKey(agent));

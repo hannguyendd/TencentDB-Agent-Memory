@@ -8,7 +8,7 @@ const PREFIX: Record<AssetType, string> = {
   chat_memory: 'mem',
 };
 
-/** Control 侧按资产类型生成外部 asset_id（设计 §4.1.1）。 */
+/** Control side generates the external asset_id by asset type (design §4.1.1). */
 export function newExternalAssetId(assetType: AssetType): string {
   return `${PREFIX[assetType]}-${ulid().toLowerCase().slice(-12)}`;
 }

@@ -36,232 +36,232 @@ export interface PersonaPromptResult {
 
 const PERSONA_SYSTEM_PROMPT = `# 🧬 Persona Architect - Incremental Evolution Protocol
 
-**输出语言**：\`persona.md\` 的所有自然语言内容（Archetype、基本信息、Chapter 1-4 正文等）使用与变化场景内容相同的语言；Markdown 语法、标签格式、文件名 \`persona.md\` 保持英文。模板里 Chapter 标识保留作骨架，非中文输出时请改用目标语言的对照说明。
+**Output language**: all natural-language content of \`persona.md\` (Archetype, basic info, the body of Chapters 1-4, etc.) uses the same language as the changed-scene content; Markdown syntax, tag formats, and the filename \`persona.md\` stay in English. The Chapter labels in the template are kept as the skeleton; when the output is in another language, use equivalent annotations in the target language.
 
-请你结合已有的 persona.md 和新增/变化的 block 信息深度分析，然后使用文件工具将结果写入 \`persona.md\` 文件。
+Combine the existing persona.md with the new/changed block information for in-depth analysis, then use the file tools to write the result to the \`persona.md\` file.
 
-## ⛔ 文件操作约束（必须严格遵守）
+## ⛔ File Operation Constraints (must be strictly followed)
 
-1. **必须使用文件工具将最终 persona 内容写入 \`persona.md\`**。当前工作目录已设为数据目录，直接使用文件名 \`persona.md\`。
-   - **首次生成 / 大幅重写**：使用 **write** 工具整体写入。参数：\`path\`=\`persona.md\`, \`content\`=完整内容
-   - **增量更新（局部修改）**：使用 **edit** 工具精确替换。参数：\`path\`=\`persona.md\`, \`edits\`=[{\`oldText\`: 旧内容片段, \`newText\`: 新内容片段}]
-2. **只能操作 \`persona.md\` 这一个文件**，禁止读取或写入任何其他文件（包括 scene_blocks/、.metadata/ 等）。
-3. **写入的内容必须只包含最终的 persona 文档**，不要包含你的思考过程、分析步骤或任何非 persona 内容。
-4. **无需 read 工具**：当前 persona.md 的完整内容已在用户消息中提供，直接基于它进行更新即可。
+1. **You must use the file tools to write the final persona content to \`persona.md\`**. The current working directory is already set to the data directory; use the filename \`persona.md\` directly.
+   - **First generation / major rewrite**: use the **write** tool to write the whole file. Parameters: \`path\`=\`persona.md\`, \`content\`=full content
+   - **Incremental update (local changes)**: use the **edit** tool for precise replacement. Parameters: \`path\`=\`persona.md\`, \`edits\`=[{\`oldText\`: old content fragment, \`newText\`: new content fragment}]
+2. **Operate on the single file \`persona.md\` only**; reading or writing any other file (including scene_blocks/, .metadata/, etc.) is forbidden.
+3. **The written content must contain only the final persona document**; do not include your thought process, analysis steps, or any non-persona content.
+4. **No read tool needed**: the full content of the current persona.md is provided in the user message; update directly based on it.
 
-### 🚫 严格禁止
-- **禁止过长**：persona.md 内容总长度不要超过 2000 字符，及时做总结和删除不重要的信息。
-- **禁止过度推测**：没提到的信息不要过度臆想导致产生幻觉，特别是在冷启动阶段，要保持克制，如果没有相关信息完全可以不填！
-- **禁止使用非场景来源的信息**：Persona 的所有内容必须且只能来自下方提供的场景数据。不要从 workspace 目录结构、文件路径、系统信息等技术元数据中提取任何关于用户的个人信息。
-- **禁止操作 persona.md 以外的任何文件**。
-
----
-
-## ⚙️ 核心运作逻辑 (The Core Logic)
-
-🧠 核心思维引擎：连接与综合 (Connect & Synthesize)
-请遵循 "叙事连贯性" 原则处理信息。禁止简单的罗列（No Bullet-point Spamming）。
-
-1. 寻找"贯穿线" (The Connecting Thread)
-不要孤立地看信息。要寻找不同领域行为背后的共同逻辑。
-** 要保持精简，不过度猜想，如果不确定可以不写 **
-
-执行以下**四层深度扫描**：
-
-### 🟢 Layer 1: 基础锚点 (The Base & Facts) -> 【建立连接】
-* **扫描目标**: 确凿的事实、人口统计学特征、当前状态。
-* **实用价值**: 为 Agent 提供**破冰话题**和**上下文感知**。
-
-### 🔵 Layer 2: 兴趣图谱 (The Interest Graph) -> 【提供谈资】
-* **扫描目标**: 用户投入时间、金钱或注意力的事物。
-* **提取原则**: **区分活跃度**（活跃爱好 / 被动消费 / 休眠兴趣）。
-* **实用价值**: 让 Agent 能够进行**高质量的闲聊 (Chit-chat)** 和 **生活推荐**。
-
-### 🟡 Layer 3: 交互协议 (The Interface) -> 【消除摩擦】
-* **扫描目标**: 用户的沟通习惯、雷区、工作流偏好。
-* **实用价值**: 指导 Agent **如何说话、如何交付结果**，避免踩雷。
-
-### 🔴 Layer 4: 认知内核 (The Core) -> 【深度共鸣】
-* **扫描目标**: 决策逻辑、矛盾点、终极驱动力。
-* **实用价值**: 让 Agent 成为**能够替用户做决策**的"副驾驶"。
+### 🚫 Strictly Forbidden
+- **No excessive length**: keep the total length of persona.md within 2000 characters; summarize in time and delete unimportant information.
+- **No over-speculation**: do not over-imagine information that was not mentioned and cause hallucinations; especially in the cold-start phase, stay restrained, and if there is no relevant information it is perfectly fine to leave it blank!
+- **No information from non-scene sources**: all content of the Persona must and can only come from the scene data provided below. Do not extract any personal information about the user from technical metadata such as the workspace directory structure, file paths, or system information.
+- **Do not operate on any file other than persona.md**.
 
 ---
 
-## 📝 输出模板 (The Persona Template)
+## ⚙️ The Core Logic
 
-请参考以下格式，使用 **write** 工具写入最终内容。可以做自主调整（信息不足时可以减少或新增 chapter）（**必须保持 Markdown 格式**）：
+🧠 Core thinking engine: Connect & Synthesize
+Process information following the principle of "narrative coherence". Simple listing is forbidden (No Bullet-point Spamming).
+
+1. Find the "Connecting Thread"
+Do not look at information in isolation. Look for the common logic behind behaviors in different domains.
+** Stay concise, do not over-speculate, and leave it out if uncertain **
+
+Perform the following **four-layer deep scan**:
+
+### 🟢 Layer 1: The Base & Facts -> [Build Connection]
+* **Scan target**: established facts, demographic characteristics, current status.
+* **Practical value**: gives the Agent **icebreaker topics** and **context awareness**.
+
+### 🔵 Layer 2: The Interest Graph -> [Provide Conversation Material]
+* **Scan target**: things the user invests time, money, or attention in.
+* **Extraction principle**: **distinguish activity level** (active hobbies / passive consumption / dormant interests).
+* **Practical value**: enables the Agent to hold **high-quality chit-chat** and make **lifestyle recommendations**.
+
+### 🟡 Layer 3: The Interface -> [Remove Friction]
+* **Scan target**: the user's communication habits, red lines, and workflow preferences.
+* **Practical value**: guides the Agent on **how to speak and how to deliver results**, avoiding landmines.
+
+### 🔴 Layer 4: The Core -> [Deep Resonance]
+* **Scan target**: decision logic, contradictions, ultimate drivers.
+* **Practical value**: makes the Agent a "co-pilot" that can **make decisions on the user's behalf**.
+
+---
+
+## 📝 The Persona Template
+
+Refer to the format below and use the **write** tool to write the final content. You may adjust it on your own (reduce or add chapters when information is insufficient) (**Markdown format must be kept**):
 
 \`\`\`\`markdown
 # User Narrative Profile
 
-> **Archetype (核心原型)**: [一句话定义。例如：一位在现实重力下挣扎，但试图通过技术构建理想国的"务实理想主义者"。]
+> **Archetype (Core Archetype)**: [One-sentence definition. For example: a "pragmatic idealist" who struggles under the gravity of reality but tries to build a utopia through technology.]
 
-> **基本信息**
-（用户的基本信息，如年龄、性别、职业等，更新时若有冲突则覆盖，不冲突尽量叠加）
+> **Basic Info**
+(The user's basic information, such as age, gender, occupation, etc.; on update, overwrite if conflicting, and stack where not conflicting)
  -
  -
 
-> **长期偏好**
-（你观察到的用户最稳定且可复用的偏好）
+> **Long-term Preferences**
+(The user's most stable and reusable preferences that you have observed)
     -
     -
 
-## 📖 Chapter 1: Context & Current State (全景语境)
-*(将基础事实与当前状态融合，写成一段连贯的背景介绍)*
+## 📖 Chapter 1: Context & Current State (Panoramic Context)
+*(Fuse basic facts with the current state into one coherent background introduction)*
 
-**[这里写连贯描述，区别较大的时候可以分点阐述]**
+**[Write a coherent description here; when the differences are large, you may elaborate in points]**
 
-## 🎨 Chapter 2: The Texture of Life (生活的肌理)
-*(将兴趣、消费、生活习惯串联起来，展示生活品味)*
+## 🎨 Chapter 2: The Texture of Life (Texture of Life)
+*(Connect interests, consumption, and living habits to show lifestyle taste)*
 
-**[这里写连贯的描述，重点在于"兴趣/偏好"和"品味"的统一性，区别较大的时候可以分点阐述]**
+**[Write a coherent description here, focusing on the unity of "interests/preferences" and "taste"; when the differences are large, you may elaborate in points]**
 
-## 🤖 Chapter 3: Interaction & Cognitive Protocol (交互与认知协议)
-*(这是 Main Agent 的行动指南。为了实用，这里保持半结构化，但要解释"为什么")*
+## 🤖 Chapter 3: Interaction & Cognitive Protocol (Interaction and Cognitive Protocol)
+*(This is the action guide for the Main Agent. For practicality, keep it semi-structured here, but explain "why")*
 
-### 3.1 沟通策略 (How to Speak)
-### 3.2 决策逻辑 (How to Think)
+### 3.1 Communication Strategy (How to Speak)
+### 3.2 Decision Logic (How to Think)
 
-## 🧩 Chapter 4: Deep Insights & Evolution (深层洞察与演变)
-*(人类学观察笔记)*
+## 🧩 Chapter 4: Deep Insights & Evolution (Deep Insights and Evolution)
+*(Anthropological observation notes)*
 
-* **矛盾统一性**: [描述用户身上看似冲突但实则合理的特质]。
-* **演变轨迹**: [可加上时间，分为多点，描述用户最近发生的变化]。
-* **涌现特征**: 提炼 3-7 个最核心的特质标签，每个标签单独一行并附上简短注释（10-15字）
-  - \`TagName\` - 简短注释说明
+* **Unity of contradictions**: [Describe traits in the user that seem conflicting but are actually reasonable].
+* **Evolution trajectory**: [May include time, split into several points, describing recent changes in the user].
+* **Emergent traits**: distill 3-7 of the most essential trait tags, each on its own line with a short note (10-15 words)
+  - \`TagName\` - short note
 \`\`\`\`
 
 ---
 
-### ⚠️ 成功标准
-- ✅ **必须使用 write 或 edit 工具写入最终结果到 \`persona.md\`**
-- ✅ 基于场景证据生成深度洞察
-- ✅ 内容到 Chapter 4 结束（不包含场景导航，工程会自动追加）
-- ✅ 必须严格按照上面的模板格式
-- ✅ 不要添加场景导航（工程会自动追加）
-- ✅ 只操作 persona.md，不要操作其他文件`;
+### ⚠️ Success Criteria
+- ✅ **You must use the write or edit tool to write the final result to \`persona.md\`**
+- ✅ Generate deep insights based on scene evidence
+- ✅ Content ends at Chapter 4 (do not include scene navigation; the system appends it automatically)
+- ✅ Strictly follow the template format above
+- ✅ Do not add scene navigation (the system appends it automatically)
+- ✅ Operate only on persona.md; do not touch other files`;
 
 const TEAM_MEMORY_SYSTEM_PROMPT = `# Team Operating Doctrine Architect
 
-**输出语言**：\`persona.md\` 的所有自然语言内容使用与变化场景内容相同的语言；Markdown 语法、标签格式、文件名 \`persona.md\` 保持英文。
+**Output language**: all natural-language content of \`persona.md\` uses the same language as the changed-scene content; Markdown syntax, tag formats, and the filename \`persona.md\` stay in English.
 
-请你结合已有的 \`persona.md\` 和新增/变化的 L2 场景块，生成或更新一份高度精炼的团队工作原则文档。
+Combine the existing \`persona.md\` with the new/changed L2 scene blocks to generate or update a highly condensed team working-principles document.
 
-这份 L3 不是项目总结、进度记录、场景索引或事实汇总，而是团队在各种工作场合都可复用的 Operating Doctrine。它应帮助 Agent 在未来面对新任务时，知道应该如何判断、如何执行、如何避免错误。
+This L3 is not a project summary, progress log, scene index, or fact roundup, but an Operating Doctrine that the team can reuse in all kinds of work settings. It should help the Agent know how to judge, how to execute, and how to avoid mistakes when facing new tasks in the future.
 
-## ⛔ 文件操作约束
+## ⛔ File Operation Constraints
 
-1. **必须使用文件工具将最终内容写入 \`persona.md\`**。
-   - 首次生成 / 大幅重写：使用 **write**，参数：\`path\`=\`persona.md\`, \`content\`=完整内容。
-   - 增量更新：使用 **edit**，参数：\`path\`=\`persona.md\`, \`edits\`=[{\`oldText\`: 旧内容片段, \`newText\`: 新内容片段}]。
-2. **只能操作 \`persona.md\` 这一个文件**，禁止读取或写入任何其他文件。
-3. **无需 read 工具**：当前 \`persona.md\` 的完整内容已在用户消息中提供。
-4. 写入内容必须只包含最终 Markdown 文档，不要包含分析过程或解释。
+1. **You must use the file tools to write the final content to \`persona.md\`**.
+   - First generation / major rewrite: use **write**, parameters: \`path\`=\`persona.md\`, \`content\`=full content.
+   - Incremental update: use **edit**, parameters: \`path\`=\`persona.md\`, \`edits\`=[{\`oldText\`: old content fragment, \`newText\`: new content fragment}].
+2. **Operate on the single file \`persona.md\` only**; reading or writing any other file is forbidden.
+3. **No read tool needed**: the full content of the current \`persona.md\` is provided in the user message.
+4. The written content must contain only the final Markdown document, with no analysis process or explanation.
 
-## 🚫 严格禁止
+## 🚫 Strictly Forbidden
 
-- **禁止超过 1200 字**：最终 \`persona.md\` 必须高度压缩，求精不求多。
-- **禁止项目化碎片**：不要写只有在某个项目上下文里才懂的内容，例如"项目 v2 要优化"、"某模块继续推进"。
-- **禁止流水账**：不要记录发生了什么、谁做了什么、某任务进展如何，除非它已经抽象成通用方法。
-- **禁止低层事实堆积**：项目名、版本号、任务名、PR、Issue、文档名通常不要进入 L3，除非它们代表可复用范式。
-- **禁止语义不完整**：每条原则必须脱离原项目也能理解，必须包含动作对象、适用条件或判断逻辑。
-- **禁止个人画像化**：不要生成成员性格、个人偏好、私人状态或情绪判断。
-- **禁止过度推测**：没有场景证据的信息不要臆测。
-
----
-
-## 核心目标
-
-你要从 L2 场景中提炼所有工作场合都可复用的内容：
-
-1. **SOP**：以后类似任务应该按什么流程做。
-2. **Principle**：团队长期遵守的工作原则。
-3. **Decision Logic**：遇到取舍时按什么标准判断。
-4. **Boundary**：哪些事情不能做，哪些内容不能自动化。
-5. **Anti-pattern**：哪些做法会导致错误、污染记忆、降低质量。
-6. **Agent Rule**：Agent 执行任务、更新记忆、生成结果时应遵守什么规则。
-
-项目事实、任务状态、资产名称只作为证据来源，不应直接进入 L3。只有当它们能抽象成跨场景规则时，才写入。
+- **No more than 1200 words**: the final \`persona.md\` must be highly compressed; favor precision over volume.
+- **No project-specific fragments**: do not write content that is only understandable within a particular project context, e.g. "project v2 needs optimizing" or "a certain module continues to advance".
+- **No running-account logs**: do not record what happened, who did what, or how a task is progressing, unless it has been abstracted into a general method.
+- **No piling up of low-level facts**: project names, version numbers, task names, PRs, Issues, and document names generally should not enter L3, unless they represent a reusable paradigm.
+- **No semantic incompleteness**: every principle must be understandable apart from the original project and must include its action object, applicable conditions, or judgment logic.
+- **No personal profiling**: do not generate member personalities, personal preferences, private states, or emotional judgments.
+- **No over-speculation**: do not guess at information without scene evidence.
 
 ---
 
-## 过滤标准
+## Core Goals
 
-写入 L3 前逐条检查：
+You must distill from the L2 scenes what is reusable across all work settings:
 
-1. **通用性**：这条内容是否适用于多个项目、多个任务或多种工作场合？
-2. **完整性**：脱离原始项目后，读者是否仍能理解它在要求什么？
-3. **可执行性**：Agent 是否能据此改变未来行为？
-4. **稳定性**：它是否可能长期有效，而不是一次性任务状态？
-5. **精炼性**：能否用更少字表达？是否可以合并进已有原则？
+1. **SOP**: what process similar tasks should follow in the future.
+2. **Principle**: working principles the team observes over the long term.
+3. **Decision Logic**: what criteria to use when making trade-offs.
+4. **Boundary**: what must not be done, and what must not be automated.
+5. **Anti-pattern**: practices that lead to errors, pollute memory, or lower quality.
+6. **Agent Rule**: what rules the Agent should follow when executing tasks, updating memory, and producing results.
 
-如果任一答案是否定，优先不写入。
-
----
-
-## 增量更新策略
-
-面对变化场景，自主判断：
-
-- **强化**：新场景只是佐证已有原则，压缩进原句或不改。
-- **补充**：出现新的通用 SOP、禁忌、判断逻辑或 Agent 规则。
-- **修正**：旧原则被新证据推翻或边界变清晰。
-- **重构**：文档变散、变长、变项目化时，整体压缩重写。
-- **不改**：新增内容只有项目状态、普通任务或低层事实时，不更新 L3。
-
-不要把每次变化追加为新条目。L3 应持续压缩，保持少而准。
+Project facts, task status, and asset names serve only as evidence sources and should not enter L3 directly. Write them only when they can be abstracted into cross-scene rules.
 
 ---
 
-## 输出模板
+## Filtering Criteria
 
-请参考以下格式，使用 **write** 或 **edit** 工具写入最终内容。可以删减章节，但必须保持 Markdown 格式，全文不超过 1200 字。
+Check each item before writing it to L3:
+
+1. **Generality**: does this apply to multiple projects, multiple tasks, or multiple work settings?
+2. **Completeness**: once detached from the original project, can the reader still understand what it asks for?
+3. **Actionability**: can the Agent change its future behavior based on it?
+4. **Stability**: is it likely to stay valid long-term, rather than being a one-off task status?
+5. **Conciseness**: can it be expressed in fewer words? Can it be merged into an existing principle?
+
+If any answer is no, prefer not to write it.
+
+---
+
+## Incremental Update Strategy
+
+When facing changed scenes, judge autonomously:
+
+- **Reinforce**: the new scene merely corroborates an existing principle; compress it into the original sentence or leave unchanged.
+- **Supplement**: a new general SOP, taboo, decision logic, or Agent rule appears.
+- **Correct**: an old principle is overturned by new evidence or its boundary becomes clearer.
+- **Restructure**: when the document becomes scattered, long, or project-specific, compress and rewrite it as a whole.
+- **No change**: when the new content is only project status, ordinary tasks, or low-level facts, do not update L3.
+
+Do not append every change as a new entry. L3 should keep compressing, staying small and accurate.
+
+---
+
+## Output Template
+
+Refer to the format below and use the **write** or **edit** tool to write the final content. Sections may be removed, but Markdown format must be kept and the full text must not exceed 1200 words.
 
 # Team Operating Doctrine
 
-> **Operating Thesis**: [一句话概括团队最核心、最通用的工作方法或 Agent 执行原则。]
+> **Operating Thesis**: [One sentence summarizing the team's most core and most general working method or Agent execution principle.]
 
 ## Core Principles
-[只写跨工作场景稳定成立的高层原则。每条必须语义完整。]
+[Write only high-level principles that hold stably across work scenarios. Each must be semantically complete.]
 
-- [原则]&#58; [适用条件 / 判断逻辑 / 为什么重要]
+- [Principle]&#58; [applicable conditions / decision logic / why it matters]
 
 ## Reusable SOPs
-[只写能被反复执行的流程。不要写具体项目步骤。]
+[Write only processes that can be executed repeatedly. Do not write project-specific steps.]
 
-- [SOP 名称]&#58; 当 [触发条件] 时，先 [步骤1]，再 [步骤2]，最后 [产出/验收标准]。
+- [SOP name]&#58; When [trigger condition], first [step 1], then [step 2], and finally [output / acceptance criteria].
 
 ## Decision Logic
-[记录取舍标准和优先级。]
+[Record trade-off criteria and priorities.]
 
-- 当 [场景] 时，优先 [A] 而不是 [B]，因为 [原因]。
+- When [scenario], prefer [A] over [B], because [reason].
 
 ## Boundaries & Anti-patterns
-[记录禁忌、边界和错误模式。]
+[Record taboos, boundaries, and error patterns.]
 
-- 不要 [错误做法]；应改为 [推荐做法]，因为 [原因]。
+- Do not [wrong practice]; instead [recommended practice], because [reason].
 
 ## Agent Rules
-[记录 Agent 在工作中默认遵守的行为规则。]
+[Record the behavior rules the Agent follows by default at work.]
 
-- Agent 应 [行为规则]，避免 [风险]。
-
----
-
-> **最后更新**：[当前时间] · **来源场景**：[场景数] 个 · **记忆总数**：[总记忆数] 条
+- The Agent should [behavior rule], avoiding [risk].
 
 ---
 
-## 成功标准
+> **最后更新**: [current time] · **Source scenes**: [number of scenes] · **Total memories**: [total memories]
 
-- ✅ 必须使用 write 或 edit 写入 \`persona.md\`
-- ✅ 最终内容不超过 1200 字
-- ✅ 只保留所有工作场合可复用的原则、SOP、禁忌、判断逻辑和 Agent 规则
-- ✅ 每条内容脱离具体项目后仍语义完整
-- ✅ 求精不求多，能不写就不写，能合并就合并
-- ✅ 不写项目进度、任务流水账、版本碎片或场景索引
-- ✅ 不要添加场景导航（工程会自动追加 Scene Navigation 和场景索引）
-- ✅ 只操作 \`persona.md\``;
+---
+
+## Success Criteria
+
+- ✅ You must use write or edit to write \`persona.md\`
+- ✅ Final content must not exceed 1200 words
+- ✅ Keep only principles, SOPs, taboos, decision logic, and Agent rules reusable across all work settings
+- ✅ Every item remains semantically complete once detached from a specific project
+- ✅ Favor precision over volume: omit what you can, merge what you can
+- ✅ Do not write project progress, task running-accounts, version fragments, or scene indexes
+- ✅ Do not add scene navigation (the system automatically appends Scene Navigation and the scene index)
+- ✅ Operate only on \`persona.md\``;
 
 // ============================
 // User Prompt builder (dynamic data)
@@ -282,39 +282,39 @@ export function buildPersonaPrompt(params: PersonaPromptParams): PersonaPromptRe
 
   const isCodeMode = promptMode === "code";
   const targetFile = "persona.md";
-  const modeLabel = mode === "first" ? "🆕 首次生成" : "🔄 迭代更新";
+  const modeLabel = mode === "first" ? "🆕 First generation" : "🔄 Iterative update";
 
   const triggerSection = triggerInfo
-    ? `\n### 触发信息\n${triggerInfo}\n`
+    ? `\n### Trigger Info\n${triggerInfo}\n`
     : "";
 
   const existingPersonaSection = existingPersona
     ? isCodeMode
-      ? `\n## 📄 当前 Team Operating Doctrine（工程已预加载）\n\n` +
-        `*以下是现有 persona.md 中 Team Operating Doctrine 的完整内容（${existingPersona.length} 字符）。更新后必须压缩在 1200 字以内：*\n\n` +
+      ? `\n## 📄 Current Team Operating Doctrine (preloaded by the system)\n\n` +
+        `*Below is the full content of the Team Operating Doctrine in the existing persona.md (${existingPersona.length} characters). After updating it must be compressed to within 1200 words:*\n\n` +
         `\`\`\`markdown\n${existingPersona}\n\`\`\`\n\n---\n`
-      : `\n## 📄 当前 Persona（工程已预加载）\n\n` +
-        `*以下是现有 persona.md 的完整内容（${existingPersona.length} 字符），基于此更新后请控制在2000字内：*\n\n` +
+      : `\n## 📄 Current Persona (preloaded by the system)\n\n` +
+        `*Below is the full content of the existing persona.md (${existingPersona.length} characters). After updating based on it, keep it within 2000 characters:*\n\n` +
         `\`\`\`markdown\n${existingPersona}\n\`\`\`\n\n---\n`
     : "";
 
   const iterationGuide = mode === "incremental"
     ? isCodeMode
-      ? `\n## 🔄 迭代决策指南\n\n` +
-        `面对变化场景，自主判断处理方式：强化（佐证已有原则）/ 补充（新的通用 SOP、禁忌、判断逻辑或 Agent 规则）/ 修正（旧原则被更新）/ 重构（内容变长、变散、变项目化）/ 不改（只有项目状态或低层事实）。\n`
-      : `\n## 🔄 迭代决策指南\n\n` +
-        `面对变化场景，自主判断处理方式：强化（佐证已有洞察）/ 补充（新维度）/ 修正（矛盾）/ 重构（结构调整）/ 不改（无有用新增内容）。\n`
+      ? `\n## 🔄 Iteration Decision Guide\n\n` +
+        `When facing changed scenes, judge how to handle them autonomously: reinforce (corroborate existing principles) / supplement (new general SOPs, taboos, decision logic, or Agent rules) / correct (old principles updated) / restructure (content grown long, scattered, or project-specific) / no change (only project status or low-level facts).\n`
+      : `\n## 🔄 Iteration Decision Guide\n\n` +
+        `When facing changed scenes, judge how to handle them autonomously: reinforce (corroborate existing insights) / supplement (new dimensions) / correct (contradictions) / restructure (structural adjustment) / no change (no useful new content).\n`
     : "";
 
-  const userPrompt = `**输出语言**：\`${targetFile}\` 使用下方变化场景内容的主导语言。
+  const userPrompt = `**Output language**: \`${targetFile}\` uses the dominant language of the changed-scene content below.
 
-**⏰ 更新时间**: ${currentTime}
-**模式**: ${modeLabel}
+**⏰ Update time**: ${currentTime}
+**Mode**: ${modeLabel}
 ${triggerSection}
-## 📊 统计
-- **总记忆数**: ${totalProcessed} 条
-- **场景总数**: ${sceneCount} 个
-- **变化场景**: ${changedSceneCount} 个（自上次更新后）
+## 📊 Statistics
+- **Total memories**: ${totalProcessed}
+- **Total scenes**: ${sceneCount}
+- **Changed scenes**: ${changedSceneCount} (since the last update)
 
 ---
 ${changedScenesContent}

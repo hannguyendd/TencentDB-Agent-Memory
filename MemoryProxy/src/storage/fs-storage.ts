@@ -1,15 +1,15 @@
 /**
- * FsStorage —— ProxyStorage 的本地文件系统实现。
+ * FsStorage -- the local filesystem implementation of ProxyStorage.
  *
- * 定位：离线/私有部署或 docker 只读兜底。生产不推荐（多进程共享目录会 race）。
+ * Positioning: offline/private deployments or docker read-only fallback. Not recommended for production (a directory shared by multiple processes races).
  *
- * 语义：
- *   - key 是相对路径，禁止绝对路径 / 路径穿越（安全守卫）
- *   - putText/putJSON 用 tmp + rename 保证原子；putIfAbsent 用 O_EXCL 保证 CAS
- *   - 目录自动创建
+ * Semantics:
+ *   - key is a relative path; absolute paths / path traversal are forbidden (security guard)
+ *   - putText/putJSON use tmp + rename for atomicity; putIfAbsent uses O_EXCL for CAS
+ *   - directories are created automatically
  *
- * TTL：不实现 sweeper（`fs.stat().mtime` 在某些容器 FS 上不可靠）——
- * 由运维用 tmpwatch / systemd-tmpfiles 清理。见方案 §3.3.3。
+ * TTL: no sweeper implemented (`fs.stat().mtime` is unreliable on some container filesystems) --
+ * cleanup is left to ops via tmpwatch / systemd-tmpfiles. See plan section 3.3.3.
  */
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
@@ -115,14 +115,14 @@ export class FsStorage implements ProxyStorage {
   }
 
   async delPrefix(prefix: string): Promise<number> {
-    // prefix 是目录形式；把它当目录 rmdir -r。为了统计删除数量，先 list 再逐个 unlink 目录。
+    // prefix is in directory form; treat it as a directory and rmdir -r. To count deletions, list first, then unlink one by one.
     const names = await this.listNames(prefix);
     let n = 0;
     for (const name of names) {
       await this.del(prefix + name);
       n++;
     }
-    // 顺带清理空目录（best-effort），不影响计数。
+    // Also clean up empty directories (best-effort); does not affect the count.
     try {
       const fullPrefixDir = this.resolve(prefix.replace(/\/+$/, "") || ".");
       await fs.rm(fullPrefixDir, { recursive: true, force: true });
@@ -131,7 +131,7 @@ export class FsStorage implements ProxyStorage {
   }
 
   async listNames(prefix: string): Promise<string[]> {
-    // prefix 通常以 "/" 结尾，代表一个目录；否则视为"目录 basename"过滤器。
+    // prefix usually ends with "/", representing a directory; otherwise treat it as a "directory basename" filter.
     const dirPart = prefix.endsWith("/") ? prefix : prefix + "/";
     let dirAbs: string;
     try {

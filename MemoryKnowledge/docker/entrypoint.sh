@@ -22,9 +22,9 @@ Required:
 
 LLM routing:
   --llm-mode MODE        proxy (default) | custom
-                         proxy  → wiki ingest 走 context_proxy（TMC 推送的 binding），
-                                  无需下面的直连凭据
-                         custom → 直连自带 OpenAI 兼容端点，需 --llm-key/--llm-base-url
+                         proxy  → wiki ingest goes through context_proxy (binding pushed by TMC),
+                                  the direct-connection credentials below are not needed
+                         custom → connect directly to your own OpenAI-compatible endpoint; requires --llm-key/--llm-base-url
 
 Only for --llm-mode custom (BYO direct endpoint):
   --llm-key KEY
@@ -187,16 +187,16 @@ validate() {
     err=1
   fi
 
-  # 仅 LLM_MODE=custom（自带端点直连）时才需要 --llm-key/--llm-base-url。
-  # 默认 LLM_MODE=proxy：wiki ingest 走 context_proxy（TMC 推送的 llm_binding），
-  # 无需容器内的直连凭据。
+  # --llm-key/--llm-base-url are only needed when LLM_MODE=custom (direct connection to your own endpoint).
+  # Default LLM_MODE=proxy: wiki ingest goes through context_proxy (llm_binding pushed by TMC),
+  # so no direct-connection credentials are needed inside the container.
   if [[ "$SKIP_LLM_CHECK" -eq 0 && "${LLM_MODE:-proxy}" == "custom" ]]; then
     if [[ -z "${LLM_API_KEY:-}" ]]; then
-      echo "error: LLM_MODE=custom 需要 --llm-key / LLM_API_KEY (或 --code-graph-only 跳过)" >&2
+      echo "error: LLM_MODE=custom requires --llm-key / LLM_API_KEY (or skip with --code-graph-only)" >&2
       err=1
     fi
     if [[ -z "${LLM_BASE_URL:-}" ]]; then
-      echo "error: LLM_MODE=custom 需要 --llm-base-url / LLM_BASE_URL (或 --code-graph-only 跳过)" >&2
+      echo "error: LLM_MODE=custom requires --llm-base-url / LLM_BASE_URL (or skip with --code-graph-only)" >&2
       err=1
     fi
   fi

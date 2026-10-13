@@ -1,58 +1,58 @@
 /**
  * normalize-conversation.ts
  *
- * 把 client 原始请求的 messages[] + upstream 返回的 assistantMessage 转换成
- * core `/v3/skill/conversation/add` 需要的 5-role 规范化数组:
+ * Convert the client's raw request messages[] + the assistantMessage returned by upstream into
+ * the 5-role normalized array that core `/v3/skill/conversation/add` requires:
  *   { role: "user" | "assistant" | "tool_call" | "tool_result" | "system",
  *     content: string,
  *     tool_call_id?: string,
  *     tool_name?: string }
  *
- * 明确按协议分支:
+ * Explicitly branches by protocol:
  *   protocol="anthropic" → Anthropic Messages API (Claude Code, /v1/messages)
- *     - user 里 content 可能是 blocks 数组, tool_result 藏在 role=user 的 blocks 里
- *     - assistant 里 tool_use 藏在 content blocks 里
+ *     - in user, content may be a blocks array, and tool_result hides in the blocks of role=user
+ *     - in assistant, tool_use hides in the content blocks
  *   protocol="openai"    → OpenAI Chat Completions (CodeBuddy, /v1/chat/completions)
- *     - tool_result 是独立 role=tool 消息 (只有 tool_call_id, 没有 tool_name)
- *     - assistant.tool_calls 是独立数组字段
+ *     - tool_result is a separate role=tool message (only tool_call_id, no tool_name)
+ *     - assistant.tool_calls is a separate array field
  *   protocol="responses" → OpenAI Responses API (Codex CLI, /responses)
- *     - 顶层字段是 `input[]` 而非 `messages[]`, item 由 `type` 判别:
+ *     - the top-level field is `input[]` rather than `messages[]`, and items are discriminated by `type`:
  *         · type="message" role=user/assistant/developer → content[].input_text|output_text
- *         · type="function_call" → 独立顶层项, 含 call_id / name / arguments
- *         · type="function_call_output" → 独立顶层项, 含 call_id / output
- *         · type="reasoning" → 内部思考, 一律丢弃 (跟 anthropic thinking 对齐)
- *     - developer message 等同 openai role=system, 丢弃 (不进 skill 语料)
- *     - assistant 侧 tool 调用不是 embedded 到 message.content, 而是独立 item, 因此
- *       "本轮 assistantMessage" 抽出来时可能包含前面若干 function_call/function_call_output
- *       跟 text 混在一起 —— caller 传 assistantMessage 时只放"响应的 assistant text 段
- *       + 本轮 stream 累积的 tool_use count override", 已存在的 input[] 里的 function_call
- *       仍由 normalizeConversation 遍历时处理。
+ *         · type="function_call" → a separate top-level item, containing call_id / name / arguments
+ *         · type="function_call_output" → a separate top-level item, containing call_id / output
+ *         · type="reasoning" → internal thinking, always dropped (aligned with anthropic thinking)
+ *     - a developer message is equivalent to openai role=system and is dropped (does not enter the skill corpus)
+ *     - assistant-side tool calls are not embedded in message.content but are separate items, so
+ *       when the "current round's assistantMessage" is extracted it may contain several preceding function_call/function_call_output
+ *       mixed with text -- when the caller passes assistantMessage it should only include "the response's assistant text segment
+ *       + the tool_use count override accumulated by this round's stream"; the function_calls already present in input[]
+ *       are still handled when normalizeConversation iterates.
  *
- * 关键规则 (对应 docs/design/2026-07-17-conversation-normalize.md):
- *   - Anthropic user 里全是 tool_result blocks 时 → 输出 role=tool_result, 不输出 user
- *   - Anthropic user 里 text + tool_result 混合 → 拆成两条 (role=user, role=tool_result)
- *   - Anthropic assistant 里 thinking block → 目前**完全丢弃**
- *     TODO: 后续如果需要保留 thinking, 加个 `keepThinking: boolean` 参数,
- *     保留形式为 role=assistant + content 前缀 [thinking] xxx (对齐 Opik flatten)
- *   - Anthropic image block → 丢弃 (对 skill 抽取无价值)
- *   - Anthropic assistant content 数组为空 → 该消息整个丢弃
- *   - OpenAI role=tool 消息 → tool_name 保持 undefined (core schema 已放宽为 optional)
+ * Key rules (corresponding to docs/design/2026-07-17-conversation-normalize.md):
+ *   - When an Anthropic user contains only tool_result blocks → output role=tool_result, do not output user
+ *   - When an Anthropic user mixes text + tool_result → split into two (role=user, role=tool_result)
+ *   - Anthropic assistant thinking blocks → currently **dropped entirely**
+ *     TODO: if thinking needs to be kept later, add a `keepThinking: boolean` parameter,
+ *     kept in the form role=assistant + content prefix [thinking] xxx (aligned with Opik flatten)
+ *   - Anthropic image block → dropped (of no value for skill extraction)
+ *   - Anthropic assistant content array is empty → the whole message is dropped
+ *   - OpenAI role=tool message → tool_name stays undefined (the core schema has been relaxed to optional)
  *
- * assistantMessage 是本轮 upstream 返回的响应, 已被 proxy 拆出来单独传:
- *   - anthropic 形态: { role: "assistant", content: <blocks 数组> }
- *   - openai 形态:    { role: "assistant", content: string | null, tool_calls?: [...] }
+ * assistantMessage is the response returned by upstream this round, already split out by the proxy and passed separately:
+ *   - anthropic form: { role: "assistant", content: <blocks array> }
+ *   - openai form:    { role: "assistant", content: string | null, tool_calls?: [...] }
  *
- * 该模块不做"本轮切片"—— 调用方要发全历史还是本轮增量由 handler-glue 决定, 这里只做格式规范化。
+ * This module does no "current-round slicing" -- whether the caller sends the full history or the current round's increment is decided by handler-glue; here only format normalization is done.
  *
- * 除 normalizer 外, 本文件还导出两个 round 边界判定 helper:
+ * Besides the normalizer, this file also exports two round-boundary determination helpers:
  *   - isFinalAnswer(asst, toolCallCountOverride?):
- *       判本次响应是不是 agent 的最终回复 (无 tool_use / tool_calls)
+ *       determine whether this response is the agent's final reply (no tool_use / tool_calls)
  *   - findLastFinalAssistant(rawMessages, protocol):
- *       在 messages[] 里找上一次 final assistant 的 index (round 起点定位)
+ *       find the index of the previous final assistant in messages[] (locating the round start)
  *
- * 这两个 helper 由 handler-glue 用来实现 round-level 触发: 只有 final answer
- * 时才 push 到 core, 中间态跳过, 避免"每次 HTTP 都发一次增量"导致 core buffer
- * 累计爆炸 (10 次 tool_use 或 40KB 就触发一次归档)。
+ * handler-glue uses these two helpers to implement round-level triggering: only on a final answer
+ * is it pushed to core and intermediate states are skipped, avoiding "sending an increment on every HTTP" making the core buffer
+ * accumulate explosively (10 tool_uses or 40KB trigger one archive).
  */
 
 import { resolveAgentAdapter } from "../agent-adapters/index.js";
@@ -61,7 +61,7 @@ import { resolveAgentAdapter } from "../agent-adapters/index.js";
 
 export type Protocol = "anthropic" | "openai" | "responses";
 
-/** 输出格式, 对应 core conversationMessageSchema。 */
+/** Output format, corresponding to core conversationMessageSchema. */
 export interface NormalizedMessage {
   role: "user" | "assistant" | "tool_call" | "tool_result" | "system";
   content: string;
@@ -69,16 +69,16 @@ export interface NormalizedMessage {
   tool_name?: string;
 }
 
-/** raw message shape - loose 因为三种协议的原始形态都要能塞进来。 */
+/** Raw message shape - loose because the raw forms of all three protocols must fit in. */
 interface RawMessage {
   role?: string;
   content?: unknown;
   tool_calls?: unknown[];
   tool_call_id?: string;
   /**
-   * codex Responses API input[] 的判别字段:
+   * Discriminator field of codex Responses API input[]:
    *   "message" | "function_call" | "function_call_output" | "reasoning" | ...
-   * anthropic/openai 的 message 里无此字段。
+   * anthropic/openai messages do not have this field.
    */
   type?: string;
   [k: string]: unknown;
@@ -87,11 +87,11 @@ interface RawMessage {
 // ─── Public API ────────────────────────────────────────────────────────────
 
 /**
- * 数 assistant 响应里 tool_use / tool_calls block 的个数, 用于 isFinalAnswer
- * / round 边界判定。跨协议兼容:
- *   - OpenAI: 顶层 `tool_calls: [...]` 数组长度
- *   - Anthropic: content blocks 里 `type === "tool_use"` 的数量
- * 其他形态一律 0 (纯 text 或空响应)。
+ * Count the number of tool_use / tool_calls blocks in the assistant response, used for isFinalAnswer
+ * / round-boundary determination. Cross-protocol compatible:
+ *   - OpenAI: length of the top-level `tool_calls: [...]` array
+ *   - Anthropic: the number of `type === "tool_use"` in the content blocks
+ * Any other form is 0 (plain text or empty response).
  */
 export function countToolCalls(assistantMessage: Record<string, unknown> | null | undefined): number {
   if (!assistantMessage) return 0;
@@ -105,10 +105,10 @@ export function countToolCalls(assistantMessage: Record<string, unknown> | null 
     for (const block of content) {
       const t = (block as Record<string, unknown>)?.type;
       if (t === "tool_use") n++;
-      // Codex Responses API: assistant "message" 只含 output_text; function_call
-      // 是 sibling item, 不在 assistant.content 里出现。所以 responses 场景
-      // countToolCalls(assistantMessage) 恒 0 —— 真正的 tool call 数由 stream
-      // accumulator 的 toolCallCountOverride 传入 (跟 anthropic stream 一致)。
+      // Codex Responses API: the assistant "message" contains only output_text; function_call
+      // is a sibling item and does not appear in assistant.content. So in the responses scenario
+      // countToolCalls(assistantMessage) is always 0 -- the real tool call count is passed in via the stream
+      // accumulator's toolCallCountOverride (consistent with the anthropic stream).
     }
     return n;
   }
@@ -116,27 +116,27 @@ export function countToolCalls(assistantMessage: Record<string, unknown> | null 
 }
 
 /**
- * 判本次 assistantMessage 是不是 agent 的最终回复 (round 结束).
+ * Determine whether this assistantMessage is the agent's final reply (round end).
  *
- * 判定标准：**没有 tool_use / tool_calls** —— 有 text 无所谓，因为可能出现
- * "text + tool_use 混合"的中间态（agent 边说话边调工具）。这种情况下 round
- * 还没结束，text 部分会作为历史保留到 messages[]，下次真正 final 时再一起
- * slice 进本 round。
+ * Criterion: **no tool_use / tool_calls** -- having text doesn't matter, because there can be
+ * a "text + tool_use mixed" intermediate state (the agent speaks while calling tools). In that case the round
+ * has not ended; the text part is kept in messages[] as history, and is sliced into this round
+ * together when the real final comes next time.
  *
- * 两个协议的区分:
- *   - anthropic non-stream: 直接看 asst.content blocks 里有没有 tool_use
- *   - anthropic stream:     content 被 proxy 拉平成 string 了（丢了 blocks 信息），
- *                           调用方必须传 toolCallCountOverride
- *   - openai:               看 asst.tool_calls[] 长度
+ * Distinguishing the protocols:
+ *   - anthropic non-stream: directly check whether the asst.content blocks contain tool_use
+ *   - anthropic stream:     content has been flattened to a string by the proxy (blocks info lost),
+ *                           the caller must pass toolCallCountOverride
+ *   - openai:               check the length of asst.tool_calls[]
  *
- * 复用本文件 countToolCalls 处理协议差异, 这里只加 override 优先级.
+ * Reuses this file's countToolCalls to handle protocol differences; here only the override priority is added.
  */
 export function isFinalAnswer(
   asst: RawMessage | null | undefined,
   toolCallCountOverride?: number,
 ): boolean {
   if (!asst) return false;
-  // stream 场景: override 是权威来源, content 已丢 blocks 结构不能靠它判
+  // stream scenario: override is the authoritative source; content has lost its blocks structure and cannot be relied on
   if (toolCallCountOverride !== undefined) {
     return toolCallCountOverride === 0;
   }
@@ -144,40 +144,40 @@ export function isFinalAnswer(
 }
 
 /**
- * 找 messages[] 里最近一条"最终回复形态"的 assistant index —— 定义为
- * role=assistant 且响应内没有 tool_use / tool_calls。返回 -1 表示历史里全是
- * 中间态 / 没有 assistant, 调用方应从 index 0 开始 slice。
+ * Find the index of the most recent assistant of "final reply form" in messages[] -- defined as
+ * role=assistant with no tool_use / tool_calls in the response. Returns -1 to mean the history is all
+ * intermediate states / has no assistant, and the caller should slice from index 0.
  *
- * 用途: 在 handler-glue 里定位本 round 起点 —— 从"上一次 final assistant"
- * 之后 slice, 就是本 round 完整对话 (user + 中间 tool_use/tool_result... +
- * 本次 assistantMessage)。
+ * Purpose: locate the start of this round in handler-glue -- slicing from after "the previous final assistant"
+ * gives this round's complete conversation (user + intermediate tool_use/tool_result... +
+ * this assistantMessage).
  *
- * 协议差异:
- *   - anthropic: 历史 messages 里 assistant.content 可能是 string (纯 text final)
- *                或 blocks 数组 (混合)。只要 blocks 里没 tool_use 就算 final。
- *   - openai:    历史 messages 里 assistant 可能有 tool_calls 字段。只要
- *                tool_calls 为空/缺失就算 final。
+ * Protocol differences:
+ *   - anthropic: in the history messages assistant.content may be a string (plain text final)
+ *                or a blocks array (mixed). As long as the blocks have no tool_use it counts as final.
+ *   - openai:    in the history messages assistant may have a tool_calls field. As long as
+ *                tool_calls is empty/missing it counts as final.
  */
 export function findLastFinalAssistant(
   rawMessages: RawMessage[],
   protocol: Protocol,
 ): number {
   if (protocol === "responses") {
-    // Codex `input[]` 里 assistant 用 `{type:"message", role:"assistant"}`;
-    // 它的 tool 调用是 sibling item `{type:"function_call", ...}` 而非
-    // 内嵌 block。判 "本条 assistant 是 final" 的规则：从该 index 往后扫,
-    // 只要在遇到下一条 role=user 的 message 之前**没有** function_call
-    // (以及配套的 function_call_output) 出现, 就算 final answer, 本轮结束。
+    // In Codex `input[]`, assistant uses `{type:"message", role:"assistant"}`;
+    // its tool calls are sibling items `{type:"function_call", ...}` rather than
+    // embedded blocks. The rule to judge "this assistant is final": scan from this index onward,
+    // and if no function_call (and its companion function_call_output) appears before the next role=user message,
+    // it counts as a final answer and this round is over.
     for (let i = rawMessages.length - 1; i >= 0; i--) {
       const m = rawMessages[i];
       if (!m || m.type !== "message" || m.role !== "assistant") continue;
-      // 扫 tail 看有没有 function_call
+      // Scan the tail to see whether there is a function_call
       let hasFnCall = false;
       for (let j = i + 1; j < rawMessages.length; j++) {
         const next = rawMessages[j];
         if (!next || typeof next !== "object") continue;
         if (next.type === "function_call") { hasFnCall = true; break; }
-        if (next.type === "message" && next.role === "user") break;   // 到了下一轮
+        if (next.type === "message" && next.role === "user") break;   // reached the next round
       }
       if (!hasFnCall) return i;
     }
@@ -187,11 +187,11 @@ export function findLastFinalAssistant(
     const m = rawMessages[i];
     if (!m || m.role !== "assistant") continue;
     if (isFinalAnswer(m)) {
-      // isFinalAnswer 对两种协议都靠 countToolCalls 判定, 覆盖:
-      //   anthropic: content 是 string → tool_use=0 → final
-      //              content 是 blocks 且无 tool_use → tool_use=0 → final
-      //   openai:    tool_calls=[] 或缺失 → tool_use=0 → final
-      // (protocol 参数保留是为将来扩展更细粒度的判定, 目前不用)
+      // isFinalAnswer relies on countToolCalls for both protocols, covering:
+      //   anthropic: content is a string → tool_use=0 → final
+      //              content is blocks with no tool_use → tool_use=0 → final
+      //   openai:    tool_calls=[] or missing → tool_use=0 → final
+      // (the protocol parameter is kept for future finer-grained determination; currently unused)
       void protocol;
       return i;
     }
@@ -206,9 +206,9 @@ export function normalizeConversation(
   agentSource: string = "claude-code",
 ): NormalizedMessage[] {
   const out: NormalizedMessage[] = [];
-  // 兜底: protocol=responses 但 agentSource 默认为 claude-code (老调用方没传)
-  // → 强制切到 codex adapter, 否则 extractUserText 会用错客户端规则返 null,
-  // 归档链路整个断掉。
+  // Fallback: protocol=responses but agentSource defaults to claude-code (old caller did not pass it)
+  // → force switch to the codex adapter, otherwise extractUserText would use the wrong client rules and return null,
+  // and the whole archive chain would break.
   const effectiveAgentSource = protocol === "responses" && agentSource === "claude-code"
     ? "codex"
     : agentSource;
@@ -222,15 +222,15 @@ export function normalizeConversation(
     for (const c of convertOne(m)) out.push(c);
   }
   if (assistantMessage) {
-    // 对 responses 协议, upstream 只回 assistant text (function_call 在流里
-    // 单独识别并已进入 input[] 下一轮请求, 归档时通过 rawMessages 遍历覆盖),
-    // 所以这里只补一条 role=assistant + text —— 复用 convertCodexInputItem
-    // 走同一路径, 保持与另外两协议对称。
+    // For the responses protocol, upstream returns only assistant text (function_call is identified separately in the stream
+    // and has already entered input[] on the next round's request; at archive time it is covered by iterating rawMessages),
+    // so here only one role=assistant + text is added -- reusing convertCodexInputItem
+    // to take the same path, staying symmetric with the other two protocols.
     const asst: RawMessage = protocol === "responses"
       ? { type: "message", role: "assistant", ...assistantMessage }
       : { role: "assistant", ...assistantMessage };
-    // 保险: 显式设 role=assistant 以防调用方传入的 assistantMessage 缺 role;
-    // convertOne 依赖 effectiveAgentSource, 上面已覆盖 protocol=responses 兜底。
+    // Safety: explicitly set role=assistant in case the caller's assistantMessage lacks role;
+    // convertOne depends on effectiveAgentSource, and the protocol=responses fallback above already covers it.
     asst.role = "assistant";
     for (const c of convertOne(asst)) out.push(c);
   }
@@ -243,12 +243,12 @@ function convertAnthropicMessage(msg: RawMessage, agentSource: string): Normaliz
   const role = msg.role;
   const content = msg.content;
 
-  // role=system: 丢弃, 不发给 core。
-  // 客户端固定 agent instruction (CodeBuddy 26KB / Claude Code 也不小) 跟
-  // skill 抽取无关, 计入 40KB bytes 阈值只会让归档节奏乱套。两侧协议统一处理:
-  //   - Anthropic: system 本来就在 body.system 顶层, messages 里出现是少数场景
-  //   - OpenAI:    system 在 messages[0], 每次 request 都带一份
-  // 详见 handler-glue.ts 上游 normalize 调用点。
+  // role=system: dropped, not sent to core.
+  // The client's fixed agent instruction (CodeBuddy 26KB / Claude Code is not small either) is unrelated to
+  // skill extraction, and counting it toward the 40KB bytes threshold would only mess up the archive cadence. Handled uniformly on both protocol sides:
+  //   - Anthropic: system is originally at the top level of body.system; appearing in messages is a minority scenario
+  //   - OpenAI:    system is at messages[0], carried with every request
+  // See the normalize call site upstream in handler-glue.ts.
   if (role === "system") {
     return [];
   }
@@ -261,17 +261,17 @@ function convertAnthropicMessage(msg: RawMessage, agentSource: string): Normaliz
     return convertAnthropicUser(content, agentSource);
   }
 
-  // 其它 role 一律 drop
+  // All other roles are dropped
   return [];
 }
 
 function convertAnthropicAssistant(content: unknown): NormalizedMessage[] {
-  // content 可能是 string / array of blocks
+  // content may be a string / array of blocks
   if (typeof content === "string") {
     return content.length > 0 ? [{ role: "assistant", content }] : [];
   }
   if (!Array.isArray(content)) {
-    // 兜底: 结构化对象但不是数组 → 序列化
+    // Fallback: a structured object but not an array → serialize
     return [{ role: "assistant", content: contentToString(content) }];
   }
 
@@ -288,7 +288,7 @@ function convertAnthropicAssistant(content: unknown): NormalizedMessage[] {
       const txt = b.text;
       if (typeof txt === "string" && txt.length > 0) textParts.push(txt);
     } else if (t === "tool_use") {
-      // 转成 role=tool_call, tool_name 从 name, tool_call_id 从 id
+      // Convert to role=tool_call, tool_name from name, tool_call_id from id
       const id = typeof b.id === "string" ? b.id : "";
       const name = typeof b.name === "string" ? b.name : undefined;
       const inputStr = safeStringify(b.input);
@@ -300,7 +300,7 @@ function convertAnthropicAssistant(content: unknown): NormalizedMessage[] {
       if (name) tc.tool_name = name;
       toolCalls.push(tc);
     }
-    // 其它 block type (thinking / redacted_thinking / image / ...) 一律丢弃
+    // All other block types (thinking / redacted_thinking / image / ...) are dropped
   }
 
   if (textParts.length > 0) {
@@ -321,26 +321,26 @@ function convertAnthropicUser(content: unknown, agentSource: string): Normalized
   const out: NormalizedMessage[] = [];
   const toolResults: NormalizedMessage[] = [];
 
-  // 收集所有 tool_result（单独输出成 role=tool_result 消息）
+  // Collect all tool_results (output separately as role=tool_result messages)
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const b = block as Record<string, unknown>;
     if (b.type !== "tool_result") continue;
     const id = typeof b.tool_use_id === "string" ? b.tool_use_id : "";
-    // tool_result.content 可能是 string / array of {type:"text",text} / other
+    // tool_result.content may be a string / array of {type:"text",text} / other
     const resultText = anthropicToolResultContentToString(b.content);
     toolResults.push({
       role: "tool_result",
       content: resultText,
       tool_call_id: id,
-      // 注意: anthropic tool_result 没有 tool_name 字段, proxy 也不做反查
-      // (core schema 已放宽为 optional)
+      // Note: anthropic tool_result has no tool_name field, and the proxy does no reverse lookup either
+      // (the core schema has been relaxed to optional)
     });
   }
 
-  // text 部分：通过 agentAdapter 按客户端规则提取"用户真正键入的文本"：
-  //   - claude-code: 取最后一个 text block（跳过 <system-reminder> 前缀元数据）
-  //   - codebuddy / unknown: 走保守的"拼接所有 text"（等价改造前老逻辑）
+  // Text part: extract "the text the user actually typed" via agentAdapter by client rules:
+  //   - claude-code: take the last text block (skipping the <system-reminder> prefix metadata)
+  //   - codebuddy / unknown: use the conservative "concatenate all text" (equivalent to the old logic before the change)
   const adapter = resolveAgentAdapter(agentSource);
   const userText = adapter.extractUserText(content);
   if (typeof userText === "string" && userText.length > 0) {
@@ -360,7 +360,7 @@ function anthropicToolResultContentToString(rc: unknown): string {
       if (bb.type === "text" && typeof bb.text === "string") {
         parts.push(bb.text);
       }
-      // 忽略 image 等其它 block type
+      // Ignore other block types such as image
     }
     return parts.join("\n");
   }
@@ -373,17 +373,17 @@ function convertOpenAIMessage(msg: RawMessage, agentSource: string): NormalizedM
   const role = msg.role;
   const content = msg.content;
 
-  // role=system: 丢弃, 不发给 core。跟 anthropic 分支一致, 详见那边注释。
+  // role=system: dropped, not sent to core. Consistent with the anthropic branch; see the comments there.
   if (role === "system") {
     return [];
   }
   if (role === "user") {
-    // 通过 adapter 按客户端规则提取"用户真正键入的文本"，跟 anthropic 侧对称：
-    //   - codebuddy: 走 <user_query> 抽取（剥掉 <user_info> / <additional_data> /
-    //     <question_answer> 等 CB pseudo-XML wrapper），返回 null 时该轮不进
-    //     skill buffer（避免污染 skill 抽取语料）
-    //   - unknown / cursor 等: 走 default 兜底（拼接所有 text，等价改造前老逻辑）
-    // 详见 agent-adapters/codebuddy.ts + common/user-query-extractor.ts。
+    // Extract "the text the user actually typed" via the adapter by client rules, symmetric with the anthropic side:
+    //   - codebuddy: use <user_query> extraction (stripping CB pseudo-XML wrappers such as <user_info> / <additional_data> /
+    //     <question_answer>); when null is returned, this round does not enter the
+    //     skill buffer (avoiding polluting the skill extraction corpus)
+    //   - unknown / cursor, etc.: use the default fallback (concatenate all text, equivalent to the old logic before the change)
+    // See agent-adapters/codebuddy.ts + common/user-query-extractor.ts.
     const adapter = resolveAgentAdapter(agentSource);
     const userText = adapter.extractUserText(content);
     if (typeof userText === "string" && userText.length > 0) {
@@ -398,7 +398,7 @@ function convertOpenAIMessage(msg: RawMessage, agentSource: string): NormalizedM
       role: "tool_result",
       content: contentToString(content),
       tool_call_id: id,
-      // tool_name 未提供 —— core schema 已 optional
+      // tool_name not provided -- the core schema is already optional
     }];
   }
   if (role === "assistant") {
@@ -444,29 +444,29 @@ function convertOpenAIAssistant(content: unknown, toolCalls: unknown): Normalize
 // ─── Codex Responses API (input[] items) ───────────────────────────────────
 
 /**
- * 把 codex `input[]` 的一个 item 翻译成 5-role NormalizedMessage[]。
+ * Translate one item of codex `input[]` into 5-role NormalizedMessage[].
  *
- * item 类型清单 (docs/2026-08-07-codex-integration-plan.md §7.2 / agent-adapters/codex.ts):
+ * Item type list (docs/2026-08-07-codex-integration-plan.md §7.2 / agent-adapters/codex.ts):
  *   - {type:"message", role:"user"|"assistant"|"developer", content:[...]}
  *   - {type:"function_call", call_id, name, arguments}
  *   - {type:"function_call_output", call_id, output}
  *   - {type:"reasoning", encrypted_content}
  *
- * 映射:
- *   message.developer         → 丢弃 (等同 openai role=system, 不进 skill 语料)
- *   message.user              → role=user, content = 用户真键入文本 (走 codex adapter)
- *   message.assistant         → role=assistant, content = output_text 拼接
+ * Mapping:
+ *   message.developer         → dropped (equivalent to openai role=system, does not enter the skill corpus)
+ *   message.user              → role=user, content = the text the user really typed (via the codex adapter)
+ *   message.assistant         → role=assistant, content = output_text concatenated
  *   function_call             → role=tool_call, tool_call_id, tool_name, content=arguments
  *   function_call_output      → role=tool_result, tool_call_id, content=output
- *   reasoning                 → 丢弃 (跟 anthropic thinking 对齐; 不进 skill 语料)
- *   其它未知 type              → 丢弃 (偏严不偏宽, 未来 codex 加新 item type 也不会误采)
+ *   reasoning                 → dropped (aligned with anthropic thinking; does not enter the skill corpus)
+ *   other unknown types       → dropped (strict rather than lenient, so a new item type added by codex in the future is not wrongly collected)
  */
 function convertCodexInputItem(item: RawMessage, agentSource: string): NormalizedMessage[] {
   const type = item.type;
 
   if (type === "message") {
     const role = item.role;
-    // developer / system / 其它 role 一律丢
+    // developer / system / other roles are all dropped
     if (role === "user") {
       return convertCodexUserMessage(item.content, agentSource);
     }
@@ -501,18 +501,18 @@ function convertCodexInputItem(item: RawMessage, agentSource: string): Normalize
     }];
   }
 
-  // reasoning / 其它一律 drop
+  // reasoning / everything else is dropped
   return [];
 }
 
-/** codex user message 里 content 是 [{type:"input_text",text}, ...] */
+/** In a codex user message, content is [{type:"input_text",text}, ...] */
 function convertCodexUserMessage(content: unknown, agentSource: string): NormalizedMessage[] {
-  // 优先复用 codex agent adapter 的 extractUserText —— 它跟 codexHandler
-  // 里 `extractCodexUserText(input)` 是同一份实现 (agent-adapters/codex.ts:81),
-  // 语义一致, 未来任何抽取规则升级只需改那一份。这里传单条 message 是包一层
-  // adapter 期望的 [message] 数组即可 (它按 role=user 过滤)。
-  //   注: adapter.extractUserText 期望的入参是完整 input[] 数组, 但内部只按
-  //   条 iterate 挑最后一条 user; 传单条也能命中。
+  // Prefer reusing the extractUserText of the codex agent adapter -- it is the same implementation as
+  // `extractCodexUserText(input)` in codexHandler (agent-adapters/codex.ts:81),
+  // with consistent semantics; any future upgrade of extraction rules only needs to change that one place. Here passing a single message just means wrapping it in the
+  // [message] array the adapter expects (it filters by role=user).
+  //   Note: adapter.extractUserText expects the full input[] array as its argument, but internally it only
+  //   iterates item by item to pick the last user; passing a single item also hits.
   const singleItem = { type: "message", role: "user", content } as Record<string, unknown>;
   const adapter = resolveAgentAdapter(agentSource);
   const text = adapter.extractUserText([singleItem]);
@@ -522,7 +522,7 @@ function convertCodexUserMessage(content: unknown, agentSource: string): Normali
   return [];
 }
 
-/** codex assistant message 里 content 是 [{type:"output_text",text}, ...] */
+/** In a codex assistant message, content is [{type:"output_text",text}, ...] */
 function convertCodexAssistantMessage(content: unknown): NormalizedMessage[] {
   if (typeof content === "string") {
     return content.length > 0 ? [{ role: "assistant", content }] : [];
@@ -532,7 +532,7 @@ function convertCodexAssistantMessage(content: unknown): NormalizedMessage[] {
   for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const b = block as Record<string, unknown>;
-    // codex assistant text 用 output_text; 兜底 text 万一 codex 用了别的写法
+    // codex assistant text uses output_text; fallback text in case codex uses another form
     if ((b.type === "output_text" || b.type === "text") && typeof b.text === "string") {
       parts.push(b.text);
     }

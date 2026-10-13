@@ -52,7 +52,7 @@ trap cleanup EXIT
 # 1) Start a proxy with cost-guard enabled + markerOptIn=true + log.level=debug
 sed -e "s|^  port: 8096|  port: $CGPORT|" \
     -e 's|^  level: info.*|  level: debug|' \
-    -e 's|^  enabled: false        # 是否启用成本守卫|  enabled: true        # 是否启用成本守卫|' \
+    -e 's|^  enabled: false        # Whether to enable cost guard|  enabled: true        # Whether to enable cost guard|' \
     -e 's|^  markerOptIn: false|  markerOptIn: true|' \
     "$BASECFG" > "$CGCFG"
 

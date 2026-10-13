@@ -1,13 +1,13 @@
 /**
  * POST /v3/session/refresh-cache
  *
- * 核心逻辑：基于 session init 信息重新执行 prewarmFromConfig，刷新 COS 上的注入缓存。
- * 除了 hook 侧的缓存，同时也会重新拉一次 Agent/Task 的 detail 覆写到 SessionStore，
- * 让"任务描述 / Agent 描述"这类 session-init 时快照下来的字段也跟着刷新。
+ * Core logic: re-run prewarmFromConfig based on the session init info, refreshing the injection cache on COS.
+ * Besides the hook-side cache, it also re-fetches the Agent/Task detail and overwrites it into SessionStore,
+ * so that fields snapshotted at session-init time, such as "task description / Agent description", are refreshed too.
  *
- * 两种使用方式：
- *   1. 函数调用（mem:sync 内部用）— import refreshSessionCache()
- *   2. HTTP 接口（面板前端用）— createSessionRefreshHandler() 注册路由
+ * Two ways to use it:
+ *   1. Function call (used inside mem:sync) — import refreshSessionCache()
+ *   2. HTTP endpoint (used by the panel frontend) — createSessionRefreshHandler() registers the route
  */
 
 import type { Context } from "hono";
@@ -29,12 +29,12 @@ export interface RefreshInput {
 
 export interface RefreshResult {
   success: boolean;
-  /** Hook 缓存刷新的 hookId 列表（skill/memory/knowledge/... injector 各自的 id）。 */
+  /** List of hookIds whose hook cache was refreshed (the ids of the skill/memory/knowledge/... injectors). */
   refreshed: string[];
   skipped: string[];
-  /** 是否成功重拉了 agent detail（覆写到 SessionStore）。 */
+  /** Whether the agent detail was successfully re-fetched (overwritten into SessionStore). */
   agentRefreshed: boolean;
-  /** 是否成功重拉了 task detail（覆写到 SessionStore）。 */
+  /** Whether the task detail was successfully re-fetched (overwritten into SessionStore). */
   taskRefreshed: boolean;
   tookMs: number;
   error?: string;
@@ -43,10 +43,10 @@ export interface RefreshResult {
 // ── Core Logic ─────────────────────────────────────────────────────────────
 
 /**
- * 重新拉一次 Agent + Task detail 并覆写到 SessionStore。
+ * Re-fetch the Agent + Task detail and overwrite it into SessionStore.
  *
- * 失败仅 warn 不抛：agent/task detail 拉不到属于"降级"场景，hook 缓存刷新仍然
- * 应当继续。返回值告诉 caller 哪一项成功了以便文案里说明。
+ * Failures only warn and do not throw: failing to fetch the agent/task detail is a "degradation" scenario, and the hook cache refresh should
+ * still continue. The return value tells the caller which items succeeded so the message text can explain it.
  */
 async function refreshAgentTaskDetail(
   state: SessionInitState,
@@ -58,13 +58,13 @@ async function refreshAgentTaskDetail(
   const sessionInfo = state.sessionInfo;
   if (!sessionInfo) return { agentRefreshed: false, taskRefreshed: false };
 
-  // ServiceId (space) 取自 sessionInfo；调用方传入的 spaceId 作为兜底。
+  // ServiceId (space) is taken from sessionInfo; the spaceId passed by the caller serves as a fallback.
   const serviceId = sessionInfo.space_id || spaceIdFromCaller || "";
-  // MetadataClient 需要 x-tdai-user-key，优先 sessionInfo，再退到调用方。
+  // MetadataClient needs x-tdai-user-key; prefer sessionInfo, then fall back to the caller's.
   const userKey = sessionInfo.user_key || callerUserKey || "";
 
   if (!serviceId || !userKey || !config.coreSkill?.endpoint) {
-    // 缺少 kernel 调用要素 → 直接跳过 detail 刷新，不视为错误。
+    // Missing the elements needed for a kernel call → skip the detail refresh directly, not treated as an error.
     return { agentRefreshed: false, taskRefreshed: false };
   }
 
@@ -137,15 +137,15 @@ async function refreshAgentTaskDetail(
 }
 
 /**
- * 刷新当前 session 的全部注入缓存。
+ * Refresh all injection caches of the current session.
  *
- * 从 SessionStore 取 sessionInfo → 重拉 Agent/Task detail 覆写 store →
- * 构建 PrewarmInput → 调用 prewarmFromConfig()
+ * Get sessionInfo from SessionStore → re-fetch Agent/Task detail and overwrite the store →
+ * build PrewarmInput → call prewarmFromConfig()
  */
 export async function refreshSessionCache(input: RefreshInput): Promise<RefreshResult> {
   const { sessionKey, agentSource, config, spaceId, callerUserKey } = input;
 
-  // 参数校验
+  // Parameter validation
   if (!sessionKey) {
     return {
       success: false, refreshed: [], skipped: [],
@@ -154,7 +154,7 @@ export async function refreshSessionCache(input: RefreshInput): Promise<RefreshR
     };
   }
 
-  // 从 SessionStore 取 session 状态
+  // Get the session state from SessionStore
   const compositeKey = `${agentSource}:${sessionKey}`;
   const store = getSessionStore();
   const state: SessionInitState | undefined = store.get(compositeKey);
@@ -177,13 +177,13 @@ export async function refreshSessionCache(input: RefreshInput): Promise<RefreshR
 
   const t0 = Date.now();
 
-  // Step 1: 尝试重拉 agent/task detail 并覆写 SessionStore。
-  //         失败不阻断 hook 缓存刷新，只是最终返回值里 agentRefreshed/taskRefreshed 为 false。
+  // Step 1: try to re-fetch the agent/task detail and overwrite SessionStore.
+  //         A failure does not block the hook cache refresh; only agentRefreshed/taskRefreshed in the final return value are false.
   const { agentRefreshed, taskRefreshed } = await refreshAgentTaskDetail(
     state, compositeKey, config, spaceId, callerUserKey,
   );
 
-  // Step 2: 用最新 state 里的 agent/task detail 构造 PrewarmInput。
+  // Step 2: build PrewarmInput from the agent/task detail in the latest state.
   const latestState = store.get(compositeKey) ?? state;
   const sessionInfo = latestState.sessionInfo!;
   const agentDetail = latestState.agentDetail ?? null;
@@ -202,12 +202,12 @@ export async function refreshSessionCache(input: RefreshInput): Promise<RefreshR
         taskDetail,
         callerUserKey,
       },
-      // 刷新场景必须 clearBefore=true —— 首次 session_init 复用同一入口时不带
-      // 这个选项,保留 "cache miss 由 pipeline 走 execute() self-heal" 的语义;
-      // 刷新时开启后,任何 hook 拿到 []/超时/异常都会连带旧缓存一起清掉,防止
-      // "资产已解绑但注入还带着老快照" 的场景(尤其 knowledge 的 wiki/code-graph
-      // 全解绑 → prewarm 返回空 → 默认逻辑不写 → COS 上老 <knowledge_tools>
-      // 无限续命)。详见 `injection/prewarm.ts` 的 PrewarmOptions.clearBefore 注释。
+      // The refresh scenario must use clearBefore=true -- the first session_init reuses the same entry point without
+      // this option, preserving the semantics of "cache miss is handled by the pipeline's execute() self-heal";
+      // when enabled during a refresh, any hook that gets []/timeout/exception also clears the old cache along with it, preventing
+      // the scenario of "the asset has been unbound but the injection still carries the old snapshot" (especially when all of knowledge's wiki/code-graph
+      // are unbound → prewarm returns empty → the default logic does not write → the old <knowledge_tools> on COS
+      // lives on forever). See the PrewarmOptions.clearBefore comment in `injection/prewarm.ts`.
       { clearBefore: true },
     );
     const tookMs = Date.now() - t0;
@@ -233,8 +233,8 @@ export async function refreshSessionCache(input: RefreshInput): Promise<RefreshR
 // ── HTTP Handler ───────────────────────────────────────────────────────────
 
 /**
- * 创建 HTTP handler，注册到 server.ts。
- * 走 admin auth 鉴权（复用 admin-auth.ts 的模式）。
+ * Create the HTTP handler, registered into server.ts.
+ * Uses admin auth (reusing the pattern of admin-auth.ts).
  */
 export function createSessionRefreshHandler(config: ProxyConfig) {
   return async (c: Context): Promise<Response> => {

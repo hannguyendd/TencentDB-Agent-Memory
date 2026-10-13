@@ -1,8 +1,8 @@
-/* AnalyticsPage — 可观测使用看板样式
+/* AnalyticsPage -- observability usage dashboard styles
  *
- * 约定：颜色全部走 Tea Token（自适应深浅色），不硬编码色值；
- * 不使用 `tea-` 前缀内置类名（classPrefix 可变，硬写会静默失效），
- * 需要作用于 Tea 组件时通过组件自身 className 挂自有类名。
+ * Convention: all colors use Tea Tokens (adapts to light/dark), no hard-coded color values;
+ * do not use the built-in `tea-` prefixed class names (classPrefix is configurable, hard-coding would silently break),
+ * to affect Tea components, attach custom class names via the component's own className.
  */
 
 ._an-toolbar {
@@ -22,15 +22,15 @@
   font-size: 12px;
 }
 
-/* KPI 行：MetricsBoard 自带排版，这里只做等宽自适应布局
- * （与 WikiSourcesPanel 的 _asset-wiki-stats 同一模式） */
+/* KPI row: MetricsBoard has its own layout, here only an equal-width adaptive layout is applied
+ * (same pattern as _asset-wiki-stats in WikiSourcesPanel) */
 ._an-kpi-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
-/* 环比徽标 */
+/* Period-over-period badge */
 ._an-delta {
   display: inline-flex;
   align-items: center;
@@ -60,7 +60,7 @@
   background: var(--tea-color-bg-secondary-default);
 }
 
-/* 占比横向条 */
+/* Horizontal share bar */
 ._an-sharebar {
   display: flex;
   flex-direction: column;
@@ -107,7 +107,7 @@
   font-style: normal;
 }
 
-/* 折线趋势 */
+/* Line trend */
 ._an-trend-svg {
   display: block;
   width: 100%;
@@ -123,7 +123,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 单点时轴标签跟随居中的数据点 */
+/* With a single point, the axis label follows the centered data point */
 ._an-trend-axis--single {
   justify-content: center;
 }
@@ -163,13 +163,13 @@
   font-size: 12px;
 }
 
-/* 请求体 / 指纹等技术字段等宽展示 */
+/* Technical fields such as request body / fingerprint shown in monospace */
 ._an-mono {
   font-family: SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
 
-/* ── 四类资产分布卡片 ── */
+/* ── Four asset category distribution cards ── */
 ._an-cat-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -246,7 +246,7 @@
   font-size: 12px;
 }
 
-/* ── trace 明细 ── */
+/* ── trace details ── */
 ._an-trace-filters {
   display: flex;
   align-items: center;
@@ -276,12 +276,12 @@
   margin-top: 12px;
 }
 
-/* ── Tab 视角切换 ── */
+/* ── Tab view switcher ── */
 ._an-tabs {
   background: transparent;
 }
 
-/* Tab 内各卡片沿用页面级 16px 纵向间距 */
+/* Cards inside a Tab keep the page-level 16px vertical spacing */
 ._an-tab-body {
   display: flex;
   flex-direction: column;
@@ -289,7 +289,7 @@
   padding-top: 16px;
 }
 
-/* ── 模型分布表 ── */
+/* ── Model distribution table ── */
 ._an-model-cell {
   display: flex;
   flex-direction: column;
@@ -308,7 +308,7 @@
   min-width: 40px;
 }
 
-/* ── usage_raw 分级构成 ── */
+/* ── usage_raw tiered breakdown ── */
 ._an-raw-summary {
   display: flex;
   align-items: center;
@@ -337,7 +337,7 @@
   font-size: 12px;
 }
 
-/* ── 下钻抽屉 ── */
+/* ── Drill-down drawer ── */
 ._an-drill-body {
   display: flex;
   flex-direction: column;
@@ -355,7 +355,7 @@
   gap: 10px;
 }
 
-/* ── 用户名单元格 ── */
+/* ── Username cell ── */
 ._an-user-cell {
   display: flex;
   flex-direction: column;
@@ -367,7 +367,7 @@
   font-size: 11px;
 }
 
-/* 成员维度资产使用次数 chips（配合「主要资产」列多类别展示） */
+/* Per-member asset usage count chips (works with the multi-category display of the "Main asset" column) */
 ._an-member-assets {
   display: inline-flex;
   flex-wrap: wrap;
@@ -398,7 +398,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* 表格内的用户名下钻链接：去掉 Button 默认内边距，与文本列对齐 */
+/* Username drill-down link in tables: remove the Button's default padding to align with the text column */
 ._an-user-link.tea-btn {
   padding: 0;
   height: auto;

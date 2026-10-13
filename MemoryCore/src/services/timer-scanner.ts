@@ -28,15 +28,15 @@ interface Logger {
 }
 
 export interface TimerScannerConfig {
-  /** 扫描间隔 ms (default: 2000) */
+  /** Scan interval ms (default: 2000) */
   scanIntervalMs?: number;
-  /** 每个 shard 每次最多取出的 timer 数 (default: 1000) */
+  /** Max timers taken out per shard per scan (default: 1000) */
   claimBatchSize?: number;
-  /** 节点 ID (用于日志标识) */
+  /** Node ID (for log identification) */
   nodeId?: string;
-  /** Legacy: 实例列表（Scheme D 下不再需要，保留兼容） */
+  /** Legacy: instance list (no longer needed under Scheme D, kept for compatibility) */
   instances?: string[] | (() => Promise<string[]>);
-  /** Legacy: leader 相关配置（Scheme D 下忽略） */
+  /** Legacy: leader-related config (ignored under Scheme D) */
   leaderLockKey?: string;
   leaderLockTtlMs?: number;
   leaderRenewIntervalMs?: number;

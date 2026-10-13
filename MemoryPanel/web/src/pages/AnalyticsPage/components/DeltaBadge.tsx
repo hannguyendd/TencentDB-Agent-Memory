@@ -1,8 +1,8 @@
 /**
- * DeltaBadge — 环比增量徽标。
+ * DeltaBadge -- period-over-period delta badge.
  *
- * 正向 ↑（success 色）/ 负向 ↓（error 色）/ 持平 ≈（次要色）。
- * 阈值 0.005：低于该幅度视为持平，避免 CH round(…,2) 的尾差被渲染成"变化"。
+ * Positive up arrow (success color) / negative down arrow (error color) / flat approx (secondary color).
+ * Threshold 0.005: changes below this are treated as flat, so CH round(...,2) rounding residue isn't rendered as a "change".
  */
 
 const FLAT_THRESHOLD = 0.005;

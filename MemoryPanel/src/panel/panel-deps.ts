@@ -27,22 +27,22 @@ export interface PanelDeps {
   instanceRegistry: InstanceRegistry;
   kernelHttp: KernelHttpPort;
   metaKernel: MetaKernelPort;
-  /** 按请求 instanceId 构造 KS 客户端（x-tdai-service-id = instanceId）。 */
+  /** Build the KS client per request instanceId (x-tdai-service-id = instanceId). */
   knowledgeClientFactory: (instanceId: string) => KnowledgeClientPort;
   skillKernel: SkillKernelPort;
-  /** 内核 /v3/analytics/* 查询面透明代理（GET/POST 按 action 分流）。 */
+  /** Kernel /v3/analytics/* query-plane transparent proxy (GET/POST split by action). */
   analyticsKernel: AnalyticsKernelPort;
-  /** 内核 /v3/task-source/* 调用面（Task 外部来源导入，令牌随请求体透传）。 */
+  /** Kernel /v3/task-source/* call surface (Task external source import; the token is passed through in the request body). */
   taskSourceKernel: TaskSourceKernelPort;
-  /** Knowledge 抽取任务内存态：create 时 stash owner key，callback ready 时取出注册 meta asset。 */
+  /** In-memory state of Knowledge extraction tasks: stash the owner key at create time, and take it out at callback ready to register the meta asset. */
   knowledgeTaskRegistry: KnowledgeTaskRegistry;
-  /** Wiki ingest 细粒度进度（KS ingest_progress 回调写入；wiki/get 聚合读出）。 */
+  /** Fine-grained Wiki ingest progress (written by the KS ingest_progress callback; read and aggregated by wiki/get). */
   ingestProgressStore: IngestProgressStore;
-  /** 可选 ClickHouse API 调用审计。未配则 NoOp，零开销。 */
+  /** Optional ClickHouse API call audit. NoOp when not configured, zero overhead. */
   apiCallTelemetry: PanelApiCallTelemetry;
-  /** 兼容 user_key 与可选 IdP 登录的统一认证服务。 */
+  /** Unified auth service compatible with user_key and optional IdP login. */
   auth: PanelAuthService;
-  /** user_key → user_id 缓存解析器（telemetry 埋点用；auth/verify 后台刷新）。 */
+  /** user_key -> user_id cache resolver (for telemetry instrumentation; background refresh after auth/verify). */
   userIdResolver: PanelUserIdResolver;
 }
 
@@ -66,7 +66,7 @@ export function buildPanelDeps(config: PanelConfig): PanelDeps {
   const taskSourceKernel = new FetchTaskSourceAdapter(kernelHttp, config.metadataRemoteTimeoutMs);
   const knowledgeTaskRegistry = new KnowledgeTaskRegistry();
   const ingestProgressStore = new IngestProgressStore();
-  // instance_id → gateway 参数：telemetry backfill 需要 per-instance 调 auth/verify
+  // instance_id -> gateway params: telemetry backfill needs a per-instance auth/verify call
   const instanceCtxProvider = (instanceId: string) => {
     try {
       const entry = instanceRegistry.resolve(instanceId);
@@ -76,7 +76,7 @@ export function buildPanelDeps(config: PanelConfig): PanelDeps {
         gatewayApiKey: entry.api_key,
       };
     } catch {
-      // instance 已从 registry 移除（老 CH 数据引用了下线的 instance）→ 跳过
+      // The instance has been removed from the registry (old CH data references a decommissioned instance) -> skip
       return null;
     }
   };

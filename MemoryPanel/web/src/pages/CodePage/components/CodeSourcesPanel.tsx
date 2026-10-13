@@ -1,7 +1,7 @@
 /**
- * CodeSourcesPanel —— Code 资产页主面板（列表视图 + 注册/分配组装）。
- * 列表视图渲染与组件组装；状态/数据逻辑在 useCodeSources，详情在 CodeDetailView，
- * Markdown 渲染统一走共享 AssetMarkdown。
+ * CodeSourcesPanel -- main panel of the Code asset page (list view + register/allocate assembly).
+ * List view rendering and component assembly; state/data logic is in useCodeSources, details in CodeDetailView,
+ * and Markdown rendering uniformly uses the shared AssetMarkdown.
  */
 import { useTranslation } from 'react-i18next';
 import { Alert, Button, Card, Form, Input, Justify, MetricsBoard, Modal, SearchBox, Segment, Select, StatusTip, Table, Text } from 'tea-component';
@@ -49,7 +49,7 @@ export default function CodeSourcesPanel() {
     formBranch,
     setFormBranch,
     submitting,
-    // 外部来源
+    // External sources
     formSourceType,
     setFormSourceType,
     sourceProviders,
@@ -125,7 +125,7 @@ export default function CodeSourcesPanel() {
               >
                 {t('code.allocateToAgent')}
               </Button>
-              {/* 注册（新增团队池资产）与 memory/skill 对齐，放右上角 header */}
+              {/* Register (add a team pool asset) is aligned with memory/skill, placed in the top-right header */}
               <Button type="primary" onClick={openRegister} data-guide="create-code">
                 + {t('code.register')}
               </Button>
@@ -444,7 +444,7 @@ export default function CodeSourcesPanel() {
           const trimmedRepo = formRepo.trim();
           const isSsh = trimmedRepo.startsWith('git@');
           const validUrl = isValidGitHttpUrl(trimmedRepo);
-          // 已输入内容、非 SSH、但又不是合法 http(s) 地址 → 提示格式错误。
+          // Content entered, not SSH, but also not a valid http(s) address -> prompt a format error.
           const showUrlError = !!trimmedRepo && !isSsh && !validUrl;
           return (
             <Modal
@@ -483,7 +483,7 @@ export default function CodeSourcesPanel() {
                     />
                   </Form.Item>
 
-                  {/* 外部来源：选了才需要令牌；来源清单来自 KS，为空则不显示该行 */}
+                  {/* External sources: a token is needed only once one is chosen; the source list comes from KS, and this row is hidden when empty */}
                   {sourceProviders.length > 0 && (
                     <Form.Item
                       label={t('code.register.source')}
@@ -495,12 +495,12 @@ export default function CodeSourcesPanel() {
                         value={formSourceType}
                         onChange={(value) => {
                           setFormSourceType(value);
-                          setFormCredential({}); // 切换来源立即丢弃已填凭据
+                          setFormCredential({}); // Discard entered credentials immediately when switching source
                         }}
                         options={[
                           { value: '', text: t('code.register.sourcePublic') },
                           ...sourceProviders.map((p) => {
-                            // 展示名取 i18n（code.source.<id>）；未收录的来源回退 id。
+                            // Display name taken from i18n (code.source.<id>); sources not listed fall back to the id.
                             const i18nKey = `code.source.${p.id}`;
                             const localized = t(i18nKey);
                             return {
@@ -514,13 +514,13 @@ export default function CodeSourcesPanel() {
                   )}
 
                   {(() => {
-                    // 按当前 provider 的 form_fields 动态渲染凭据表单
+                    // Dynamically render the credential form per the current provider's form_fields
                     const provider = sourceProviders.find((p) => p.id === formSourceType);
                     if (!provider) return null;
                     return provider.form_fields.map((field, idx) => {
                       const isLast = idx === provider.form_fields.length - 1;
-                      // i18n key 规约：code.credField.<name>.{label,placeholder}
-                      // 未收录 name 时 fallback 到 code.register.token* 老 key（bearer 场景保持兼容）
+                      // i18n key convention: code.credField.<name>.{label,placeholder}
+                      // When name is not listed, fall back to the old code.register.token* keys (bearer scenario stays compatible)
                       const labelKey = `code.credField.${field.name}.label`;
                       const label = t(labelKey);
                       const placeholderKey = `code.credField.${field.name}.placeholder`;
@@ -577,7 +577,7 @@ export default function CodeSourcesPanel() {
           );
         })()}
 
-      {/* Allocate Code-Graph → Agent (固定资产) */}
+      {/* Allocate Code-Graph -> Agent (fixed asset) */}
       {allocateTarget && (
         <AllocateAssetDialog
           assetType="code_graph"

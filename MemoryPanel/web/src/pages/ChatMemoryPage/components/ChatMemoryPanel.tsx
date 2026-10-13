@@ -1,7 +1,7 @@
 /**
- * ChatMemoryPanel — 原子能力 · 记忆。
+ * ChatMemoryPanel -- atomic capability: memory.
  *
- * 本文件只保留渲染与组装；状态/数据逻辑在 useChatMemory，常量与工具在 memory-utils。
+ * This file keeps only rendering and assembly; state/data logic lives in useChatMemory, constants and utilities in memory-utils.
  */
 import { useTranslation } from 'react-i18next';
 import { Button, Segment, Select } from 'tea-component';
@@ -180,7 +180,7 @@ export default function ChatMemoryPanel(
                 const l0Count = b.layer_counts?.L0_messages ?? 0;
                 return (
                   <div className="_memory-card">
-                    {/* 第 1 行：标题（左） + 蓝色计数徽章（右） */}
+                    {/* Row 1: title (left) + blue count badge (right) */}
                     <div className="_memory-card-header">
                       <span className="_memory-card-title" title={b.title}>
                         {b.title}
@@ -193,11 +193,11 @@ export default function ChatMemoryPanel(
                       {l0Count > 0 && <span className="_memory-card-count">{l0Count}</span>}
                     </div>
 
-                    {/* 第 2 行：资产真实 id，等宽灰色 */}
+                    {/* Row 2: the asset's real id, monospace gray */}
                     <div className="_memory-card-id" title={b.id}>{b.id}</div>
 
-                    {/* 第 3 行：用户名（左） + 时间 / 解绑（右）
-                        复用通用 AssetItemBadges + AssetItemTime，与 Skills 页结构一致 */}
+                    {/* Row 3: username (left) + time / unbind (right)
+                        reuses the shared AssetItemBadges + AssetItemTime, consistent with the Skills page structure */}
                     <AssetItemBadges>
                       {b.uploaded_by_user_id && (
                         <UserBadge
@@ -225,7 +225,7 @@ export default function ChatMemoryPanel(
                       )}
                     </AssetItemBadges>
 
-                    {/* 第 4 行：共享/私密切换（仅 owner 可见） */}
+                    {/* Row 4: shared/private toggle (visible to the owner only) */}
                     {canToggleScope && (
                       <div
                         className="_memory-card-scope"

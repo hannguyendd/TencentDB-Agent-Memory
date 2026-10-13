@@ -7,10 +7,10 @@
  * exact same wording, so this file should NOT diverge — keep it byte-equal
  * with the design doc.
  *
- * NOTE (skill_view id 模式): 原文 "load it with skill_view(name)" 已改为不绑定
- * 具体参数字段的中性表述,因为默认已切到 id 模式(skill_view 传 skill_id)。
- * 具体传 id 还是 name 由 skill_view 工具描述 + <available_skills> 每行格式说明决定。
- * 若同步 Hermes / 设计文档,请一并更新这句,勿当作笔误改回。
+ * NOTE (skill_view id mode): the original "load it with skill_view(name)" was changed to a neutral wording that does not bind
+ * a specific parameter field, because the default has switched to id mode (skill_view takes skill_id).
+ * Whether to pass id or name is decided by the skill_view tool description + the per-line format described in <available_skills>.
+ * If syncing Hermes / the design doc, please update this sentence as well; do not revert it as a typo.
  */
 
 export const SKILL_LISTING_HEADER =

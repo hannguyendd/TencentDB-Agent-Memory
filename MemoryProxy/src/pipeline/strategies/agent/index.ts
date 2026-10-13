@@ -1,12 +1,12 @@
 /**
- * AgentStrategy 工厂 —— 按 agentSource 分派 10 个 AgentStrategy 实例。
+ * AgentStrategy factory -- dispatches 10 AgentStrategy instances by agentSource.
  *
- * 主蓝图 §2.1 列 8 个 (claude-code/codebuddy/codex/workbuddy/dsh/opencode/
- * pi/default); addendum §4.3 追加 hermes/openclaw 两个 header-only agent,
- * 与 pi 共用同一组约束 (supportsSessionForm=false + bypassOnPresetFail=true)。
- * 前 8 个的 derive 源是 `agent-adapters/` 下同名 adapter; hermes/openclaw
- * 无独立 adapter (未做抓包特化), 复用 defaultAdapter 并在 strategy 层补字段 ——
- * 见 hermes.ts 头注释。
+ * The main blueprint §2.1 lists 8 (claude-code/codebuddy/codex/workbuddy/dsh/opencode/
+ * pi/default); addendum §4.3 adds two header-only agents, hermes/openclaw,
+ * which share the same constraints as pi (supportsSessionForm=false + bypassOnPresetFail=true).
+ * The first 8 derive from the same-named adapters under `agent-adapters/`; hermes/openclaw
+ * have no dedicated adapter (no capture-specific specialization), reuse defaultAdapter and fill in fields at the strategy layer --
+ * see the header comment of hermes.ts.
  */
 
 import type { AgentStrategy } from "./types.js";
@@ -43,7 +43,7 @@ export function resolveAgentStrategy(agentSource: string): AgentStrategy {
     case "dsh": return dshStrategy;
     case "opencode": return opencodeStrategy;
     case "pi": return piStrategy;
-    // header-only 三方 (addendum §4.3) —— 独立实例而非共用, 便于将来单方特化
+    // three header-only agents (addendum §4.3) -- separate instances rather than shared, to allow future per-agent specialization
     case "hermes": return hermesStrategy;
     case "openclaw": return openclawStrategy;
     default: return defaultStrategy;

@@ -1,6 +1,6 @@
 /**
- * useSkillsPanel —— Skills 页面的状态与数据逻辑。
- * 组件层只保留 JSX 渲染，状态 / 数据逻辑集中在此。
+ * useSkillsPanel -- state and data logic of the Skills page.
+ * The component layer keeps only JSX rendering; state / data logic is centralized here.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -26,23 +26,23 @@ export const TAB_I18N_KEY: Record<Tab, string> = {
 
 export function useSkillsPanel() {
   const { t } = useTranslation();
-  // 默认展示 Agent 资产（fixed），避免用户误以为自己的资产在「团队资产」里
+  // Show Agent assets (fixed) by default, so users don't mistakenly think their assets are in "Team assets"
   const [tab, setTab] = useState<Tab>('fixed');
   const { activeTeamId, activeTeam } = useTeams();
   const myUserId = getPanelSession()?.user?.user_id ?? '';
   const [selectedAgent, setSelectedAgent] = useState<string>('');
   const [skills, setSkills] = useState<SkillSummary[]>([]);
 
-  // team 内 agent 数据 —— 一次全量拉取，前端派生两份，避免之前分别为
-  // 「name 映射（全量）」和「我 owner 的 agent（fixed 下拉）」发两次 agent/list：
-  //   - agentNameMap：team 内**全部** agent 的 id→name（团队资产里会出现别人
-  //     agent 的 skill，需要能显示归属 agent 名）。
-  //   - teamAgents：前端按 owner_user_id === myUserId 过滤出**我 owner 的 agent**
-  //     （fixed tab 下拉 / 导入 / fork 用；agent 私有可见性语义）。
+  // Agent data within the team -- fetched in full once and derived into two copies on the frontend, avoiding the earlier two agent/list calls for
+  // the "name map (full)" and "agents I own (fixed dropdown)":
+  //   - agentNameMap: id->name of **all** agents in the team (team assets contain skills of other
+  //     agents, so the owning agent name must be displayable).
+  //   - teamAgents: filtered on the frontend by owner_user_id === myUserId into **agents I own**
+  //     (used by the fixed tab dropdown / import / fork; agent private-visibility semantics).
   const [teamAgents, setTeamAgents] = useState<Array<{ id: string; name: string }>>([]);
   const [agentNameMap, setAgentNameMap] = useState<Record<string, string>>({});
-  // agent 列表加载态：fixed tab 依赖 agent（下拉 + 按 agent 拉 skill），
-  // 初始 true 让首屏就是加载态，避免 agent 请求期间左侧列表先闪空态再变加载态。
+  // agent list loading state: the fixed tab depends on agents (dropdown + fetching skills per agent),
+  // initially true so the first paint is the loading state, avoiding the left list flashing the empty state before the loading state during the agent request.
   const [agentsLoading, setAgentsLoading] = useState(true);
 
   useEffect(() => {
@@ -69,7 +69,7 @@ export function useSkillsPanel() {
       })
       .catch((err) => {
         if (cancelled) return;
-        // agent 加载失败不致命（列表 fallback 显示 agent_id），但仍给出提示。
+        // Agent load failure is not fatal (the list falls back to showing agent_id), but a notice is still given.
         tea.notify.error(err?.message || t('skills.notify.loadAgentsFailed'));
         setAgentNameMap({});
         setTeamAgents([]);
@@ -88,29 +88,29 @@ export function useSkillsPanel() {
   const [showFork, setShowFork] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
-  // team tab 下每条 skill 的 visibility（从 meta_assets 拿），列表徽章展示用。
-  // key = skill_id（=asset_id）。fixed tab 不填。
+  // Visibility of each skill under the team tab (from meta_assets), used for list badge display.
+  // key = skill_id (=asset_id). Not filled for the fixed tab.
   const [visibilityMap, setVisibilityMap] = useState<Record<string, Asset['visibility']>>({});
 
-  // ── 按需 skill 详情缓存 ──
-  // team tab 列表数据源是 asset/list-accessible，不含 skill 数据面的
-  // version / owner_agent_id；不再对每条 skill 并发 N 次 getSkill()，
-  // 改为用户选中后才按需拉取并写入此缓存。
+  // ── On-demand skill detail cache ──
+  // The team tab list data source is asset/list-accessible, which lacks the skill data plane's
+  // version / owner_agent_id; getSkill() is no longer fired N times concurrently for each skill,
+  // and instead fetched on demand after the user selects one and written into this cache.
   const {
     applyCachedDetail,
     preload: preloadSkillDetail,
     cacheVersion,
   } = useSkillDetailCache(activeTeamId);
 
-  // 对 skills 列表应用缓存：已拉过的 skill 更新为真实 version / owner_agent_id。
+  // Apply the cache to the skills list: skills already fetched are updated to the real version / owner_agent_id.
   const skillsWithCache = useMemo(
     () => skills.map((s) => applyCachedDetail(s)),
     [skills, cacheVersion],
   );
 
-  // 选中某条 skill 时按需预拉其数据面详情（幂等，已缓存则跳过）。
-  // 不做列表级批量预取：有多少 skill 就发多少次 getSkill() 太浪费，
-  // 详情只在用户点开时按需加载。
+  // On selecting a skill, prefetch its data plane details on demand (idempotent, skipped if cached).
+  // No list-level batch prefetch: firing getSkill() as many times as there are skills is too wasteful,
+  // and details are loaded on demand only when the user opens one.
   useEffect(() => {
     if (selectedSkillId) void preloadSkillDetail(selectedSkillId);
   }, [selectedSkillId, preloadSkillDetail]);
@@ -119,12 +119,12 @@ export function useSkillsPanel() {
   // Data fetching
   // ============================
 
-  // 请求序号防竞态：快速切换 tab/agent 时，先发的请求可能后返回，
-  // 旧 tab 的数据会覆盖新 tab 的数据。
+  // Request sequence number against races: when switching tab/agent quickly, an earlier request may return later,
+  // and the old tab's data would overwrite the new tab's data.
   const refreshSeqRef = useRef(0);
-  // 上一次刷新的 team，用于区分「切 team」与「切 tab / 切 agent」。
-  // 切 team 时静默刷新（保留旧列表直到新数据到达），不闪空不骨架屏；
-  // 切 tab / agent 仍按原逻辑清空 + loading（避免看到上一个 tab 的列表）。
+  // The team of the last refresh, used to distinguish "switch team" from "switch tab / switch agent".
+  // On team switch, refresh silently (keep the old list until new data arrives), with no empty flash or skeleton;
+  // on tab / agent switch, clear + loading as before (to avoid seeing the previous tab's list).
   const prevTeamIdRef = useRef(activeTeamId);
 
   const refresh = useCallback(async () => {
@@ -139,38 +139,38 @@ export function useSkillsPanel() {
     const silent = teamChanged;
     if (!silent) {
       setLoading(true);
-      // 立即清空旧数据 —— 否则切 tab 时会先看到上一个 tab 的列表，
-      // 新数据到了才突然替换，视觉上就是"闪一下"。
+      // Clear old data immediately -- otherwise when switching tabs the previous tab's list is seen first,
+      // then suddenly replaced when new data arrives, which visually looks like a "flash".
       setSkills([]);
       setVisibilityMap({});
     }
     try {
       if (tab === 'team') {
-        // 团队资产 tab 语义：**只显示共享的（visibility=team） skill**，
-        // 私密 skill（包括自己 owner 的）都不出现在这里。自己的私密去
-        // "我的资产分配" tab 查看和管理。
+        // Team assets tab semantics: **show only shared (visibility=team) skills**,
+        // private skills (including ones you own) do not appear here. Your own private ones
+        // are viewed and managed in the "My asset allocation" tab.
         //
-        // 数据源（服务端严格过滤，抓包也拿不到不该看的）：
+        // Data source (strictly filtered server-side; even packet capture cannot get what shouldn't be seen):
         //   asset/list-accessible + visibility='team'
-        //     → 内核 SQL 层直接过滤 private，HTTP 响应体里根本不包含别人的
-        //       private，也不包含自己的 private，安全。
+        //     -> the kernel SQL layer filters out private directly; the HTTP response body does not contain others'
+        //       private skills at all, nor your own private ones, which is safe.
         //
-        // 为什么不调 skill/list：
-        //   数据面 skill/list 没有 visibility 概念，会把别人的 private 一并
-        //   返回（虽然内核 permission-checker 后续会拦截读取，但列表响应
-        //   仍会带回 name/owner 等元信息，前端过滤 = 数据已泄露）。
+        // Why not call skill/list:
+        //   The data plane skill/list has no visibility concept and would return others' private
+        //   skills too (although the kernel permission-checker later blocks reads, the list response
+        //   would still carry metadata such as name/owner, and frontend filtering = the data has already leaked).
         //
-        // 按需加载 version / owner_agent_id：
-        //   asset 表无这两个字段；旧实现在此处对每条 skill 并发 N 次
-        //   getSkill()（N+1），用户还没点开任何一条就把全部详情拉回来。
-        //   现在先用 asset 默认值渲染，version/owner_agent_id 等用户选中
-        //   后才由 useSkillDetailCache 按需拉取并写入缓存。
+        // Load version / owner_agent_id on demand:
+        //   The asset table has neither field; the old implementation fired getSkill() N times concurrently
+        //   per skill here (N+1), pulling back all details before the user opened any.
+        //   Now it renders with asset defaults first, and version/owner_agent_id etc. are fetched on demand by
+        //   useSkillDetailCache only after the user selects one, and written into the cache.
         const accessible = await assetsApi.listAccessible(activeTeamId, {
           asset_type: 'skill',
           action: 'read',
           visibility: 'team',
         });
-        if (seq !== refreshSeqRef.current) return; // 已被后续请求取代
+        if (seq !== refreshSeqRef.current) return; // Superseded by a later request
         const visMap: Record<string, Asset['visibility']> = {};
         for (const a of accessible) visMap[a.asset_id] = a.visibility;
         const toMs = (iso: string): number => new Date(iso).getTime();
@@ -188,35 +188,35 @@ export function useSkillsPanel() {
           created_at_ms: toMs(a.created_at),
           updated_at_ms: toMs(a.updated_at),
         })) as SkillSummary[];
-        // 不再额外等待；直接用 asset 默认值渲染，缓存命中后自动更新。
+        // No extra waiting; render directly with asset defaults, and update automatically on cache hit.
         setSkills(items);
         setVisibilityMap(visMap);
       } else {
-        // 固定资产 = 指定 agent 拥有（owner）的 skill；这一 tab 侧重"某 agent 装备了什么"，
-        // 由 owner 权限判定即可，不再叠加 visibility 过滤（agent owner 一定能看到自己的 skill）。
-        // meta_assets 主表，与 assetsApi.update 写入同源，读写一致。
+        // Fixed assets = skills owned (owner) by the specified agent; this tab focuses on "what an agent is equipped with",
+        // decided by owner permission alone, with no extra visibility filtering (an agent owner can always see their own skills).
+        // The meta_assets main table, from the same source as assetsApi.update writes, so reads and writes are consistent.
         if (!selectedAgent) {
           if (seq !== refreshSeqRef.current) return;
           setSkills([]);
           setVisibilityMap({});
         } else {
-          // visibility 徽章数据源：只拿**当前用户 owner** 的 skill 资产。
-          //   fixed tab 列表 = selectedAgent 拥有的 skill，而 selectedAgent 只可能
-          //   是当前用户 owner 的 agent（teamAgents 已按 owner_user_id === myUserId
-          //   过滤），故这些 skill 的 owner_user_id 必然是 myUserId。
+          // Source of the visibility badge: only fetch skill assets **owned by the current user**.
+          //   The fixed tab list = skills owned by selectedAgent, and selectedAgent can only be
+          //   an agent owned by the current user (teamAgents is already filtered by owner_user_id === myUserId),
+          //   so the owner_user_id of these skills is necessarily myUserId.
           //
-          // 为什么用 asset/list + owner_user_id 而非 asset/list-accessible：
-          //   - list-accessible 会遍历**团队全量** skill 资产并逐条跑
-          //     checkAssetPermission（N+1）；团队合并后资产暴涨 → 明显变慢。
-          //   - asset/list 走纯 SQL WHERE 直查，无逐条权限检查；配合
-          //     owner_user_id 把范围收敛到「我 owner 的 skill」，量级与合并前一致。
-          //   - asset/list 不做 visibility 过滤，返回同时含 team / private，
-          //     徽章语义完整（owner 本就应看到自己全部可见性的 skill）。
+          // Why use asset/list + owner_user_id instead of asset/list-accessible:
+          //   - list-accessible traverses the **team's full** skill assets and runs
+          //     checkAssetPermission on each (N+1); after teams merge, assets balloon -> noticeably slower.
+          //   - asset/list uses a pure SQL WHERE lookup with no per-item permission check; combined with
+          //     owner_user_id it narrows the scope to "skills I own", at the same scale as before the merge.
+          //   - asset/list does no visibility filtering and returns both team / private,
+          //     so the badge semantics are complete (an owner should see their skills of every visibility).
           //
-          // myUserId 缺失（未登录 / session 异常）时**不**降级为无 owner 过滤的
-          // 全量查询：asset/list 无 ACL，不带 owner_user_id 会把整个 team 的
-          // skill 元信息拉回响应体（信息暴露 + 慢），得不偿失。此时徽章留空
-          // （toggle 处对 undefined 已按 private 兜底），列表本身不受影响。
+          // When myUserId is missing (not logged in / session anomaly), **do not** degrade to a full query without the owner filter:
+          // asset/list has no ACL, and without owner_user_id it would pull the whole team's
+          // skill metadata into the response body (information exposure + slow), which is not worth it. In that case the badge stays blank
+          // (the toggle already falls back to private for undefined), and the list itself is unaffected.
           const [listRes, ownedAssets] = await Promise.all([
             listSkills({
               team_id: activeTeamId,
@@ -229,7 +229,7 @@ export function useSkillsPanel() {
                   .catch(() => [] as Asset[])
               : Promise.resolve([] as Asset[]),
           ]);
-          if (seq !== refreshSeqRef.current) return; // 已被后续请求取代
+          if (seq !== refreshSeqRef.current) return; // Superseded by a later request
           const vm: Record<string, Asset['visibility']> = {};
           for (const a of ownedAssets) vm[a.asset_id] = a.visibility;
           setSkills(listRes.items);
@@ -246,9 +246,9 @@ export function useSkillsPanel() {
     }
   }, [tab, selectedAgent, activeTeamId, myUserId]);
 
-  // 同步 selectedAgent 到 teamAgents：
-  //   - 切换 team 后，老 selectedAgent 可能已不在新 team 内，需要重置；
-  //   - 首次渲染时也要给 selectedAgent 一个默认值。
+  // Sync selectedAgent to teamAgents:
+  //   - After switching team, the old selectedAgent may no longer be in the new team and must be reset;
+  //   - On first render selectedAgent also needs a default value.
   useEffect(() => {
     if (teamAgents.length === 0) {
       if (selectedAgent) setSelectedAgent('');
@@ -259,15 +259,15 @@ export function useSkillsPanel() {
     }
   }, [teamAgents, selectedAgent]);
 
-  // 触发 refresh：依赖原始参数 + refresh，并用 key 去重防止短时间内重复触发。
-  // 之前直接 `useEffect(() => refresh(), [refresh])` 会因 refresh 引用变化
-  // （selectedAgent 等依赖异步同步）触发多次，导致 asset/list-accessible 等接口被反复请求。
+  // Trigger refresh: depends on the raw params + refresh, and dedupes with a key to prevent repeated triggers in a short time.
+  // Previously a direct `useEffect(() => refresh(), [refresh])` would be triggered multiple times as the refresh reference changed
+  // (async sync of dependencies such as selectedAgent), causing asset/list-accessible and other endpoints to be requested repeatedly.
   const fetchKeyRef = useRef<string>('');
   useEffect(() => {
-    // key 中只有 fixed tab 才纳入 selectedAgent —— team tab 的数据源
-    // asset/list-accessible 与选中 agent 无关。若把 selectedAgent 纳入 team 的 key，
-    // teamAgents 异步加载完后 selectedAgent 会从 '' 变成首个 agent，导致 key 变化、
-    // 再触发一次**完全重复**的 list-accessible（进页面即多打一次接口）。
+    // Only the fixed tab includes selectedAgent in the key -- the team tab's data source
+    // asset/list-accessible is unrelated to the selected agent. If selectedAgent were included in the team key,
+    // after teamAgents finishes loading asynchronously selectedAgent would change from '' to the first agent, changing the key and
+    // triggering a **completely duplicate** list-accessible call again (one extra API call on page entry).
     const key =
       tab === 'fixed' ? `${activeTeamId}|${tab}|${selectedAgent}` : `${activeTeamId}|${tab}`;
     if (fetchKeyRef.current === key) return;
@@ -275,10 +275,10 @@ export function useSkillsPanel() {
     void refresh();
   }, [activeTeamId, tab, selectedAgent, refresh]);
 
-  // 选中项不在列表里时清空选中。
-  // 跳过 loading 中间态：refresh 会先 setSkills([]) 再重新拉取，
-  // 若在清空瞬间就判断会把选中误置空（编辑保存后刷新会丢失当前选中）。
-  // 等刷新完成（loading=false）、列表填充后再判断，选中项仍在则保留。
+  // Clear the selection when the selected item is not in the list.
+  // Skip the intermediate loading state: refresh first does setSkills([]) and then re-fetches,
+  // and judging at the instant of clearing would wrongly clear the selection (the current selection would be lost after refreshing following an edit save).
+  // Wait until the refresh finishes (loading=false) and the list is filled before judging; keep the selection if it is still present.
   useEffect(() => {
     if (loading) return;
     if (selectedSkillId && !skillsWithCache.find((s) => s.skill_id === selectedSkillId)) {
@@ -303,9 +303,9 @@ export function useSkillsPanel() {
       if (!activeTeamId) return;
       setDeleteLoading(true);
       try {
-        // owner_agent_id 是 delete 的鉴权依据。团队 tab 数据源来自
-        // asset/list-accessible，那份数据没有 owner_agent_id（asset 表无该字段），
-        // 列表里 skill.owner_agent_id 会是 ''。这里按需再拉一次 skill/get 补齐。
+        // owner_agent_id is the authorization basis for delete. The team tab data source comes from
+        // asset/list-accessible, and that data has no owner_agent_id (the asset table lacks the field),
+        // so skill.owner_agent_id in the list will be ''. Here skill/get is fetched again on demand to fill it in.
         let ownerAgentId = skill.owner_agent_id;
         if (!ownerAgentId) {
           const full = await getSkill({
@@ -383,18 +383,18 @@ export function useSkillsPanel() {
   // ============================
   // Visibility toggle (shared/private)
   // ============================
-  // 共享/私密切换：原「个人资产」tab 的能力，迁到「Agent 资产(fixed)」tab 的资产项上，
-  // 仅 owner 可切（SkillsPanel 渲染处按 owner_user_id 判断）。skill_id === asset_id。
+  // Share/private toggle: the capability of the former "Personal assets" tab, moved to the asset items of the "Agent assets (fixed)" tab,
+  // switchable by the owner only (SkillsPanel renders by owner_user_id). skill_id === asset_id.
   const handleToggleVisibility = useCallback(
     async (skill: SkillSummary, scope: 'team' | 'private') => {
       const current = visibilityMap[skill.skill_id];
-      // current 缺失时按 private 兜底：owner 视角下 getAssets 已不过滤，
-      // 正常都能拿到 visibility；万一仍缺失（旧数据/接口异常），也允许
-      // 切换而非直接 return，避免又卡死无法切回 team。
+      // When current is missing, fall back to private: from the owner's view getAssets no longer filters,
+      // and visibility is normally available; if it is still missing (legacy data / endpoint anomaly), switching
+      // is still allowed instead of returning directly, to avoid getting stuck again unable to switch back to team.
       if (current === scope) return;
       try {
         await assetsApi.update(skill.skill_id, { visibility: scope });
-        // 局部更新 visibility 徽章，避免整表 flicker
+        // Update the visibility badge locally to avoid whole-table flicker
         setVisibilityMap((prev) => ({ ...prev, [skill.skill_id]: scope }));
       } catch (err) {
         tea.notify.error(err);
@@ -403,12 +403,12 @@ export function useSkillsPanel() {
     [visibilityMap],
   );
 
-  // 列表加载态（供左侧 AssetListPanel 使用）。
-  // fixed tab 依赖 agent，需覆盖三段"数据未就绪"期，否则会先闪空态：
-  //   1) agentsLoading：agent 列表请求中
-  //   2) teamAgents 已就绪但 selectedAgent 尚未由 effect 设定的 gap
-  //   3) loading：按 agent 拉 skill 列表请求中
-  // team tab 不依赖 agent，直接用 skill 列表 loading。
+  // List loading state (used by the left AssetListPanel).
+  // The fixed tab depends on agents and must cover three "data not ready" phases, otherwise it would flash the empty state first:
+  //   1) agentsLoading: the agent list request is in flight
+  //   2) the gap where teamAgents is ready but selectedAgent has not yet been set by the effect
+  //   3) loading: the request for the per-agent skill list is in flight
+  // The team tab does not depend on agents and uses the skill list loading directly.
   const listLoading =
     tab === 'fixed'
       ? agentsLoading || loading || (teamAgents.length > 0 && !selectedAgent)

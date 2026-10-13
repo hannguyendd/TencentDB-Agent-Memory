@@ -1,49 +1,49 @@
 /**
- * 白名单端点表：集中管理 context-proxy 支持转发的 Anthropic/OpenAI 端点。
+ * Whitelist endpoint table: centrally manages the Anthropic/OpenAI endpoints that context-proxy supports forwarding.
  *
- * 该表是路由、URL 拼接、handler 分派三处逻辑的**单一数据源**：
- * - `server.ts` 依据表注册 Hono 路由（精确匹配放在 catch-all 之前）
- * - `guard-adapter.ts:joinUrl` 依据表决定上游 endpoint suffix，而非硬编码二分支
- * - `auxiliaryHandler.ts` 依据表决定是否透传、是否需要走 stream 分支
+ * This table is the **single source of truth** for three pieces of logic: routing, URL joining, and handler dispatch:
+ * - `server.ts` registers Hono routes according to the table (exact matches go before the catch-all)
+ * - `guard-adapter.ts:joinUrl` decides the upstream endpoint suffix according to the table, instead of a hardcoded two-way branch
+ * - `auxiliaryHandler.ts` decides whether to pass through and whether to take the stream branch according to the table
  *
- * 新增端点时，只需在 `WHITELIST_ENDPOINTS` 增加一条记录即可，无需散点修改。
+ * When adding an endpoint, just add one record to `WHITELIST_ENDPOINTS`; no scattered modifications are needed.
  */
 
-/** 白名单端点元数据。 */
+/** Whitelist endpoint metadata. */
 export interface WhitelistEndpoint {
   /**
-   * 用户请求 path 的后缀（剥离 `/proxy/{spaceId}` 前缀后精确匹配）。
-   * 例：`/v1/messages/count_tokens`
+   * The suffix of the user request path (matched exactly after stripping the `/proxy/{spaceId}` prefix).
+   * Example: `/v1/messages/count_tokens`
    */
   pathSuffix: string;
   /**
-   * 转发到 upstream 时拼接到 `upstream.url` 之后的 endpoint 部分。
-   * 例：`/messages/count_tokens`（拼在 `https://tokenhub.../v1` 之后）
+   * The endpoint part appended after `upstream.url` when forwarding to the upstream.
+   * Example: `/messages/count_tokens` (appended after `https://tokenhub.../v1`)
    */
   upstreamEndpoint: string;
   /**
-   * 协议类型：决定鉴权头格式（anthropic → `x-api-key`，openai → `Authorization: Bearer`）
-   * 与 credit-reporter 的 usage 解析分支一致。
+   * Protocol type: determines the auth header format (anthropic → `x-api-key`, openai → `Authorization: Bearer`),
+   * consistent with the usage parsing branch of credit-reporter.
    */
   protocol: "anthropic" | "openai";
-  /** 端点是否支持流式响应（SSE）。 */
+  /** Whether the endpoint supports streaming responses (SSE). */
   supportsStream: boolean;
   /**
-   * 是否为主端点：主端点由现有的 `handleAnthropicMessages` / `handleChatCompletions`
-   * 处理（含路由决策）；非主端点走轻量的 `handleAuxiliaryEndpoint`
-   * （跳过路由，仅做鉴权 + 转发 + credit）。
+   * Whether it is a primary endpoint: primary endpoints are handled by the existing `handleAnthropicMessages` / `handleChatCompletions`
+   * (including routing decisions); non-primary endpoints go through the lightweight `handleAuxiliaryEndpoint`
+   * (skipping routing, only auth + forwarding + credit).
    */
   isPrimary: boolean;
 }
 
 /**
- * 当前支持的白名单端点列表。
+ * The list of currently supported whitelist endpoints.
  *
- * 顺序不重要——`matchWhitelistEndpoint` 内部会按 `pathSuffix` 长度**从长到短**排序，
- * 以保证 `/v1/messages/count_tokens` 优先于 `/v1/messages` 命中。
+ * Order does not matter -- `matchWhitelistEndpoint` internally sorts by `pathSuffix` length **from longest to shortest**,
+ * to guarantee that `/v1/messages/count_tokens` is matched before `/v1/messages`.
  */
 export const WHITELIST_ENDPOINTS: readonly WhitelistEndpoint[] = [
-  // ── 主端点（由现有 handler 处理，含路由）────────────────────────
+  // -- Primary endpoints (handled by the existing handlers, including routing) --------
   {
     pathSuffix: "/v1/messages",
     upstreamEndpoint: "/messages",
@@ -58,7 +58,7 @@ export const WHITELIST_ENDPOINTS: readonly WhitelistEndpoint[] = [
     supportsStream: true,
     isPrimary: true,
   },
-  // ── 辅助端点（由 handleAuxiliaryEndpoint 处理，不走路由）─────────
+  // -- Auxiliary endpoints (handled by handleAuxiliaryEndpoint, no routing) ---------
   {
     pathSuffix: "/v1/messages/count_tokens",
     upstreamEndpoint: "/messages/count_tokens",
@@ -87,13 +87,13 @@ export const WHITELIST_ENDPOINTS: readonly WhitelistEndpoint[] = [
     supportsStream: false,
     isPrimary: false,
   },
-  // ── Codex Responses API 端点（由 codexHandler 处理）──────────────
-  // 主端点：见 codexHandler.ts；上游拼接靠这里防止 joinUrl 走 fallback
-  // 兜底到 /chat/completions（错误协议）。
+  // -- Codex Responses API endpoints (handled by codexHandler) --------------
+  // Primary endpoint: see codexHandler.ts; the upstream joining relies on this to prevent joinUrl from taking the fallback
+  // to /chat/completions (the wrong protocol).
   //
-  // 两组条目对应 base_url 带 /v1 与不带 /v1 两种客户端写法，见 server.ts 的
-  // codex 路由注释。matchWhitelistEndpoint 按 pathSuffix 长度降序匹配，
-  // /v1/responses 会优先于 /responses 命中，保证语义清晰。
+  // The two groups of entries correspond to the two client styles where base_url has /v1 or not, see the
+  // codex route comments in server.ts. matchWhitelistEndpoint matches by pathSuffix length descending,
+  // so /v1/responses is matched before /responses, keeping the semantics clear.
   {
     pathSuffix: "/v1/responses",
     upstreamEndpoint: "/responses",
@@ -152,86 +152,86 @@ export const WHITELIST_ENDPOINTS: readonly WhitelistEndpoint[] = [
   },
 ] as const;
 
-/** 按长度降序排列的缓存，避免每次匹配都重新排序。 */
+/** Cache sorted by length descending, to avoid re-sorting on every match. */
 const SORTED_BY_SUFFIX_LEN: readonly WhitelistEndpoint[] = [...WHITELIST_ENDPOINTS].sort(
   (a, b) => b.pathSuffix.length - a.pathSuffix.length,
 );
 
-/** `/proxy/{spaceId}` 前缀正则：仅剥离一层，避免误伤路径中的 "proxy" 字面量。 */
+/** `/proxy/{spaceId}` prefix regex: strips only one layer, to avoid hurting the literal "proxy" in paths. */
 const PROXY_PREFIX_RE = /^\/proxy\/[^/]+/;
 /**
- * Agent 前缀正则：匹配 `/{agent}[/{spaceId}]/{v1|responses|...}` 形态。
- *   - `/claude-code/v1/messages`              → 剥 `/claude-code`
- *   - `/claude-code/{spaceId}/v1/messages`    → 剥 `/claude-code/{spaceId}`
- *   - `/codex/{spaceId}/responses`            → 剥 `/codex/{spaceId}`（codex 客户端
- *     不像 CC/CB 那样自拼 /v1/，源码 endpoint 常量就是 /responses，因此 base_url
- *     不带 /v1 时前缀后紧接的就是 /responses 或 /memories 等）
- * lookahead 允许 `/v1/`、`/responses`、`/responses/`、`/memories/`、`/realtime/`
- * 后紧邻，其中 `/v1/` 必须带尾斜杠避免误伤未来出现的 `/v1foo` 之类；responses
- * 等 codex 端点允许尾斜杠可选（如 `/responses` 是完整路径）。
- * 白名单入口 `/v1/messages`、`/responses` 自身不会被误剥（因为它们不匹配 agent
- * 段——agent 段限定为已知名字）。
+ * Agent prefix regex: matches the `/{agent}[/{spaceId}]/{v1|responses|...}` shape.
+ *   - `/claude-code/v1/messages`              → strips `/claude-code`
+ *   - `/claude-code/{spaceId}/v1/messages`    → strips `/claude-code/{spaceId}`
+ *   - `/codex/{spaceId}/responses`            → strips `/codex/{spaceId}` (the codex client
+ *     does not assemble /v1/ itself like CC/CB; the endpoint constant in its source is /responses, so when base_url
+ *     has no /v1, what immediately follows the prefix is /responses or /memories, etc.)
+ * The lookahead allows `/v1/`, `/responses`, `/responses/`, `/memories/`, `/realtime/`
+ * immediately after, where `/v1/` must carry the trailing slash to avoid hurting a future `/v1foo` and the like; codex endpoints such as responses
+ * allow the trailing slash to be optional (e.g. `/responses` is a complete path).
+ * The whitelist entries `/v1/messages` and `/responses` themselves will not be wrongly stripped (because they do not match the agent
+ * segment -- the agent segment is restricted to known names).
  */
 const AGENT_PREFIX_RE = /^\/(claude-code|codebuddy|codex|cursor|anthropic|openai|pi)(?:\/[^/]+)?(?=\/v1\/|\/responses(?:\/|$)|\/memories\/|\/realtime\/)/i;
 
 /**
- * `/cost-guard` marker 正则：位于 `/{agent}/{spaceId}` 之后的独立 segment。
+ * `/cost-guard` marker regex: an independent segment located after `/{agent}/{spaceId}`.
  *
- * 语义（相对早期的 `/direct` marker 已反转）：**默认 passthrough**，
- * 仅在请求路径显式带上 `/cost-guard` 段时才让 primary handler 走 cost-guard 路由。
+ * Semantics (reversed relative to the earlier `/direct` marker): **passthrough by default**,
+ * only when the request path explicitly carries a `/cost-guard` segment does the primary handler take the cost-guard routing.
  *
- * 命中条件（两者同时满足）：
- *   1. lookahead `(?=/)`——marker 是一个独立 segment（后面还有内容），
- *      不限定紧接 `/v1/` 还是裸尾巴。这样 marker 与客户端拼的尾巴解耦：
- *        - `/codebuddy/{spaceId}/cost-guard/chat/completions`（CB 裸尾）
- *        - `/claude-code/{spaceId}/cost-guard/v1/messages`（CC 带 /v1）
- *      两种都识别为 marker。词干 `/cost-guarded/` `/cost-guarding/`
- *      `/pre-cost-guard/` 因 lookahead 要求 `/cost-guard` 后紧邻 `/` 而被隔断。
- *   2. lookbehind `(?<=(?:/[^/]+){2,})`——marker 前必须有 ≥ 2 段非空 segment，
- *      使 marker 只在 `/{agent}/{spaceId}/cost-guard/...` 或
- *      `/proxy/{spaceId}/cost-guard/...` 的结构下命中；spaceId 恰好
- *      叫 "cost-guard"（三段结构 `/agent/cost-guard/...`）不会误触发。
+ * Match conditions (both must hold):
+ *   1. lookahead `(?=/)` -- the marker is an independent segment (with more content after it),
+ *      not restricted to being immediately followed by `/v1/` or a bare tail. This way the marker is decoupled from the tail the client assembles:
+ *        - `/codebuddy/{spaceId}/cost-guard/chat/completions` (CB bare tail)
+ *        - `/claude-code/{spaceId}/cost-guard/v1/messages` (CC with /v1)
+ *      both are recognized as markers. Stems like `/cost-guarded/` `/cost-guarding/`
+ *      `/pre-cost-guard/` are cut off because the lookahead requires `/cost-guard` to be immediately followed by `/`.
+ *   2. lookbehind `(?<=(?:/[^/]+){2,})` -- the marker must be preceded by ≥ 2 non-empty segments,
+ *      so that the marker only hits in the structure `/{agent}/{spaceId}/cost-guard/...` or
+ *      `/proxy/{spaceId}/cost-guard/...`; a spaceId that happens to
+ *      be called "cost-guard" (the three-segment structure `/agent/cost-guard/...`) will not trigger it wrongly.
  *
- * 见 `hasCostGuardMarker` 让 primary handler 判定是否**启用** router；
- * `normalizeWhitelistRequestPath` 同步剥离它以保证白名单匹配继续工作。
+ * See `hasCostGuardMarker`, which lets the primary handler decide whether to **enable** the router;
+ * `normalizeWhitelistRequestPath` strips it in sync to keep whitelist matching working.
  *
- * 子模式扩展（`/cost-guard/pre` 和 `/cost-guard/cheap`）：
- *   - `/cost-guard/pre/v1/messages`  → 只走压缩，不走路由
- *   - `/cost-guard/cheap/v1/messages` → 只走路由，不走压缩
- *   - `/cost-guard/v1/messages`       → 既走路由又走压缩（默认行为）
- * 三种 marker 共用一条正则剥离，`resolveCostGuardMode` 细分语义。
+ * Sub-mode extension (`/cost-guard/pre` and `/cost-guard/cheap`):
+ *   - `/cost-guard/pre/v1/messages`  → compression only, no routing
+ *   - `/cost-guard/cheap/v1/messages` → routing only, no compression
+ *   - `/cost-guard/v1/messages`       → both routing and compression (default behavior)
+ * The three markers share one regex for stripping, and `resolveCostGuardMode` refines the semantics.
  */
 const COST_GUARD_MARKER_RE = /(?<=(?:\/[^/]+){2,})\/cost-guard(?:\/(?:pre|cheap))?(?=\/)/;
 
 /**
- * `/analyse` marker：结构完全对齐 `/cost-guard`——位于 `/{agent}/{spaceId}` 之后
- * 的独立 segment，命中即表示"本次请求要走内部资产反思模式"。
+ * `/analyse` marker: structure fully aligned with `/cost-guard` -- an independent segment located after `/{agent}/{spaceId}`,
+ * and a hit means "this request should take the internal asset reflection mode".
  *
- * 由 `injection.assetReflection.markerOptIn` 门控，
- * 见 `AssetReflectionInjector`。跟 cost-guard 不同，`/analyse` **不注册**
- * 专门的 hono 路由——它是完全透明的标记：正常业务路径继续处理，
- * 只是 injector 检测到 marker 后往 system prompt 末尾多贴一段反思提示。
+ * Gated by `injection.assetReflection.markerOptIn`,
+ * see `AssetReflectionInjector`. Unlike cost-guard, `/analyse` **does not register**
+ * a dedicated hono route -- it is a completely transparent marker: the normal business path continues to process,
+ * and the injector merely appends an extra reflection prompt to the end of the system prompt after detecting the marker.
  *
- * `normalizeWhitelistRequestPath` 剥掉这个 marker，保证白名单后缀匹配继续工作。
+ * `normalizeWhitelistRequestPath` strips this marker, keeping whitelist suffix matching working.
  */
 const ANALYSE_MARKER_RE = /(?<=(?:\/[^/]+){2,})\/analyse(?=\/)/;
 
 /**
- * Cost-guard 运行模式，决定路由和压缩的启用组合。
+ * Cost-guard run mode, determining the enabled combination of routing and compression.
  *
- * - `"full"`      — `/cost-guard/...` — 既走路由又走压缩（默认行为）
- * - `"pre"`       — `/cost-guard/pre/...` — 只走压缩（request-prepare），不走路由
- * - `"cheap"`     — `/cost-guard/cheap/...` — 只走路由（正常 cost-guard 路由），不走压缩
- * - `"off"`       — 不带 marker — 不走 cost-guard
+ * - `"full"`      — `/cost-guard/...` — both routing and compression (default behavior)
+ * - `"pre"`       — `/cost-guard/pre/...` — compression only (request-prepare), no routing
+ * - `"cheap"`     — `/cost-guard/cheap/...` — routing only (normal cost-guard routing), no compression
+ * - `"off"`       — no marker — no cost-guard
  */
 export type CostGuardMode = "full" | "pre" | "cheap" | "off";
 
-/** 内部正则：提取 `/cost-guard` 后可选的子模式段。 */
+/** Internal regex: extracts the optional sub-mode segment after `/cost-guard`. */
 const COST_GUARD_SUB_MODE_RE = /(?<=(?:\/[^/]+){2,})\/cost-guard(?:\/(pre|cheap))?(?=\/)/;
 
 /**
- * 请求路径是否携带 `/cost-guard` marker（位于 `/v1/` 之前的独立 segment）。
- * 携带时 primary handler 走完整的 cost-guard 路由；不带时（默认）直接透传到默认上游。
+ * Whether the request path carries the `/cost-guard` marker (an independent segment before `/v1/`).
+ * When carried, the primary handler takes the full cost-guard routing; when not (default), it passes straight through to the default upstream.
  */
 export function hasCostGuardMarker(requestPath: string): boolean {
   if (!requestPath) return false;
@@ -240,14 +240,14 @@ export function hasCostGuardMarker(requestPath: string): boolean {
 }
 
 /**
- * 解析请求路径中的 cost-guard 模式。
+ * Resolve the cost-guard mode in the request path.
  *
- * | URL marker 段          | 返回值    | 路由 | 压缩 |
+ * | URL marker segment     | Return    | Route | Compress |
  * |------------------------|-----------|------|------|
  * | `/cost-guard/...`      | `"full"`  | ✓    | ✓    |
  * | `/cost-guard/pre/...`  | `"pre"`   | ✗    | ✓    |
  * | `/cost-guard/cheap/...`| `"cheap"` | ✓    | ✗    |
- * | 不带 marker            | `"off"`   | ——   | ——   |
+ * | no marker              | `"off"`   | --   | --   |
  */
 export function resolveCostGuardMode(requestPath: string): CostGuardMode {
   if (!requestPath) return "off";
@@ -261,12 +261,12 @@ export function resolveCostGuardMode(requestPath: string): CostGuardMode {
 }
 
 /**
- * 请求是否走遗留的 `/proxy/{spaceId}` 前缀。
+ * Whether the request takes the legacy `/proxy/{spaceId}` prefix.
  *
- * 该前缀不带 agent 信息，`agentSource` 只能兜底成 `claude-code`，据此解析出的
- * 会话身份与消息结构对其它客户端并不成立。因此这条入口只承担路由、压缩与计费，
- * 记忆类功能（session-init / mem 命令 / injection / L0 / skill）一律关闭——
- * 宁可不注入，也不要按错误的 agent 画像往用户上下文里塞东西。
+ * This prefix carries no agent info, so `agentSource` can only fall back to `claude-code`, and the
+ * session identity and message structure parsed from it do not hold for other clients. So this entry only handles routing, compression and billing,
+ * and memory features (session-init / mem commands / injection / L0 / skill) are all turned off --
+ * better to inject nothing than to stuff things into the user's context based on a wrong agent profile.
  */
 export function isLegacyProxyPath(requestPath: string): boolean {
   if (!requestPath) return false;
@@ -275,8 +275,8 @@ export function isLegacyProxyPath(requestPath: string): boolean {
 }
 
 /**
- * 请求路径是否携带 `/analyse` marker（结构同 `/cost-guard`）。
- * 命中时 `AssetReflectionInjector` 会在系统提示词末尾追加 `<asset_reflection>` 块。
+ * Whether the request path carries the `/analyse` marker (same structure as `/cost-guard`).
+ * On a hit, `AssetReflectionInjector` appends an `<asset_reflection>` block to the end of the system prompt.
  */
 export function hasAnalyseMarker(requestPath: string): boolean {
   if (!requestPath) return false;
@@ -285,13 +285,13 @@ export function hasAnalyseMarker(requestPath: string): boolean {
 }
 
 /**
- * 规范化请求路径以便白名单匹配。
+ * Normalize the request path for whitelist matching.
  *
- * 1. 剥离 query string
- * 2. 剥离 `/cost-guard` marker（如有，见 `hasCostGuardMarker`）
- * 3. 剥离 `/analyse` marker（如有，见 `hasAnalyseMarker`）
- * 4. 剥离 `/proxy/{spaceId}` 前缀（如有）
- * 5. 剥离 `/{agent}/{spaceId}` 前缀（如 `/claude-code/{spaceId}/v1/messages`）
+ * 1. Strip the query string
+ * 2. Strip the `/cost-guard` marker (if any, see `hasCostGuardMarker`)
+ * 3. Strip the `/analyse` marker (if any, see `hasAnalyseMarker`)
+ * 4. Strip the `/proxy/{spaceId}` prefix (if any)
+ * 5. Strip the `/{agent}/{spaceId}` prefix (such as `/claude-code/{spaceId}/v1/messages`)
  */
 export function normalizeWhitelistRequestPath(requestPath: string): string {
   if (!requestPath) return "";
@@ -307,13 +307,13 @@ export function normalizeWhitelistRequestPath(requestPath: string): string {
 }
 
 /**
- * 从请求路径匹配白名单条目。
+ * Match a whitelist entry from the request path.
  *
- * 匹配规则：
- * 1. `normalizeWhitelistRequestPath` 规范化路径（剥离 query / proxy 前缀 / agent+spaceId 前缀）
- * 2. 按 `pathSuffix` 长度**从长到短**尝试精确后缀匹配
+ * Matching rules:
+ * 1. `normalizeWhitelistRequestPath` normalizes the path (strips query / proxy prefix / agent+spaceId prefix)
+ * 2. Try exact suffix matching by `pathSuffix` length **from longest to shortest**
  *
- * @returns 命中的白名单条目，未命中返回 `null`
+ * @returns the matched whitelist entry, or `null` if there is no match
  */
 export function matchWhitelistEndpoint(
   requestPath: string,

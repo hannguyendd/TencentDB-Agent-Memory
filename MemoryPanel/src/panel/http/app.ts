@@ -26,34 +26,34 @@ export function buildPanelApp(deps: PanelDeps): Hono {
   registerHealthRoutes(app);
 
   const api = new Hono();
-  // API 调用审计（可选 ClickHouse 上报，不配则 NoOp）
-  // user_id 采集三级兜底: route.set('resolvedUserId') > userIdResolver cache > 空
+  // API call audit (optional ClickHouse reporting; NoOp if not configured)
+  // user_id collection has three fallback levels: route.set('resolvedUserId') > userIdResolver cache > empty
   api.use('*', apiCallTelemetryMiddleware(deps.apiCallTelemetry, deps.userIdResolver));
   registerMetaInstanceRoutes(api, deps);
   registerAuthRoutes(api, deps);
   registerMetaProxyRoutes(api, deps);
-  // Skill 数据面透明代理：/api/v1/skill/* → 内核 /v3/skill/*
+  // Skill data-plane transparent proxy: /api/v1/skill/* -> kernel /v3/skill/*
   registerSkillProxyRoutes(api, deps);
-  // Analytics 查询面透明代理：/api/v1/analytics/* → 内核 /v3/analytics/*
+  // Analytics query-plane transparent proxy: /api/v1/analytics/* -> kernel /v3/analytics/*
   registerAnalyticsProxyRoutes(api, deps);
-  // Chat Memory 面板 3-tab 专属业务路由（12.3 决策例外，见 chat-memory.ts 顶注释）
+  // Dedicated business routes for the Chat Memory panel's 3 tabs (12.3 decision exception; see the top comment of chat-memory.ts)
   registerChatMemoryRoutes(api, deps);
-  // Task 聚合路由：task/list + 批量 task-agent/list 一次返回
+  // Task aggregation route: task/list + batched task-agent/list returned in one response
   registerTaskRoutes(api, deps);
-  // Task 外部来源：/api/v1/task/source/* → 内核 /v3/task-source/*（令牌随请求体下发，不留存）
+  // External task source: /api/v1/task/source/* -> kernel /v3/task-source/* (token is sent in the request body and not retained)
   registerTaskSourceRoutes(api, deps);
   registerAgentOverviewRoutes(api, deps);
-  // Agent 生命周期业务路由：/agent/delete-cascade 在 control 层级联清 skill 再 archive
+  // Agent lifecycle business route: /agent/delete-cascade cascades skill cleanup at the control layer, then archives
   registerAgentLifecycleRoutes(api, deps);
   registerKnowledgeRoutes(api, deps);
   app.route(API_PREFIX, api);
-  // 仅当至少一个 header-injected Provider 已注册时才挂 ingress 中间件：
-  // 该中间件会拦截"根路径 GET + 命中任一 Provider 的 ingressHeaderName"的请求
-  // 自动完成 IdP 登录。未启用时不注册，上游网关转发来的带头请求会原样落到静态资源，
-  // 避免"未开 IdP 却仍被 IdP 流程绑架"。
-  // 双层 optional chaining：既有测试 fixture 只塞被测路由需要的字段，`deps.auth`
-  // 与 `deps.config.auth` 常被整块省略；缺任何一层都视为未启用 IdP，与 v1 时代
-  // `deps.config.auth?.woa?.enabled` 的兼容语义一致。
+  // Mount the ingress middleware only when at least one header-injected Provider is registered:
+  // that middleware intercepts requests that are "GET on the root path + match any Provider's ingressHeaderName"
+  // and completes IdP login automatically. When not enabled it is not registered, so header-bearing requests forwarded by the upstream gateway fall through to static assets unchanged,
+  // avoiding being "hijacked by the IdP flow even though no IdP is enabled".
+  // Double optional chaining: existing test fixtures only supply the fields the route under test needs, and `deps.auth`
+  // and `deps.config.auth` are often omitted entirely; a missing layer at either level counts as IdP not enabled, consistent with the v1-era
+  // `deps.config.auth?.woa?.enabled` compatibility semantics.
   if (deps.auth?.listHeaderInjectedProviders?.().length) {
     registerWoaIngressRoutes(app, deps);
   }

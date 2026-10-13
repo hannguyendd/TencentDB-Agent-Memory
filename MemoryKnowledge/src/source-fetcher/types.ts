@@ -1,42 +1,42 @@
 /**
- * SourceFetcher 接口层 — 协议无关的源码拉取与安全校验抽象。
+ * SourceFetcher interface layer — protocol-agnostic abstraction for source fetching and security validation.
  *
- * 职责：把"从某个 source（git/local/ftp）拉取代码到本地目录"抽象成统一接口，
- * 安全校验（协议白名单 + SSRF 防护）集中在各实现的 validate() 里。
- * 具体实现（如 GitSourceFetcher）依赖 simple-git，但该依赖不泄漏到本接口层。
+ * Responsibility: abstract "fetching code from some source (git/local/ftp) to a local directory" into a unified interface,
+ * with security validation (protocol allowlist + SSRF protection) centralized in each implementation's validate().
+ * Concrete implementations (e.g. GitSourceFetcher) depend on simple-git, but that dependency does not leak into this interface layer.
  */
 
 export type SourceType = "git" | "local" | "ftp";
 
 export interface FetchResult {
-  /** 源码落盘的本地目录（绝对路径）。 */
+  /** Local directory where the source code is written to disk (absolute path). */
   localPath: string;
-  /** 当前版本标识（git 为 commit hash 前 12 位；取不到为 null）。 */
+  /** Current version identifier (for git, the first 12 chars of the commit hash; null if unavailable). */
   version: string | null;
-  /** 源协议类型。 */
+  /** Source protocol type. */
   sourceType: SourceType;
 }
 
 /**
- * 源码拉取器接口。实现者负责：
- *   1. 校验 sourceUrl 安全性（协议白名单、SSRF 等）
- *   2. 拉取/同步源码到 localPath
- *   3. 返回版本标识
+ * Source fetcher interface. Implementers are responsible for:
+ *   1. Validating sourceUrl safety (protocol allowlist, SSRF, etc.)
+ *   2. Fetching/syncing the source to localPath
+ *   3. Returning the version identifier
  *
- * 实现：
- *   - GitSourceFetcher：simple-git，第一版仅 public HTTPS（SSH/私有仓库鉴权见文档 005）
- *   - LocalSourceFetcher / FtpSourceFetcher：未来扩展
+ * Implementations:
+ *   - GitSourceFetcher: simple-git, first version only public HTTPS (SSH/private repo auth, see doc 005)
+ *   - LocalSourceFetcher / FtpSourceFetcher: future extensions
  */
 export interface ISourceFetcher {
-  /** 首次拉取：把源码下载到 localPath。 */
+  /** First fetch: download the source to localPath. */
   fetch(sourceUrl: string, branch: string, localPath: string): Promise<FetchResult>;
 
-  /** 增量同步：更新已存在的 localPath 到最新版本。 */
+  /** Incremental sync: update the existing localPath to the latest version. */
   sync(sourceUrl: string, branch: string, localPath: string): Promise<FetchResult>;
 
-  /** 校验 sourceUrl 是否合法（协议白名单 + SSRF 防护）。非法则 throw。 */
+  /** Validate whether sourceUrl is legal (protocol allowlist + SSRF protection). Throws if illegal. */
   validate(sourceUrl: string): void;
 
-  /** 支持的协议类型。 */
+  /** Supported protocol types. */
   readonly supportedType: SourceType;
 }

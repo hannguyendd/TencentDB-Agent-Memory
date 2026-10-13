@@ -111,30 +111,30 @@ export interface LLMRunParams {
    */
   abortSignal?: AbortSignal;
   /**
-   * Langfuse trace name — 决定 Langfuse UI 上 trace 的 "Name" 字段。
-   * 未传时保持向后兼容（Langfuse 会显示 Unnamed trace）。
-   * 建议传业务语义值，如 "skill.extract" / "memory.l1-extract"。
+   * Langfuse trace name — determines the trace's "Name" field in the Langfuse UI.
+   * When omitted, backward compatibility is kept (Langfuse shows an Unnamed trace).
+   * Passing a business-semantic value is recommended, e.g. "skill.extract" / "memory.l1-extract".
    */
   traceName?: string;
   /**
-   * Langfuse trace 标签，用于 UI 筛选。空数组等价于未传。
-   * 建议格式：["<domain>", "team:<id>", "agent:<id>"]。
+   * Langfuse trace tags, used for UI filtering. An empty array is equivalent to omitted.
+   * Recommended format: ["<domain>", "team:<id>", "agent:<id>"].
    */
   tags?: string[];
   /**
-   * Langfuse 顶级 sessionId 字段。空字符串等价于未传。
+   * Langfuse top-level sessionId field. An empty string is equivalent to omitted.
    */
   sessionId?: string;
   /**
-   * Langfuse 顶级 userId 字段。空字符串等价于未传。
+   * Langfuse top-level userId field. An empty string is equivalent to omitted.
    */
   userId?: string;
 }
 
 /**
- * TraceContext —— 记忆/技能抽取链路给 langfuse 上报用的身份四元组。
- * 由 caller 向下透传到 llmRunner.run，最终填充 LLMRunParams 的 userId/sessionId/tags。
- * 好处：langfuse UI 上按 user_id / session_id 独立列过滤，不用把身份塞进 name。
+ * TraceContext — the identity 4-tuple used by the memory/skill extraction chain for langfuse reporting.
+ * Passed down by the caller to llmRunner.run, ultimately filling the userId/sessionId/tags of LLMRunParams.
+ * Benefit: in the langfuse UI you can filter by user_id / session_id as separate columns, without stuffing identity into the name.
  */
 export interface TraceContext {
   teamId?: string;
@@ -144,12 +144,12 @@ export interface TraceContext {
 }
 
 /**
- * 把 TraceContext 展平进 LLMRunParams 的 langfuse 三字段。
- *   - traceName: 传业务锚点（如 "memory.l1-extract"）
- *   - userId:    langfuse 顶级 userId 列
- *   - sessionId: langfuse 顶级 sessionId 列
- *   - tags:      ["team:<id>", "agent:<id>"] 便于侧栏筛选
- * 三者结合后 langfuse UI 上一眼能定位某个 (user, agent, session) 的 trace 组。
+ * Flatten TraceContext into the three langfuse fields of LLMRunParams.
+ *   - traceName: pass a business anchor (such as "memory.l1-extract")
+ *   - userId:    the langfuse top-level userId column
+ *   - sessionId: the langfuse top-level sessionId column
+ *   - tags:      ["team:<id>", "agent:<id>"] for easy sidebar filtering
+ * Combined, the three let you locate the trace group of a given (user, agent, session) at a glance in the langfuse UI.
  */
 export function buildTraceParams(traceName: string, ctx?: TraceContext): {
   traceName: string;

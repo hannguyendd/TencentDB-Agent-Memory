@@ -1,14 +1,14 @@
 /**
- * DrillDownDrawer — 统一的下钻抽屉。
+ * DrillDownDrawer -- unified drill-down drawer.
  *
- * 取代原先「点卡片/行 → 设置页面级 filter → 滚到下方表格看结果」的交互：
- * 下钻结果直接在抽屉内呈现，不再要求用户滚动定位，也不会改动页面主体状态。
+ * Replaces the earlier "click card/row -> set page-level filter -> scroll down to the table for results" interaction:
+ * drill-down results are shown directly in the drawer, so users no longer need to scroll, and the page body state is not changed.
  *
- * 数据加载严格受 visible 约束：抽屉关闭时两个 hook 的 enabled 均为 false，
- * 不会产生后台请求；切 Tab 时也只加载当前视角。
+ * Data loading is strictly bound to visible: when the drawer is closed, enabled is false for both hooks,
+ * so no background requests are made; switching tabs only loads the current view.
  *
- * wiki / codegraph 同属 knowledge-service，bridge_source 无法区分二者 —— 按这两类
- * 下钻时抽屉会给出提示，说明结果含 knowledge 全部调用（内核过滤维度限制）。
+ * wiki / codegraph both belong to knowledge-service and bridge_source cannot tell them apart -- when drilling into these two
+ * categories the drawer shows a notice that the results include all knowledge calls (a kernel filter dimension limitation).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -40,7 +40,7 @@ export function DrillDownDrawer({
   const views = useMemo<DrillView[]>(() => (target ? drillViews(target) : ['trace']), [target]);
   const [view, setView] = useState<DrillView>(views[0]);
 
-  // 切换下钻对象时重置到该对象的默认视角（上一个对象的视角可能不适用）
+  // When switching drill-down targets, reset to the target's default view (the previous target's view may not apply)
   useEffect(() => {
     setView(views[0]);
   }, [views]);
@@ -97,7 +97,7 @@ export function DrillDownDrawer({
 
   const tabs = views.map((v) => ({ id: v, label: t(`analytics.drill.view.${v}`) }));
 
-  // knowledge-service 下 wiki / codegraph 共用 bridge_source，结果无法只含单一类别
+  // wiki / codegraph share bridge_source under knowledge-service, so results cannot contain a single category only
   const knowledgeAmbiguous =
     target?.type === 'category' && (target.category === 'wiki' || target.category === 'codegraph');
 

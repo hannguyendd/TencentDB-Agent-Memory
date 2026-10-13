@@ -26,35 +26,35 @@ import type http from "node:http";
 // Common Types
 // ============================
 
-/** Trace 属性 — 支持基本类型和 null/undefined（会被过滤） */
+/** Trace attributes — supports primitive types and null/undefined (which are filtered out) */
 export type TraceAttrs = Record<string, string | number | boolean | null | undefined>;
 
-/** Log 属性 — 只支持基本类型 */
+/** Log attributes — supports primitive types only */
 export type LogAttrs = Record<string, string | number | boolean>;
 
-/** Span 接口 — 与 @opentelemetry/api Span 兼容的最小子集 */
+/** Span interface — minimal subset compatible with @opentelemetry/api Span */
 export interface ISpan {
-  /** 结束 Span */
+  /** End the Span */
   end(): void;
-  /** 设置单个属性 */
+  /** Set a single attribute */
   setAttribute(key: string, value: string | number | boolean): this;
-  /** 批量设置属性 */
+  /** Set attributes in bulk */
   setAttributes(attrs: Record<string, string | number | boolean>): this;
-  /** 设置 Span 状态 */
+  /** Set the Span status */
   setStatus(status: { code: number; message?: string }): this;
-  /** 记录异常 */
+  /** Record an exception */
   recordException(exception: Error | string): void;
-  /** 获取 Span Context */
+  /** Get the Span Context */
   spanContext(): { traceId: string; spanId: string; traceFlags: number };
-  /** 是否正在记录 */
+  /** Whether it is recording */
   isRecording(): boolean;
-  /** 更新 Span 名称 */
+  /** Update the Span name */
   updateName(name: string): this;
-  /** 添加事件 */
+  /** Add an event */
   addEvent(name: string, attrs?: Record<string, string | number | boolean>): this;
 }
 
-/** SpanProcessor 接口 — 与 @opentelemetry/sdk-trace-base SpanProcessor 兼容的最小子集 */
+/** SpanProcessor interface — minimal subset compatible with @opentelemetry/sdk-trace-base SpanProcessor */
 export interface ISpanProcessor {
   onStart(span: unknown, parentContext: unknown): void;
   onEnd(span: unknown): void;
@@ -63,187 +63,187 @@ export interface ISpanProcessor {
 }
 
 // ============================
-// ITraceBackend — Trace 抽象
+// ITraceBackend — Trace abstraction
 // ============================
 
 /**
- * Trace 后端接口。
+ * Trace backend interface.
  *
- * 实现：
- * - NoopTraceBackend   — 空操作（开源默认）
- * - ConsoleTraceBackend — stdout 输出（开发调试）
- * - OTelTraceBackend   — OpenTelemetry（内部：智研 + ClickHouse 双写）
+ * Implementations:
+ * - NoopTraceBackend   — no-op (open-source default)
+ * - ConsoleTraceBackend — stdout output (development/debugging)
+ * - OTelTraceBackend   — OpenTelemetry (internal: Zhiyan + ClickHouse dual-write)
  */
 export interface ITraceBackend {
-  /** 后端标识 */
+  /** Backend identifier */
   readonly type: string;
 
   /**
-   * 上报一个业务事件（事件即 Span）。
-   * 内部创建 Span → 设置属性 → 设置状态 → End。
+   * Report a business event (event-as-Span).
+   * Internally creates a Span → sets attributes → sets status → End.
    */
   report(event: string, attrs?: TraceAttrs): void;
 
   /**
-   * 创建一个传统 Span（调用方需手动 span.end()）。
-   * @param spanName Span 名称
-   * @param kind SpanKind 数值（INTERNAL=0, SERVER=1, CLIENT=2, PRODUCER=3, CONSUMER=4）
+   * Create a traditional Span (the caller must call span.end() manually).
+   * @param spanName Span name
+   * @param kind SpanKind numeric value (INTERNAL=0, SERVER=1, CLIENT=2, PRODUCER=3, CONSUMER=4)
    */
   start(spanName: string, kind?: number): ISpan;
 
-  /** 创建 SERVER 类型 Span */
+  /** Create a SERVER-type Span */
   startServer(spanName: string): ISpan;
 
-  /** 创建 CLIENT 类型 Span */
+  /** Create a CLIENT-type Span */
   startClient(spanName: string): ISpan;
 }
 
 // ============================
-// ILogBackend — Log 抽象
+// ILogBackend — Log abstraction
 // ============================
 
 /**
- * Log 后端接口。
+ * Log backend interface.
  *
- * 实现：
- * - NoopLogBackend    — 空操作（开源默认）
- * - ConsoleLogBackend — stdout 输出（开发调试）
- * - OTelLogBackend    — OpenTelemetry Logs API（内部：智研 + ClickHouse 双写）
+ * Implementations:
+ * - NoopLogBackend    — no-op (open-source default)
+ * - ConsoleLogBackend — stdout output (development/debugging)
+ * - OTelLogBackend    — OpenTelemetry Logs API (internal: Zhiyan + ClickHouse dual-write)
  */
 export interface ILogBackend {
-  /** 后端标识 */
+  /** Backend identifier */
   readonly type: string;
 
-  /** INFO 级别日志 */
+  /** INFO level log */
   info(eventName: string, attrs?: LogAttrs): void;
 
-  /** WARN 级别日志 */
+  /** WARN level log */
   warn(eventName: string, attrs?: LogAttrs): void;
 
-  /** ERROR 级别日志 */
+  /** ERROR level log */
   error(eventName: string, attrs?: LogAttrs, error?: Error): void;
 
-  /** DEBUG 级别日志 */
+  /** DEBUG level log */
   debug?(eventName: string, attrs?: LogAttrs): void;
 }
 
 // ============================
-// IMetricBackend — Metric 抽象
+// IMetricBackend — Metric abstraction
 // ============================
 
-/** 指标消息结构 */
+/** Metric message structure */
 export interface MetricMessage {
-  /** 指标名 */
+  /** Metric name */
   metric: string;
-  /** 实例 ID（同时作为 Kafka key） */
+  /** Instance ID (also used as the Kafka key) */
   instanceId: string;
-  /** 原始值 */
+  /** Raw value */
   value: number;
-  /** 事件发生时 Unix 秒（UTC），不传则自动取当前时间 */
+  /** Unix seconds (UTC) when the event occurred; the current time is used automatically if omitted */
   timestamp?: number;
-  /** 来源服务 */
+  /** Source service */
   source?: string;
   /**
-   * 关联的 OTel Trace ID，用于 Metric → Trace 反查。
-   * 由 metricProducer.send() 自动从当前 active span 注入，调用方通常不需要手动传入。
-   * 存入 ClickHouse 后，在线评测服务可通过此字段定位到具体请求的完整 Trace。
+   * Associated OTel Trace ID, used for Metric → Trace reverse lookup.
+   * Automatically injected from the current active span by metricProducer.send(); callers usually do not need to pass it manually.
+   * Once stored in ClickHouse, the online evaluation service can use this field to locate the complete Trace of a specific request.
    */
   traceId?: string;
 }
 
-/** Kafka Metric 配置 */
+/** Kafka Metric configuration */
 export interface MetricBackendConfig {
-  /** Kafka Broker 列表 */
+  /** Kafka Broker list */
   brokers: string[];
-  /** Topic 名称 (默认: "memory_monitor") */
+  /** Topic name (default: "memory_monitor") */
   topic?: string;
-  /** 是否启用 (默认: false) */
+  /** Whether enabled (default: false) */
   enabled?: boolean;
 }
 
 /**
- * Metric 后端接口。
+ * Metric backend interface.
  *
- * 实现：
- * - NoopMetricBackend  — 空操作（开源默认）
- * - ConsoleMetricBackend — stdout 输出（开发调试）
- * - KafkaMetricBackend — Kafka Producer（内部：memory-monitor 消费 → Barad + ClickHouse）
+ * Implementations:
+ * - NoopMetricBackend  — no-op (open-source default)
+ * - ConsoleMetricBackend — stdout output (development/debugging)
+ * - KafkaMetricBackend — Kafka Producer (internal: memory-monitor consumes → Barad + ClickHouse)
  */
 export interface IMetricBackend {
-  /** 后端标识 */
+  /** Backend identifier */
   readonly type: string;
 
-  /** 发送一条指标消息（同步，不阻塞） */
+  /** Send one metric message (synchronous, non-blocking) */
   send(msg: MetricMessage): void;
 
-  /** 初始化后端（异步） */
+  /** Initialize the backend (async) */
   initialize(config: MetricBackendConfig): Promise<void>;
 
-  /** 优雅关闭 */
+  /** Graceful shutdown */
   destroy(): Promise<void>;
 }
 
 // ============================
-// ILLMTraceBackend — AI/LLM Trace 抽象
+// ILLMTraceBackend — AI/LLM Trace abstraction
 // ============================
 
-/** Langfuse 配置 */
+/** Langfuse configuration */
 export interface LLMTraceConfig {
-  /** 是否启用 */
+  /** Whether enabled */
   enabled: boolean;
-  /** Langfuse 实例地址 */
+  /** Langfuse instance address */
   host?: string;
-  /** Langfuse 公钥 */
+  /** Langfuse public key */
   publicKey?: string;
-  /** Langfuse 私钥 */
+  /** Langfuse secret key */
   secretKey?: string;
 }
 
 /**
- * LLM Trace 后端接口。
+ * LLM Trace backend interface.
  *
- * 实现：
- * - NoopLLMTraceBackend     — 空操作（开源默认）
- * - ConsoleLLMTraceBackend  — stdout 输出（开发调试）
- * - LangfuseLLMTraceBackend — Langfuse（内部：过滤 AI Span 上报到 Langfuse）
+ * Implementations:
+ * - NoopLLMTraceBackend     — no-op (open-source default)
+ * - ConsoleLLMTraceBackend  — stdout output (development/debugging)
+ * - LangfuseLLMTraceBackend — Langfuse (internal: filters AI Spans and reports them to Langfuse)
  */
 export interface ILLMTraceBackend {
-  /** 后端标识 */
+  /** Backend identifier */
   readonly type: string;
 
   /**
-   * 创建一个 SpanProcessor 实例。
-   * 返回的 processor 会被注册到 OTel TracerProvider 中，
-   * 用于过滤并上报 AI/LLM 相关 Span。
+   * Create a SpanProcessor instance.
+   * The returned processor is registered with the OTel TracerProvider
+   * to filter and report AI/LLM-related Spans.
    */
   createSpanProcessor(): ISpanProcessor | null;
 
-  /** 强制刷新待上报的 LLM Trace 数据 */
+  /** Force-flush pending LLM Trace data */
   flush(): Promise<void>;
 
-  /** 优雅关闭 */
+  /** Graceful shutdown */
   shutdown(): Promise<void>;
 }
 
 // ============================
-// ITraceMiddleware — HTTP Trace 中间件抽象
+// ITraceMiddleware — HTTP Trace middleware abstraction
 // ============================
 
 /**
- * HTTP Trace 中间件接口。
+ * HTTP Trace middleware interface.
  *
- * 实现：
- * - NoopTraceMiddleware — 透传（开源默认）
- * - ConsoleTraceMiddleware — stdout 输出（开发调试）
- * - OTelTraceMiddleware — OpenTelemetry（内部：创建 SERVER Span + Context 传播）
+ * Implementations:
+ * - NoopTraceMiddleware — pass-through (open-source default)
+ * - ConsoleTraceMiddleware — stdout output (development/debugging)
+ * - OTelTraceMiddleware — OpenTelemetry (internal: creates SERVER Spans + Context propagation)
  */
 export interface ITraceMiddleware {
-  /** 后端标识 */
+  /** Backend identifier */
   readonly type: string;
 
   /**
-   * 包装 HTTP 请求处理器，添加 Trace 埋点。
-   * 从 traceparent 头恢复上游 Trace Context，创建 SERVER Span。
+   * Wrap an HTTP request handler and add Trace instrumentation.
+   * Restores the upstream Trace Context from the traceparent header and creates a SERVER Span.
    */
   wrapWithTrace(
     req: http.IncomingMessage,
@@ -252,8 +252,8 @@ export interface ITraceMiddleware {
   ): Promise<void>;
 
   /**
-   * 创建子 Span（在业务处理器内部使用）。
-   * 调用方需手动 span.end()。
+   * Create a child Span (used inside a business handler).
+   * The caller must call span.end() manually.
    */
   startChildSpan(
     name: string,
@@ -261,7 +261,7 @@ export interface ITraceMiddleware {
   ): ISpan;
 
   /**
-   * 在 Span 上下文中执行函数，自动创建子 Span。
+   * Execute a function in a Span context and automatically create a child Span.
    */
   withSpan<T>(
     name: string,
@@ -271,23 +271,23 @@ export interface ITraceMiddleware {
 }
 
 // ============================
-// ITracePropagation — Trace Context 传播抽象
+// ITracePropagation — Trace Context propagation abstraction
 // ============================
 
 /**
- * Trace Context 跨异步边界传播接口。
- * 用于异步任务中序列化/反序列化 OTel Trace Context。
+ * Trace Context propagation interface across async boundaries.
+ * Used to serialize/deserialize the OTel Trace Context in async tasks.
  */
 export interface ITracePropagation {
   /**
-   * 序列化当前 Trace Context 到 plain object。
-   * 返回的 object 可以 spread 到 TaskPayload.data 中。
+   * Serialize the current Trace Context into a plain object.
+   * The returned object can be spread into TaskPayload.data.
    */
   serializeTraceContext(): Record<string, string | number>;
 
   /**
-   * 从 TaskPayload.data 反序列化恢复 Trace Context。
-   * 返回 parentContext 和 parentSpanContext。
+   * Deserialize and restore the Trace Context from TaskPayload.data.
+   * Returns parentContext and parentSpanContext.
    */
   deserializeTraceContext(data?: Record<string, unknown>): {
     parentContext: unknown;
@@ -296,41 +296,41 @@ export interface ITracePropagation {
 }
 
 // ============================
-// IObservabilityBackend — 聚合接口
+// IObservabilityBackend — aggregate interface
 // ============================
 
 /**
- * 可观测性后端聚合接口 — 包含所有子后端。
+ * Observability backend aggregate interface — contains all sub-backends.
  *
- * 通过工厂函数 createObservabilityBackend(config) 创建，
- * 全局单例暴露给各门面模块使用。
+ * Created via the factory function createObservabilityBackend(config),
+ * with the global singleton exposed to the facade modules.
  */
 export interface IObservabilityBackend {
-  /** 后端类型标识 */
+  /** Backend type identifier */
   readonly type: "noop" | "console" | "internal" | string;
 
-  /** Trace 后端 */
+  /** Trace backend */
   readonly trace: ITraceBackend;
 
-  /** Log 后端 */
+  /** Log backend */
   readonly log: ILogBackend;
 
-  /** Metric 后端 */
+  /** Metric backend */
   readonly metric: IMetricBackend;
 
-  /** LLM Trace 后端 */
+  /** LLM Trace backend */
   readonly llmTrace: ILLMTraceBackend;
 
-  /** HTTP Trace 中间件 */
+  /** HTTP Trace middleware */
   readonly traceMiddleware: ITraceMiddleware;
 
-  /** Trace Context 传播 */
+  /** Trace Context propagation */
   readonly tracePropagation: ITracePropagation;
 
-  /** 初始化所有子后端 */
+  /** Initialize all sub-backends */
   initialize(config: ObservabilityConfig): Promise<void>;
 
-  /** 优雅关闭所有子后端 */
+  /** Gracefully shut down all sub-backends */
   shutdown(): Promise<void>;
 }
 
@@ -338,68 +338,68 @@ export interface IObservabilityBackend {
 // Configuration
 // ============================
 
-/** OTel 配置 */
+/** OTel configuration */
 export interface OTelConfig {
-  /** 是否启用 */
+  /** Whether enabled */
   enabled: boolean;
-  /** OTel Collector 端点 */
+  /** OTel Collector endpoint */
   endpoint?: string;
-  /** 协议 (grpc | http | http/protobuf) */
+  /** Protocol (grpc | http | http/protobuf) */
   protocol?: "grpc" | "http" | "http/protobuf";
-  /** 服务名 */
+  /** Service name */
   serviceName?: string;
-  /** 租户 ID */
+  /** Tenant ID */
   tenantId?: string;
 }
 
-/** ClickHouse 配置 */
+/** ClickHouse configuration */
 export interface ClickHouseConfig {
-  /** 是否启用 */
+  /** Whether enabled */
   enabled: boolean;
-  /** ClickHouse HTTP 端点 */
+  /** ClickHouse HTTP endpoint */
   endpoint?: string;
-  /** 用户名 */
+  /** Username */
   username?: string;
-  /** 密码 */
+  /** Password */
   password?: string;
-  /** 数据库名 */
+  /** Database name */
   database?: string;
 }
 
 /**
- * 可观测性总配置。
+ * Overall observability configuration.
  *
- * 后端类型说明：
- * - "noop"     — 空操作，零开销（默认，不配置时使用）
- * - "console"  — 输出到 stdout，用于开发调试
- * - "otlp"     — 标准 OTLP 协议后端（开源用户推荐）
- *                配置 otel.endpoint 即可将 Trace/Log/Metric 上报到任何支持 OTLP 的后端
- *                （如 ClickHouse、Jaeger、Grafana Tempo/Loki/Mimir、SigNoz、OTel Collector 等）
- * - "internal" — 内部私有模块（通过 git submodule 引入，智研 + Kafka + Langfuse）
+ * Backend type descriptions:
+ * - "noop"     — no-op, zero overhead (default, used when not configured)
+ * - "console"  — output to stdout, for development/debugging
+ * - "otlp"     — standard OTLP protocol backend (recommended for open-source users)
+ *                configure otel.endpoint to report Trace/Log/Metric to any OTLP-capable backend
+ *                (such as ClickHouse, Jaeger, Grafana Tempo/Loki/Mimir, SigNoz, OTel Collector, etc.)
+ * - "internal" — internal private module (introduced via git submodule, Zhiyan + Kafka + Langfuse)
  */
 export interface ObservabilityConfig {
-  /** 后端类型：noop | console | otlp | internal */
+  /** Backend type: noop | console | otlp | internal */
   type: "noop" | "console" | "otlp" | "internal" | string;
 
   /**
-   * OTel 配置（otlp 和 internal 模式使用）。
+   * OTel configuration (used in otlp and internal modes).
    *
-   * 开源用户使用 "otlp" 模式时，只需配置：
+   * When open-source users use "otlp" mode, they only need to configure:
    *   otel: {
    *     enabled: true,
-   *     endpoint: "http://localhost:4318",  // 你的 OTLP 后端地址
-   *     serviceName: "my-memory-service",   // 可选，默认 "tdai-memory"
+   *     endpoint: "http://localhost:4318",  // your OTLP backend address
+   *     serviceName: "my-memory-service",   // optional, default "tdai-memory"
    *   }
    */
   otel?: OTelConfig;
 
-  /** ClickHouse 配置（internal 模式使用） */
+  /** ClickHouse configuration (used in internal mode) */
   clickhouse?: ClickHouseConfig;
 
-  /** Kafka Metric 配置（internal 模式使用） */
+  /** Kafka Metric configuration (used in internal mode) */
   kafka?: MetricBackendConfig;
 
-  /** Langfuse LLM Trace 配置（internal 模式使用） */
+  /** Langfuse LLM Trace configuration (used in internal mode) */
   langfuse?: LLMTraceConfig;
 }
 
@@ -407,7 +407,7 @@ export interface ObservabilityConfig {
 // Logger Interface (for internal use)
 // ============================
 
-/** 可观测性模块内部使用的最小日志接口 */
+/** Minimal logger interface used internally by the observability module */
 export interface ObservabilityLogger {
   debug?: (message: string) => void;
   info: (message: string) => void;

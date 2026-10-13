@@ -139,8 +139,8 @@ jobs:
           fi
 
   # ── 7. Skill queue isolation guard ─────────────────────────
-  # 强约束：禁止 PR 触碰记忆模块红线文件（state/pipeline-worker/integrations/redis），
-  # 禁止 src/core/skill/** 新增直接 fs import。详见
+  # Hard constraints: forbid PRs from touching memory-module red-line files (state/pipeline-worker/integrations/redis),
+  # and forbid src/core/skill/** from adding direct fs imports. See
   # docs/design/2026-06-16-skill-extract-queue.md
   isolation:
     name: Skill Queue Isolation
@@ -148,7 +148,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # 需要完整历史以便 git diff base..HEAD
+          fetch-depth: 0   # full history needed for git diff base..HEAD
 
       - name: Run isolation guard
         env:

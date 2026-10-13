@@ -16,19 +16,19 @@ const COLORS: Record<LogLevel, string> = {
 const RESET = '\x1b[0m';
 
 export interface ConsoleLoggerOptions {
-  /** 最低输出级别，低于此级别的日志被丢弃。 */
+  /** Minimum output level; logs below this level are discarded. */
   level: LogLevel;
-  /** json：每行一个 JSON（适合采集）；pretty：人类可读（适合本地开发）。 */
+  /** json: one JSON per line (suited for collection); pretty: human-readable (suited for local development). */
   format: 'json' | 'pretty';
-  /** 固定绑定字段（child 累加）。 */
+  /** Fixed bound fields (accumulated by child). */
   bindings?: LogFields;
 }
 
 /**
- * 零依赖的结构化 console 日志实现。
- * - error 走 stderr，其余走 stdout；
- * - format=json 时每行一个 JSON 对象，便于被日志平台采集；
- * - child() 累加绑定字段，实现 reqId 串联。
+ * Zero-dependency structured console logger implementation.
+ * - error goes to stderr, the rest go to stdout;
+ * - with format=json each line is one JSON object, easy for log platforms to collect;
+ * - child() accumulates bound fields, enabling reqId correlation.
  */
 export class ConsoleLogger implements Logger {
   private readonly minWeight: number;

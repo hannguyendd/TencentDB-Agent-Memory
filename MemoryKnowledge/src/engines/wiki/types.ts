@@ -1,5 +1,5 @@
 /**
- * Wiki 类型定义
+ * Wiki type definitions
  */
 
 export interface FileNode {
@@ -13,8 +13,8 @@ export interface WikiPage {
   id: string;
   title: string;
   type: string;
-  path: string;       // 绝对路径
-  relPath: string;    // wiki/ 相对路径
+  path: string;       // absolute path
+  relPath: string;    // path relative to wiki/
   content: string;
   sources: string[];
   links: string[];    // outbound [[wikilinks]]
@@ -79,9 +79,9 @@ export interface SearchResponse {
 }
 
 export interface WikiSourceConfig {
-  /** 名称（唯一标识） */
+  /** Name (unique identifier) */
   name: string;
-  /** wiki 目录的绝对路径（里面应该有 wiki/ 子目录） */
+  /** Absolute path of the wiki directory (should contain a wiki/ subdirectory) */
   path: string;
 }
 

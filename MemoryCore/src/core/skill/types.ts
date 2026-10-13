@@ -2,7 +2,7 @@
  * Type definitions for the Skill module — v2 redesign (2026-06-17).
  *
  * Host-neutral. No imports from openclaw / hermes / automation projects.
- * 设计文档：docs/design/2026-06-17-skill-redesign-v2.md
+ * Design doc: docs/design/2026-06-17-skill-redesign-v2.md
  */
 
 // ============================
@@ -36,35 +36,35 @@ export interface SkillConfigInput {
     model?: string;
     maxIterations?: number;
     /**
-     * 单一"归档尺寸"旋钮（字节）。默认 40960 (40KB)。派生 7 个内部字段:
-     *   • Handler 的 bytesThreshold / requestCompressThresholdBytes = archiveBytes
-     *   • Oversize 兜底的 chunkMaxBytes = 2 × archiveBytes
-     *   • Oversize 兜底的 headKeepBytes / tailKeepBytes = archiveBytes
-     *   • Extractor transcript 截断的 headChars / tailChars = archiveBytes
-     * 语义: 归档 payload 目标大小 = archiveBytes，上限 = 2 × archiveBytes。
+     * Single "archive size" knob (bytes). Default 40960 (40KB). Derives 7 internal fields:
+     *   • Handler's bytesThreshold / requestCompressThresholdBytes = archiveBytes
+     *   • Oversize fallback's chunkMaxBytes = 2 × archiveBytes
+     *   • Oversize fallback's headKeepBytes / tailKeepBytes = archiveBytes
+     *   • Extractor transcript truncation's headChars / tailChars = archiveBytes
+     * Semantics: archive payload target size = archiveBytes, cap = 2 × archiveBytes.
      */
     archiveBytes?: number;
-    /** Skill review 单次 LLM 调用输出 token 上限。不填 → 继承顶层 llm.maxTokens。 */
+    /** Output token cap for a single Skill review LLM call. If omitted → inherits the top-level llm.maxTokens. */
     maxTokens?: number;
     /**
-     * Extractor 在把 transcript 交给 review LLM 之前, 会先注入一段"预先检索"的
-     * skill 列表 (由抽取器自己代跑 skill_list 得到)。本字段控制这段的最大条数,
-     * 同时是 relevant 检索 (LLM 生成 query + BM25 search) 与 recent 兜底
-     * (按 updated_at DESC 分页) 共用的上限。默认 20; <=0 或非整数 warn 落回 20。
+     * Before handing the transcript to the review LLM, the Extractor first injects a "pre-retrieved"
+     * skill list (obtained by the extractor running skill_list itself). This field controls the maximum number of entries in it,
+     * and is also the cap shared by relevant retrieval (LLM generates a query + BM25 search) and the recent fallback
+     * (paged by updated_at DESC). Default 20; <=0 or a non-integer warns and falls back to 20.
      */
     prefixSkillsLimit?: number;
   };
 
   /**
-   * 单条大 tool 消息头尾压缩规则。只影响 tool_call / tool_result 单条 content
-   * 超阈值时的头尾切分；user/assistant/system 永不压缩。
+   * Head/tail compression rules for a single large tool message. Only affects the head/tail split of a single tool_call / tool_result content
+   * when it exceeds the threshold; user/assistant/system are never compressed.
    */
   compress?: {
-    /** 单条 tool 消息 content 超过多少字节才压缩。默认 2048 (2KB)。 */
+    /** How many bytes a single tool message's content must exceed before it is compressed. Default 2048 (2KB). */
     toolContentThresholdBytes?: number;
-    /** 压缩后保留的头字节。默认 1024 (1KB)。 */
+    /** Head bytes kept after compression. Default 1024 (1KB). */
     headBytes?: number;
-    /** 压缩后保留的尾字节。默认 1024 (1KB)。 */
+    /** Tail bytes kept after compression. Default 1024 (1KB). */
     tailBytes?: number;
   };
 
@@ -74,29 +74,29 @@ export interface SkillConfigInput {
     allowExecutable?: boolean;
   };
 
-  /** 旧版本 TTL 天数。默认 0（关闭）。设 7 = 非 head 版本创建 7 天后过期。 */
+  /** TTL in days for old versions. Default 0 (disabled). Set 7 = non-head versions expire 7 days after creation. */
   versionTtlDays?: number;
 
   /**
-   * 每个 skill 最多保留的**非 head** 版本数。默认 0（关闭）。
-   * 设 100 = 非 head 版本最多 100 个，超出则删最老的（head 永不受影响）。
-   * 与 versionTtlDays 取并集：两者同时开启时，谁更严谁生效。
+   * Max number of **non-head** versions retained per skill. Default 0 (disabled).
+   * Set 100 = at most 100 non-head versions, the oldest are deleted when exceeded (the head is never affected).
+   * Takes the union with versionTtlDays: when both are enabled, whichever is stricter takes effect.
    */
   maxVersions?: number;
 
   /**
-   * Skill 抽取 worker 池 (2026-07-30 引入)。整个进程一个池, 全 instance
-   * 共享一条 skill agent 队列, 池里 N 条无状态 worker loop 从队列拿活。
-   * 详见 docs/design/2026-07-30-skill-worker-instance-decoupling.md。
+   * Skill extraction worker pool (introduced 2026-07-30). One pool per process, all instances
+   * share one skill agent queue, and N stateless worker loops in the pool take work from the queue.
+   * See docs/design/2026-07-30-skill-worker-instance-decoupling.md for details.
    */
   worker?: {
-    /** 池里 worker 数, 全进程 skill 抽取并发上限。默认 60。可被 env TDAI_SKILL_WORKER_CONCURRENCY 覆盖。 */
+    /** Number of workers in the pool, the process-wide cap on skill extraction concurrency. Default 60. Can be overridden by env TDAI_SKILL_WORKER_CONCURRENCY. */
     concurrency?: number;
-    /** dequeueAgent 单次自旋 deadline (ms)。默认 5000。 */
+    /** dequeueAgent single-spin deadline (ms). Default 5000. */
     brpopBlockMs?: number;
-    /** extract-lock TTL (ms), 保护同 (instance, agent) 串行。默认 600_000 (10 min)。 */
+    /** extract-lock TTL (ms), protects serialization of the same (instance, agent). Default 600_000 (10 min). */
     extractLockTtlMs?: number;
-    /** extract-lock 续约间隔 (ms), 默认 ttl / 4。 */
+    /** extract-lock renewal interval (ms), default ttl / 4. */
     extractLockRenewIntervalMs?: number;
   };
 }
@@ -123,33 +123,33 @@ export interface ResolvedSkillConfig {
     toolCallThreshold: number;
     model?: string;
     maxIterations: number;
-    /** 归档尺寸旋钮 (字节)。用户可见配置源；下面 7 个字段由它派生。 */
+    /** Archive size knob (bytes). The user-visible config source; the 7 fields below are derived from it. */
     archiveBytes: number;
-    /** Skill review 单次 LLM 调用输出 token 上限；不填 → 由 runner 继承 llm.maxTokens。 */
+    /** Output token cap for a single Skill review LLM call; if omitted → the runner inherits llm.maxTokens. */
     maxTokens?: number;
     /**
-     * Extractor 预检索 skill 列表条数上限 (relevant BM25 检索 & recent 兜底共用)。
-     * 默认 20。
+     * Cap on the number of Extractor pre-retrieved skill list entries (shared by relevant BM25 retrieval & the recent fallback).
+     * Default 20.
      */
     prefixSkillsLimit: number;
-    // ↓↓↓ 以下 7 个由 archiveBytes 派生，用户不直接配 ↓↓↓
-    /** Handler: buffer 累计字节 ≥ 触发归档。= archiveBytes。 */
+    // ↓↓↓ The following 7 are derived from archiveBytes; users do not configure them directly ↓↓↓
+    /** Handler: archiving triggers when buffer cumulative bytes ≥ this. = archiveBytes. */
     bytesThreshold: number;
-    /** Handler: 单次 add 请求 ≥ 强制走压缩路径。= archiveBytes。 */
+    /** Handler: a single add request ≥ this is forced onto the compression path. = archiveBytes. */
     requestCompressThresholdBytes: number;
-    /** Oversize 兜底: 归档 payload > 触发切分。= 2 × archiveBytes。 */
+    /** Oversize fallback: splitting triggers when the archive payload > this. = 2 × archiveBytes. */
     chunkMaxBytes: number;
-    /** Oversize 兜底: 切完保留的头字节。= archiveBytes。 */
+    /** Oversize fallback: head bytes kept after splitting. = archiveBytes. */
     headKeepBytes: number;
-    /** Oversize 兜底: 切完保留的尾字节。= archiveBytes。 */
+    /** Oversize fallback: tail bytes kept after splitting. = archiveBytes. */
     tailKeepBytes: number;
-    /** Extractor transcript 截断: 保留头字符。= archiveBytes (字节数近似当字符数)。 */
+    /** Extractor transcript truncation: head characters kept. = archiveBytes (byte count approximated as character count). */
     headChars: number;
-    /** Extractor transcript 截断: 保留尾字符。= archiveBytes。 */
+    /** Extractor transcript truncation: tail characters kept. = archiveBytes. */
     tailChars: number;
   };
 
-  /** 单条大 tool 消息头尾压缩，参数与 CompressOptions 对齐。 */
+  /** Head/tail compression of a single large tool message, with parameters aligned with CompressOptions. */
   compress: {
     toolContentThresholdBytes: number;
     headBytes: number;
@@ -162,13 +162,13 @@ export interface ResolvedSkillConfig {
     allowExecutable: boolean;
   };
 
-  /** 旧版本 TTL 秒数。0 = 关闭。 */
+  /** TTL in seconds for old versions. 0 = disabled. */
   versionTtlSeconds: number;
 
-  /** 每个 skill 最多保留的非 head 版本数。0 = 关闭。 */
+  /** Max number of non-head versions retained per skill. 0 = disabled. */
   maxNonHeadVersions: number;
 
-  /** Skill 抽取 worker 池配置 (2026-07-30)。见 SkillConfigInput.worker 注释。 */
+  /** Skill extraction worker pool config (2026-07-30). See the SkillConfigInput.worker comment. */
   worker: {
     concurrency: number;
     brpopBlockMs: number;
@@ -219,12 +219,12 @@ export interface SkillEnvProbe {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-//  v2 数据面契约（2026-06-17 redesign）
+//  v2 data-plane contract (2026-06-17 redesign)
 // ════════════════════════════════════════════════════════════════════════
 
 /**
- * 业务身份四元组。全部可选。
- * team_id 和 agent_id 要么都传要么都不传（由 gateway schema 层 cross-field 校验保证）。
+ * Business identity 4-tuple. All optional.
+ * team_id and agent_id must either both be passed or both omitted (guaranteed by the gateway schema layer's cross-field validation).
  */
 export interface IdFields {
   user_id?: string;
@@ -233,12 +233,12 @@ export interface IdFields {
   task_id?: string;
 }
 
-/** skill 状态。与 interface.yaml 对齐：active 或 archived。 */
+/** Skill status. Aligned with interface.yaml: active or archived. */
 export type SkillStatus = "active" | "archived";
 
-/** manifest_json 列里的单个资源元信息。字节不在此类型中。 */
+/** Metadata of a single resource in the manifest_json column. Bytes are not in this type. */
 export interface SkillManifestEntry {
-  /** 相对 `files/` 的路径，UNIX 风格，禁 `..` / 绝对路径。例 "scripts/run.sh" */
+  /** Path relative to `files/`, UNIX style; `..` / absolute paths are forbidden. E.g. "scripts/run.sh" */
   path: string;
   size_bytes: number;
   mime_type: string;
@@ -265,11 +265,11 @@ export interface SkillProposeResult {
 }
 
 /**
- * skill 主表的一行。每行 = (skill_id, version) 一个不可变快照。
+ * A row of the skill main table. Each row = an immutable snapshot of (skill_id, version).
  *
- * - 字段对应 `skills` 表（见 skill-store-ddl.ts SKILLS_DDL）
- * - `manifest` 是 `manifest_json` 列反序列化后的结构化形式
- * - `is_head` 是 boolean（DB 中是 0/1 INTEGER）
+ * - fields correspond to the `skills` table (see SKILLS_DDL in skill-store-ddl.ts)
+ * - `manifest` is the structured form of the deserialized `manifest_json` column
+ * - `is_head` is a boolean (0/1 INTEGER in the DB)
  */
 export interface Skill {
   row_id: string;
@@ -295,15 +295,15 @@ export interface Skill {
   updated_at_ms: number;
 }
 
-/** `appendVersion` 的入参。store 内部基于 head 推导 version+1。 */
+/** Input of `appendVersion`. The store derives version+1 internally based on the head. */
 export interface AppendVersionInput {
-  /** 写入身份。不传则写 "default"。 */
+  /** Write identity. If omitted, writes "default". */
   user_id?: string;
   team_id?: string;
   agent_id?: string;
   task_id?: string;
 
-  /** 业务主键 — 首次创建由调用方生成；同 skill 的后续版本同 skill_id。 */
+  /** Business primary key — generated by the caller on first creation; later versions of the same skill use the same skill_id. */
   skill_id: string;
 
   name: string;
@@ -313,13 +313,13 @@ export interface AppendVersionInput {
   manifest: SkillManifestEntry[];
   storage_dir: string;
 
-  /** 仅 create 时由调用方指定为 owner_agent_id；后续版本由 store 校验后从 head 继承。 */
+  /** Specified as owner_agent_id by the caller only on create; later versions are validated by the store and inherited from the head. */
   owner_agent_id?: string;
 
   metadata_json?: string;
 }
 
-/** `listSkills` 的查询参数。仅返回 head + (status 满足) 的行。四个 ID 全部可选，传了就过滤。 */
+/** Query parameters of `listSkills`. Returns only rows that are head + (status satisfied). All four IDs are optional; if passed they filter. */
 export interface ListSkillsOptions {
   team_id?: string;
   owner_agent_id?: string;
@@ -331,29 +331,29 @@ export interface ListSkillsOptions {
   offset?: number;
 }
 
-/** `searchSkills` 的查询参数。仅命中 head + active 行。四个 ID 全部可选，传了就过滤。 */
+/** Query parameters of `searchSkills`. Hits only head + active rows. All four IDs are optional; if passed they filter. */
 export interface SearchSkillsOptions {
   team_id?: string;
   query: string;
   queryEmbedding?: Float32Array;
   topK?: number;
   /**
-   * 检索模式（设计 §3.5.7）。
-   *   - 'bm25'      : 仅 FTS5 BM25
-   *   - 'embedding' : 仅 vec0 KNN（需 queryEmbedding）
-   *   - 'hybrid'    : BM25 + KNN RRF 融合（需 queryEmbedding）
-   * 不传 / 未配置 embedding 时降级为 bm25。
+   * Retrieval mode (design §3.5.7).
+   *   - 'bm25'      : FTS5 BM25 only
+   *   - 'embedding' : vec0 KNN only (requires queryEmbedding)
+   *   - 'hybrid'    : BM25 + KNN RRF fusion (requires queryEmbedding)
+   * When omitted / embedding not configured, degrades to bm25.
    */
   mode?: "bm25" | "embedding" | "hybrid";
-  /** 可选：按 owner agent 过滤搜索结果。 */
+  /** Optional: filter search results by owner agent. */
   agent_id?: string;
-  /** 可选：按 task 过滤搜索结果。 */
+  /** Optional: filter search results by task. */
   task_id?: string;
-  /** 可选：按 user 过滤搜索结果。 */
+  /** Optional: filter search results by user. */
   user_id?: string;
 }
 
-/** 抽取接口的结构化对话消息。对齐 interface.yaml §SkillImportMessage。 */
+/** Structured conversation message of the extraction interface. Aligned with interface.yaml §SkillImportMessage. */
 export interface ExtractMessage {
   role: "user" | "assistant" | "tool_call" | "tool_result";
   content: string;
@@ -361,20 +361,20 @@ export interface ExtractMessage {
 }
 
 /**
- * Skill Review Agent 用的 LLM runner 形状。boot 端构造后注入 SkillExtractor。
- * 与 src/adapters/standalone/llm-runner.ts 的 StandaloneLLMRunner.run 兼容。
+ * Shape of the LLM runner used by the Skill Review Agent. Injected into SkillExtractor after construction at boot.
+ * Compatible with StandaloneLLMRunner.run in src/adapters/standalone/llm-runner.ts.
  */
 export interface ExtractorLLMRunner {
   run(params: {
     prompt: string;
     systemPrompt?: string;
-    /** Tool dict (Vercel AI SDK shape). 当 enableTools=true 时驱动 tool-call 循环。 */
+    /** Tool dict (Vercel AI SDK shape). Drives the tool-call loop when enableTools=true. */
     tools?: Record<string, unknown>;
     enableTools?: boolean;
     maxIterations?: number;
     taskId: string;
     timeoutMs?: number;
-    /** Worker 在锁失效时通过 abort 信号取消 LLM 调用。 */
+    /** The Worker cancels the LLM call via an abort signal when the lock becomes invalid. */
     signal?: AbortSignal;
   }): Promise<string>;
 }

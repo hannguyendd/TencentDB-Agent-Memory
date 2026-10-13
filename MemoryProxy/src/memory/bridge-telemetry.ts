@@ -1,13 +1,13 @@
 /**
- * Bridge-side tool-call 埋点 helper（memory-bridge + skill-bridge 共用）。
+ * Bridge-side tool-call telemetry helper (shared by memory-bridge + skill-bridge).
  *
- * 设计：每次 upstream fetch 完成（成功或失败）都发一条 kind='bridge_call'。
- *      调用方负责把 body 脱敏到 <= 512 字节（本函数不再清洗），只做透传。
+ * Design: every time an upstream fetch completes (success or failure), emit one kind='bridge_call'.
+ *      The caller is responsible for sanitizing the body to <= 512 bytes (this function does no further cleaning), only passing it through.
  *
- * 硬约束（§7.-1）：
- *   - 同步返回 void
- *   - sink 异常静默吞掉
- *   - body/sub 已由调用方准备好，绝不额外读 session store
+ * Hard constraints (section 7.-1):
+ *   - return void synchronously
+ *   - swallow sink exceptions silently
+ *   - body/sub are already prepared by the caller; never read the session store additionally
  */
 import { writeSkillUsageRow, writeToolCallRow, type SkillUsageLogInput, type ToolCallLogInput } from "../clickhouse.js";
 
@@ -18,28 +18,28 @@ export interface BridgeCallTelemetryInput {
   userId?: string;
   teamId?: string;
   agentId?: string;
-  /** "claude-code" | "codebuddy" | "unknown" — 从 sessionKey 前缀反解 */
+  /** "claude-code" | "codebuddy" | "unknown" — reverse-derived from the sessionKey prefix */
   agentSource: string;
   /** "memory-bridge" | "skill-bridge" */
   bridgeSource: string;
-  /** 具体 sub 字符串（"atomic/search" / "skill/get" 等） */
+  /** The concrete sub string ("atomic/search" / "skill/get" etc.) */
   executedEndpoint: string;
-  /** 已脱敏、已截断的 outbound body（<= 512 字节） */
+  /** Sanitized, truncated outbound body (<= 512 bytes) */
   requestBody: string;
-  /** upstream HTTP status（网络失败可传 0 或 502） */
+  /** upstream HTTP status (may pass 0 or 502 on network failure) */
   upstreamStatus: number;
-  /** upstream 耗时毫秒 */
+  /** upstream latency in milliseconds */
   elapsedMs: number;
   /**
-   * 前置校验失败原因。空/未传 = 请求打到了上游（成功或 4xx/5xx）。
-   * 非空 = proxy 前置早退，没到 fetcher。见 clickhouse.ts ToolCallLogInput 注释。
+   * Reason a pre-validation failed. Empty/unset = the request reached upstream (success or 4xx/5xx).
+   * Non-empty = the proxy returned early before reaching the fetcher. See the comment on clickhouse.ts ToolCallLogInput.
    */
   rejectReason?: string;
 }
 
 /**
- * 发一条 bridge_call 埋点。sink 默认走 clickhouse.writeToolCallRow。
- * 内部自吞异常，绝不 throw。
+ * Emit one bridge_call telemetry event. The sink defaults to clickhouse.writeToolCallRow.
+ * Swallows exceptions internally and never throws.
  */
 export function emitBridgeToolCallTelemetry(
   input: BridgeCallTelemetryInput,
@@ -67,18 +67,18 @@ export function emitBridgeToolCallTelemetry(
     try {
       sink(row);
     } catch {
-      // sink 抛 → 埋点绝不阻塞业务
+      // If the sink throws → telemetry never blocks the business
     }
   } catch {
-    // input 构造异常也吞掉
+    // Also swallow exceptions from constructing the input
   }
 }
 
 /**
- * 从 proxy session-key 反解 agentSource。
+ * Reverse-derive agentSource from a proxy session-key.
  *   "claude-code:conv-abc" → "claude-code"
  *   "codebuddy:conv-abc"   → "codebuddy"
- *   "conv-abc"（无前缀）    → "unknown"
+ *   "conv-abc" (no prefix)    → "unknown"
  */
 export function agentSourceFromSessionKey(sessionKey: string): string {
   const idx = sessionKey.indexOf(":");
@@ -87,28 +87,28 @@ export function agentSourceFromSessionKey(sessionKey: string): string {
 }
 
 /**
- * 前置校验失败埋点 helper —— proxy 层拒绝了请求, 没能打到上游 fetcher。
+ * Pre-validation-failure telemetry helper -- the proxy layer rejected the request and it never reached the upstream fetcher.
  *
- * 前置早退大部分连 session ids 都还没解析出来 (missing header / bad content-type /
- * invalid json ...), 能拿到的稳定字段有限。剩下的字段按可选透传。
+ * Most early pre-validation exits haven't even parsed the session ids yet (missing header / bad content-type /
+ * invalid json ...), so the stable fields available are limited. The remaining fields are passed through optionally.
  *
- * 内部套 emitBridgeToolCallTelemetry, kind 仍是 'bridge_call', 通过 rejectReason
- * 非空来区分。老 dashboard 全部 kind='bridge_call' 的 SQL 一字不动仍能跑,
- * 新增维度靠 `WHERE reject_reason != ''` 反查。
+ * Wraps emitBridgeToolCallTelemetry internally; kind is still 'bridge_call', distinguished by rejectReason
+ * being non-empty. Old dashboards whose SQL all use kind='bridge_call' keep running untouched,
+ * and the new dimension is queried via `WHERE reject_reason != ''`.
  *
- * 硬约束: 同步返回 void, 埋点绝不阻塞业务; sessionKey 允许空串。
+ * Hard constraints: return void synchronously, telemetry never blocks the business; sessionKey may be an empty string.
  */
 export interface BridgeRejectTelemetryInput {
-  /** derive 出来就填, 前置阶段 (missing header) 派生不了填 "" */
+  /** Fill in when derived; if it cannot be derived in the pre-validation stage (missing header) use "" */
   sessionKey: string;
   bridgeSource: "memory-bridge" | "skill-bridge";
-  /** 稳定枚举值, 供 GROUP BY —— 详见 tool_call_logs.reject_reason 注释 */
+  /** Stable enum value, for GROUP BY -- see the tool_call_logs.reject_reason comment for details */
   rejectReason: string;
-  /** proxy 返给客户端的 HTTP status (401/415/400/...); 存到 upstream_status 列 */
+  /** HTTP status the proxy returned to the client (401/415/400/...); stored in the upstream_status column */
   httpStatus: number;
-  /** subpath 若已能算出就填, 否则 "" */
+  /** Fill in subpath if it can already be computed, otherwise "" */
   executedEndpoint?: string;
-  /** body 若已解析可填 (调用方负责 <=512 截断), 否则 "" */
+  /** Fill in body if already parsed (the caller is responsible for <=512 truncation), otherwise "" */
   requestBody?: string;
   spaceId?: string;
   userId?: string;
@@ -136,15 +136,15 @@ export function emitBridgeRejectTelemetry(input: BridgeRejectTelemetryInput): vo
 }
 
 /**
- * Skill usage 埋点 helper —— LLM 主动 view/search_hit 时发一条。
+ * Skill usage telemetry helper -- emit one event when the LLM actively views/search_hits.
  *
- * 设计: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
+ * Design: docs/design/2026-09-09-skill-usage-telemetry-and-default-task-recall.md
  *
- * 只在真实使用信号 (LLM 主动调 skill_view / skill_search 命中) 上埋,
- * 不埋 `<available_skills>` 注入 —— 避免自循环 (召回→注入→埋点→分数更高)。
+ * Instrument only real usage signals (the LLM actively calling skill_view / skill_search and hitting),
+ * not the `<available_skills>` injection -- to avoid a self-loop (recall → inject → telemetry → higher score).
  *
- * 硬约束: 同步返回 void, sink 异常静默吞掉, 绝不阻塞主链路;
- * CH 未配置时 writeSkillUsageRow 自身 no-op。
+ * Hard constraints: return void synchronously, swallow sink exceptions silently, never block the main path;
+ * when CH is not configured writeSkillUsageRow is itself a no-op.
  */
 export interface SkillUsageTelemetryInput {
   /** 'view' | 'search_hit' */
@@ -155,7 +155,7 @@ export interface SkillUsageTelemetryInput {
   teamId?: string;
   agentId?: string;
   userId?: string;
-  /** claude-code/codebuddy/... 空时按 sessionKey 前缀反解 */
+  /** claude-code/codebuddy/... when empty, reverse-derived from the sessionKey prefix */
   agentSource?: string;
 }
 
@@ -179,9 +179,9 @@ export function emitSkillUsageTelemetry(
     try {
       sink(row);
     } catch {
-      // sink 抛 → 埋点绝不阻塞业务
+      // If the sink throws → telemetry never blocks the business
     }
   } catch {
-    // input 构造异常也吞掉
+    // Also swallow exceptions from constructing the input
   }
 }

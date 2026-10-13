@@ -1,10 +1,10 @@
 /**
- * useAnalyticsMetrics — 指标面数据加载（CH 探测 + Space 列表 + 5 项指标）。
+ * useAnalyticsMetrics -- metrics-view data loading (CH probe + Space list + 5 metrics).
  *
- * 数据流约束（勿改回「load 内部再探测 config」）：
- *   config 只探测一次 → 归约为 chReady 布尔 → 由布尔驱动数据加载。
- *   若在 load 内 setConfig，会与以 config 对象为依赖的 effect 形成自激励循环
- *   （fetch 每次返回新引用 → effect 重跑 → 再 setConfig），导致无限请求。
+ * Data flow constraint (do not change back to "probe config again inside load"):
+ *   config is probed only once -> reduced to a chReady boolean -> the boolean drives data loading.
+ *   Calling setConfig inside load would form a self-triggering loop with an effect that depends on the config object
+ *   (each fetch returns a new reference -> effect re-runs -> setConfig again), causing infinite requests.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -43,7 +43,7 @@ export function useAnalyticsMetrics(params: {
   const chReady = chState === 'ready';
   const queryBody = useMemo(() => ({ days, space_id: spaceId }), [days, spaceId]);
 
-  // CH 配置探测（仅一次）
+  // CH config probe (once only)
   useEffect(() => {
     if (!enabled) return undefined;
     let alive = true;
@@ -65,9 +65,9 @@ export function useAnalyticsMetrics(params: {
     };
   }, [enabled]);
 
-  // 注：不再拉取 /analytics/spaces 全量列表 —— Space 固定为当前登录实例
-  // （页面数据面按实例隔离），全量列表会把共享 CH 中其他实例的 space_id
-  // 带回前端，既无用也违背隔离语义。
+  // Note: the full /analytics/spaces list is no longer fetched -- Space is fixed to the currently logged-in instance
+  // (page data is isolated per instance); the full list would bring back space_ids of other instances in the shared CH,
+  // which is useless and violates the isolation semantics.
 
   const load = useCallback(async () => {
     const seq = ++reqSeqRef.current;

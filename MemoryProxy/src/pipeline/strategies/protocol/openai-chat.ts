@@ -1,22 +1,22 @@
 /**
- * OpenAI Chat Completions ProtocolStrategy (Phase 2)。
+ * OpenAI Chat Completions ProtocolStrategy (Phase 2).
  *
- * 覆盖 codebuddy / dsh / opencode / pi / default agent 走的协议。
- * 老代码入口: handler.ts::handleChatCompletions。
+ * Covers the protocol used by the codebuddy / dsh / opencode / pi / default agents.
+ * Legacy entry point: handler.ts::handleChatCompletions.
  *
- * ⚠️ 本文件目前只填 3 类方法:
- *   1. 纯函数 (extractMessages / extractUserQuery / applyInjection)
+ * Warning: this file currently fills in only 3 kinds of methods:
+ *   1. pure functions (extractMessages / extractUserQuery / applyInjection)
  *   2. buildErrorResponse (openai envelope)
- *   3. 委托 stream-parsers (parseNonStreamResponse)
+ *   3. delegation to stream-parsers (parseNonStreamResponse)
  *
- * 尚未填的方法 (Phase 4 组装时补):
- *   - buildUpstreamBody: 需要 target 已 resolve + prepareUpstreamRequest 逻辑
- *   - buildUpstreamHeaders: 需要 effectiveApiKey + SKIP_REQUEST_HEADERS
- *   - createStreamTap: 需要完整 ctx (lf/tdai/opik/cfq) — Phase 4 定型
- *   - buildMemResponse / buildLangfuseInput: 大量入参, Phase 4 时按需
+ * Methods not yet filled in (to be added when Phase 4 assembles):
+ *   - buildUpstreamBody: needs target already resolved + prepareUpstreamRequest logic
+ *   - buildUpstreamHeaders: needs effectiveApiKey + SKIP_REQUEST_HEADERS
+ *   - createStreamTap: needs the full ctx (lf/tdai/opik/cfq) — finalized in Phase 4
+ *   - buildMemResponse / buildLangfuseInput: many parameters, added on demand in Phase 4
  *
- * 所以本策略当前不完整, 尚不能被 runPipeline 直接使用; 属于 "types.ts 契约 +
- * 首批可复用纯函数集中放置" 的过渡形态。Phase 4 前会补齐所有方法。
+ * So this strategy is currently incomplete and cannot be used directly by runPipeline; it is a transitional form of
+ * "types.ts contract + first batch of reusable pure functions placed together". All methods will be filled in before Phase 4.
  */
 
 import type {
@@ -38,16 +38,16 @@ export const openaiChatProtocol: ProtocolStrategy = {
   },
 
   extractUserQuery(_body, _headers): string {
-    // 实际实现在 handler.ts 里用 resolveLatestUserQuery + resolveAgentProfile 拿最新用户输入;
-    // Phase 4 组装时接入。当前 stub 返回空 —— caller 若要用, 用 stages/observability.ts
-    // 里的 resolveLatestUserQuery 桥接。
+    // The actual implementation in handler.ts uses resolveLatestUserQuery + resolveAgentProfile to get the latest user input;
+    // wired in when Phase 4 assembles. The current stub returns empty — callers that need it should bridge via
+    // resolveLatestUserQuery in stages/observability.ts.
     return "";
   },
 
   applySessionContext(body, block): void {
-    // openai 协议: session context 追加到 messages[0].content 尾部
-    // (原 handler 逻辑, 见 injection/agents 里的 apply 实现)。
-    // Phase 4 接入 injection/pipeline 时统一走 pipeline.process, 这里保留 stub。
+    // openai protocol: session context is appended to the tail of messages[0].content
+    // (original handler logic, see the apply implementation in injection/agents).
+    // When Phase 4 hooks into injection/pipeline it will go through pipeline.process uniformly; the stub is kept here.
     const messages = Array.isArray(body.messages) ? (body.messages as Array<Record<string, unknown>>) : [];
     if (messages.length === 0 || !block) return;
     const first = messages[0];
@@ -57,11 +57,11 @@ export const openaiChatProtocol: ProtocolStrategy = {
   },
 
   applyInjection(_body, _block): void {
-    // Phase 4 接入 injection/pipeline (injection 已是独立模块, 不需要 protocol 定制)
+    // Phase 4 hooks into injection/pipeline (injection is already an independent module, no protocol customization needed)
   },
 
   buildUpstreamBody(body, target: ForwardTarget): unknown {
-    // handler.ts:255 buildUpstreamBody 语义: 直接 body 或 body + target.bodyOverrides
+    // handler.ts:255 buildUpstreamBody semantics: the body directly, or body + target.bodyOverrides
     if (target.bodyOverrides) {
       return { ...body, ...target.bodyOverrides };
     }
@@ -69,7 +69,7 @@ export const openaiChatProtocol: ProtocolStrategy = {
   },
 
   buildUpstreamHeaders(_clientHeaders, _effectiveKey, _target, _sessionKey): Record<string, string> {
-    // Phase 4 组装完整版; 需要 SKIP_REQUEST_HEADERS_HOP_BY_HOP + target.authHeaders
+    // Phase 4 assembles the full version; needs SKIP_REQUEST_HEADERS_HOP_BY_HOP + target.authHeaders
     return {};
   },
 
@@ -93,7 +93,7 @@ export const openaiChatProtocol: ProtocolStrategy = {
       const upstreamRequestId = typeof respJson.id === "string" ? respJson.id : undefined;
       return { usage, assistantText, upstreamRequestId };
     } catch {
-      // 上游返非 JSON → 让 stream helper 兜底
+      // upstream returned non-JSON → let the stream helper fall back
       return {
         usage: undefined,
         assistantText: extractOpenaiSseAssistantText(text) || undefined,
@@ -107,8 +107,8 @@ export const openaiChatProtocol: ProtocolStrategy = {
   },
 
   buildErrorResponse(msg: string, status: number): Response {
-    // handler.ts 里的错误 envelope: `{error: {message, type, code}}`
-    // 也兼容简单 `{error: msg}` 姿势 (401 auth failed 用简单形式) — 用参数保守通用姿势
+    // error envelope in handler.ts: `{error: {message, type, code}}`
+    // also compatible with the simple `{error: msg}` form (401 auth failed uses the simple form) — use the conservative, generic parameter form
     return new Response(
       JSON.stringify({ error: { message: msg, type: "invalid_request_error" } }),
       { status, headers: { "content-type": "application/json" } },
@@ -116,7 +116,7 @@ export const openaiChatProtocol: ProtocolStrategy = {
   },
 
   buildLangfuseInput(body): unknown {
-    // 复用 handler.ts flattenMessagesForOpik 语义, Phase 4 直接 import
+    // reuse the handler.ts flattenMessagesForOpik semantics; import directly in Phase 4
     return Array.isArray(body.messages) ? body.messages : [];
   },
 };

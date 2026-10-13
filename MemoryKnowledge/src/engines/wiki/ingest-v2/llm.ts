@@ -1,12 +1,12 @@
 /**
- * llm.ts — OpenAI 兼容 chat 调用封装（wiki ingest 专用）。
+ * llm.ts — OpenAI-compatible chat call wrapper (dedicated to wiki ingest).
  *
- * 复用仓库已有的 Vercel AI SDK（`ai` + `@ai-sdk/openai`），走标准
- * `/chat/completions`（compatibility: "compatible"），兼容各类 OpenAI 兼容后端。
+ * Reuses the repo's existing Vercel AI SDK (`ai` + `@ai-sdk/openai`) and goes through the standard
+ * `/chat/completions` (compatibility: "compatible"), supporting all kinds of OpenAI-compatible backends.
  *
- * llmConfig 的实际形状由上层 module.ts 传入，字段命名为：
+ * The actual shape of llmConfig is passed in by the upper-level module.ts, with these field names:
  *   { provider, apiKey, model, customEndpoint, maxContextSize }
- * 这里做归一化以兼容 INTERFACE 文档里写的 { baseUrl, maxTokens, timeoutMs } 别名。
+ * Here we normalize it to stay compatible with the { baseUrl, maxTokens, timeoutMs } aliases in the INTERFACE doc.
  */
 
 import { generateText, streamText } from "ai";
@@ -16,31 +16,31 @@ import { createLogger } from "../../../logger.js";
 
 const log = createLogger("wiki-ingest-llm");
 
-/** 上层传入的原始 llmConfig（宽松，字段可能用不同命名）。 */
+/** Raw llmConfig passed in by the caller (loose; fields may use different names). */
 export interface RawLlmConfig {
   protocol?: "openai" | "anthropic";
   provider?: string;
   apiKey?: string;
   model?: string;
-  // 实际命名（module.ts）
+  // Actual names (module.ts)
   customEndpoint?: string;
   maxContextSize?: number;
-  // INTERFACE 文档别名
+  // INTERFACE doc aliases
   baseUrl?: string;
   maxTokens?: number;
   timeoutMs?: number;
   /**
-   * 是否用流式请求(streamText)调用上游。默认 false(非流式)。
-   * 个别只接受流式请求的兼容上游需置 true。openai/anthropic 协议均生效。
+   * Whether to call the upstream with a streaming request (streamText). Defaults to false (non-streaming).
+   * Set to true for compatible upstreams that only accept streaming requests. Applies to both openai/anthropic protocols.
    *
-   * ⚠️ 仅 wiki-ingest 这条 AI SDK 直连路径生效;不影响 MemoryCore/OpenClaw host
-   * runner。也不会把增量 token 透传给调用方,只是"以流式协议请求上游后等待
-   * 完整文本"的兼容层。
+   * WARNING: only takes effect on the wiki-ingest direct AI SDK path; does not affect the MemoryCore/OpenClaw host
+   * runner. It also does not forward incremental tokens to the caller; it is just a compatibility layer that
+   * "requests the upstream via the streaming protocol and waits for the full text".
    */
   stream?: boolean;
 }
 
-/** 归一化后的配置。 */
+/** Normalized config. */
 export interface NormalizedLlmConfig {
   protocol: "openai" | "anthropic";
   baseUrl: string;
@@ -53,14 +53,14 @@ export interface NormalizedLlmConfig {
 
 const DEFAULT_MODEL = "Memory-Model";
 const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_TIMEOUT_MS = 1_200_000; // 20min — reasoning 模型需要更长时间
+const DEFAULT_TIMEOUT_MS = 1_200_000; // 20min — reasoning models need more time
 
 /**
- * 把上层多种命名的 config 归一化。
+ * Normalize a config that may use several different naming schemes from the caller.
  *
- * 注意：这里**不再**兜底读 process.env（历史上读 TDAI_LLM_*，会绕过 resolveLlmConfig
- * 的 binding/mode 逻辑，造成"偷偷掉回直连"）。baseUrl/apiKey 必须由上层
- * （module.ts → resolveLlmConfig）提供；缺失时 createLlmClient 直接抛错。
+ * Note: this **no longer** falls back to reading process.env (historically it read TDAI_LLM_*, which bypassed resolveLlmConfig's
+ * binding/mode logic and caused "silently falling back to a direct connection"). baseUrl/apiKey must be supplied by the upper layer
+ * (module.ts → resolveLlmConfig); if missing, createLlmClient throws directly.
  */
 export function normalizeLlmConfig(raw: RawLlmConfig | undefined): NormalizedLlmConfig {
   const cfg = raw ?? {};
@@ -77,41 +77,41 @@ export function normalizeLlmConfig(raw: RawLlmConfig | undefined): NormalizedLlm
 export interface ChatParams {
   system: string;
   prompt: string;
-  /** 覆盖默认 max output tokens。 */
+  /** Override the default max output tokens. */
   maxOutputTokens?: number;
-  /** 采样温度（可选，不传则用 SDK 默认）。 */
+  /** Sampling temperature (optional; the SDK default is used if omitted). */
   temperature?: number;
-  /** 外部 abort 信号（与内部超时合并）。 */
+  /** External abort signal (merged with the internal timeout). */
   abortSignal?: AbortSignal;
-  /** 调用标签（如 "analysis"/"generate"/"merge"），用于日志区分步骤。 */
+  /** Call label (e.g. "analysis"/"generate"/"merge"), used to distinguish steps in logs. */
   label?: string;
 }
 
-/** 抽象出的最小 LLM 客户端接口，便于测试时打桩。 */
+/** Minimal abstract LLM client interface, easy to stub in tests. */
 export interface LlmClient {
   chat(params: ChatParams): Promise<string>;
   readonly config: NormalizedLlmConfig;
 }
 
 /**
- * 基于 AI SDK 的真实客户端。纯文本输出（不挂任何 tool，避免弱模型幻觉 tool call）。
+ * Real client based on the AI SDK. Plain-text output (no tools attached, to avoid weak models hallucinating tool calls).
  */
 export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
   const config = normalizeLlmConfig(raw);
   if (!config.apiKey) {
     throw new Error(
-      "LLM apiKey 未配置：proxy 模式需 TMC 为该 service_id 推送 llm_binding；" +
-      "或设 LLM_MODE=custom + LLM_API_KEY 走自带端点",
+      "LLM apiKey is not configured: in proxy mode TMC must push an llm_binding for this service_id; " +
+      "or set LLM_MODE=custom + LLM_API_KEY to use your own endpoint",
     );
   }
   if (!config.baseUrl) {
     throw new Error(
-      "LLM baseUrl 未配置：proxy 模式需 TMC 为该 service_id 推送 llm_binding；" +
-      "或设 LLM_MODE=custom + LLM_BASE_URL 走自带端点",
+      "LLM baseUrl is not configured: in proxy mode TMC must push an llm_binding for this service_id; " +
+      "or set LLM_MODE=custom + LLM_BASE_URL to use your own endpoint",
     );
   }
 
-  // 按 protocol 选 AI SDK provider 工厂（两者都实现 LanguageModelV3 接口）。
+  // Pick the AI SDK provider factory by protocol (both implement the LanguageModelV3 interface).
   const provider = config.protocol === "anthropic"
     ? createAnthropic({ baseURL: config.baseUrl, apiKey: config.apiKey })
     : createOpenAI({ baseURL: config.baseUrl, apiKey: config.apiKey });
@@ -127,7 +127,7 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
       const label = params.label ?? "chat";
       const promptChars = params.system.length + params.prompt.length;
       const startMs = Date.now();
-      log.info(`LLM 调用开始 [${label}]`, {
+      log.info(`LLM call started [${label}]`, {
         model: config.model,
         protocol: config.protocol,
         promptChars,
@@ -151,8 +151,8 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
           },
         };
 
-        // stream=true → streamText(给只吃流式的上游);否则 generateText。
-        // streamText 的 text/usage/finishReason 是 Promise,await 后形状与 generateText 一致。
+        // stream=true → streamText (for upstreams that only accept streaming); otherwise generateText.
+        // streamText's text/usage/finishReason are Promises; after await their shape matches generateText.
         const { text, usage, finishReason } = config.stream
           ? await (async () => {
               const r = streamText(callParams);
@@ -172,7 +172,7 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
             })();
 
         const u = usage ?? ({} as Record<string, number>);
-        log.info(`LLM 调用完成 [${label}]`, {
+        log.info(`LLM call completed [${label}]`, {
           ms: Date.now() - startMs,
           promptTokens: u.inputTokens ?? null,
           completionTokens: u.outputTokens ?? null,
@@ -181,11 +181,11 @@ export function createLlmClient(raw: RawLlmConfig | undefined): LlmClient {
           outputChars: text.length,
         });
         if (!text) {
-          log.warn(`LLM 返回空文本 [${label}]`, { finishReason: finishReason ?? null });
+          log.warn(`LLM returned empty text [${label}]`, { finishReason: finishReason ?? null });
         }
         return text;
       } catch (err) {
-        log.error(`LLM 调用失败 [${label}]`, {
+        log.error(`LLM call failed [${label}]`, {
           ms: Date.now() - startMs,
           error: err instanceof Error ? err.message : String(err),
         });

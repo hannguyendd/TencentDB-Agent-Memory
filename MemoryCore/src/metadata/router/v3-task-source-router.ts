@@ -1,14 +1,14 @@
 /**
- * v3 Task 外部来源路由（/v3/task-source/*，5 接口）。
+ * v3 Task external source routes (/v3/task-source/*, 5 endpoints).
  *
- * 对应设计文档 §5.2。dispatch 模式镜像 v3-meta-router：
- *   - 仅 POST，前缀 /v3/task-source
- *   - 复用同一套 x-tdai-user-key 用户鉴权
+ * Corresponds to design doc §5.2. The dispatch pattern mirrors v3-meta-router:
+ *   - POST only, prefix /v3/task-source
+ *   - reuses the same x-tdai-user-key user auth
  *   - MetadataError / TaskSourceError → envelope code
  *
- * **凭据注入方式**：用户在 Panel 上手工填入令牌（太湖统一认证令牌 / TAPD 个人令牌），
- * 前端随请求体 `credential` 字段提交，Panel 薄转发到此。
- * Core **不落库、不写日志、不回吐** —— 令牌用完即弃，请求结束即不再持有。
+ * **Credential injection**: the user manually enters a token on the Panel (Taihu unified auth token / TAPD personal token),
+ * the frontend submits it in the request body `credential` field, and the Panel thinly forwards it here.
+ * Core **does not persist, log, or echo it back** — the token is single-use and no longer held once the request ends.
  */
 
 import type * as http from "node:http";
@@ -35,12 +35,12 @@ export const V3_TASK_SOURCE_PREFIX = "/v3/task-source";
 const TAG = "[TASK-SOURCE-V3]";
 
 /**
- * 从请求体解析用户提交的令牌。
+ * Parse the user-submitted token from the request body.
  *
- * 支持两种（打到同一端点，仅 header 名不同）：
- *   - bearer：太湖统一认证令牌
- *   - custom：TAPD 个人令牌（走 extra.header 指定的 header）
- * 令牌只在这条请求的内存里存在，不落库、不写日志。
+ * Two kinds are supported (hitting the same endpoint, only the header name differs):
+ *   - bearer: Taihu unified auth token
+ *   - custom: TAPD personal token (via the header specified in extra.header)
+ * The token only exists in memory for this request; it is not persisted or logged.
  */
 function parseCredential(body: unknown): SourceCredential | null {
   if (!body || typeof body !== "object") return null;
@@ -99,7 +99,7 @@ function serviceFor(svc: MetadataService): TaskSourceImportService {
 
 const routeTable: Record<string, Handler> = {
   [`${V3_TASK_SOURCE_PREFIX}/providers`]: bind(S.taskSourceProvidersSchema, async (d, c, s) => {
-    // 门控：caller 必须是该 team 的 active member。
+    // Gate: the caller must be an active member of that team.
     await s.assertExternalTaskImportAllowed(d.team_id, c);
     return { providers: TaskSourceRegistry.list() };
   }),
@@ -125,8 +125,8 @@ const routeTable: Record<string, Handler> = {
       limit: d.limit,
       onlyTodo: d.only_todo,
     });
-    // 内部 RemoteTaskRef 用 camelCase，但 v3 接口对外统一 snake_case
-    // （与 meta 其它接口一致，且前端按 snake_case 读取）。
+    // Internal RemoteTaskRef uses camelCase, but the v3 API is uniformly snake_case externally
+    // (consistent with other meta endpoints, and the frontend reads snake_case).
     return {
       items: page.items.map((it) => ({
         external_id: it.externalId,
@@ -154,7 +154,7 @@ const routeTable: Record<string, Handler> = {
 
 };
 
-/** 已注册的路由路径（供测试 / 文档）。 */
+/** Registered route paths (for tests / docs). */
 export const V3_TASK_SOURCE_ROUTES = Object.keys(routeTable);
 
 function mapTaskSourceError(err: TaskSourceError): number {
@@ -222,7 +222,7 @@ export async function handleV3TaskSourceRoute(
   }
 
   const body = await parseJsonBody(req);
-  // providers 不需要令牌（只是列出已启用来源）；其余接口必须有。
+  // providers does not need a token (it only lists enabled sources); all other endpoints must have one.
   const needsCred = pathname !== `${V3_TASK_SOURCE_PREFIX}/providers`;
   const cred = parseCredential(body);
   if (needsCred && !cred) {
@@ -231,11 +231,11 @@ export async function handleV3TaskSourceRoute(
   }
 
   try {
-    // providers 分支不需要令牌，用空占位即可（provider 侧不会用到）。
+    // The providers branch does not need a token; an empty placeholder is enough (the provider side will not use it).
     const effective = cred ?? { kind: "bearer" as const, secret: "" };
     const envelope = await handler(body, auth.ctx, svc, requestId, effective);
-    // envelope.code 是业务码（成功为 0），不能直接当 HTTP 状态码用 ——
-    // 直接下发会命中 `Invalid status code: 0`。与 v3-meta-router 同一映射规则。
+    // envelope.code is a business code (0 on success) and cannot be used directly as an HTTP status code —
+    // sending it directly would hit `Invalid status code: 0`. Same mapping rule as v3-meta-router.
     const httpStatus =
       envelope.code === 0
         ? 200
@@ -248,7 +248,7 @@ export async function handleV3TaskSourceRoute(
     if (err instanceof TaskSourceError) {
       const code = mapTaskSourceError(err);
       deps.logger.warn(`${TAG} ${err.code}: ${err.message}`);
-      // 日志只记 code 与 message，绝不记令牌。
+      // Log only code and message, never the token.
       sendJson(res, code, errorEnvelope(code, `${err.code}: ${err.message}`, requestId));
       return true;
     }

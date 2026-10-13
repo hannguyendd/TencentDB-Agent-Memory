@@ -7,9 +7,9 @@ import type { LogLevel } from '../infra/logger.js';
 loadDotenv();
 
 function env(key: string, fallback: string): string {
-  // 空串视为未设置：.env 里常被写成 `PANEL_AUTH_WOA_LOGIN_URL=`（占位/留空），
-  // 若按 ?? 语义会把空串当成有效值，导致 URL 变空、WOA 跳转静默失效。
-  // 统一按"留空即用默认值"处理，让 .env.example 里的空占位项可安全保留。
+  // An empty string is treated as unset: .env often has `PANEL_AUTH_WOA_LOGIN_URL=` (placeholder / left blank),
+  // and with ?? semantics the empty string would count as a valid value, emptying the URL and silently breaking the WOA redirect.
+  // Uniformly treat "blank means use the default" so empty placeholders in .env.example can be safely kept.
   const raw = process.env[key];
   if (raw === undefined || raw.trim() === '') return fallback;
   return raw;
@@ -22,7 +22,7 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** 可选 ClickHouse API 调用审计配置。enabled=false 或 url 为空时全静默跳过。 */
+/** Optional ClickHouse API call audit config. Fully skipped silently when enabled=false or url is empty. */
 export interface PanelClickHouseConfig {
   enabled: boolean;
   url: string;
@@ -56,13 +56,13 @@ function envBoolFirst(keys: string[], fallback: boolean): boolean {
 }
 
 /**
- * 解析 Panel Session/加密密钥（**内部生成，不接受外部配置**）：
- * 1. 优先从持久文件读取（与 identity 绑定同目录，生命周期一致）；
- * 2. 文件不存在则自动生成随机强密钥并写入（权限 0600），后续重启复用。
+ * Resolve the Panel session / encryption key (**generated internally, external configuration not accepted**):
+ * 1. Prefer reading from the persisted file (same directory as the identity binding, same lifecycle);
+ * 2. If the file does not exist, generate a random strong key and write it (mode 0600); reuse it on later restarts.
  *
- * 不提供 PANEL_AUTH_SESSION_SECRET 之类的环境变量入口：密钥一旦可被外部指定，
- * 就可能被写进 .env 并提交进仓库。内部生成能保证它只以 0600 文件形式存在。
- * 重启/多次启动保持稳定（换密钥会导致已存 identity 绑定无法解密）。
+ * No env var entry such as PANEL_AUTH_SESSION_SECRET is provided: once the key can be specified externally,
+ * it might be written into .env and committed to the repo. Internal generation guarantees it only exists as a 0600 file.
+ * Stable across restarts / repeated starts (changing the key would make stored identity bindings undecryptable).
  */
 function resolveSessionSecret(identityStorePath: string): string {
   const secretPath = env('PANEL_AUTH_SESSION_SECRET_FILE', join(dirname(identityStorePath), 'panel-session-secret'));
@@ -91,28 +91,28 @@ export interface PanelConfig {
   metadataRemoteTimeoutMs: number;
   ui: { distDir: string };
   log: { level: LogLevel; format: 'json' | 'pretty' };
-  /** Knowledge Service (KS :8421) 连接配置。serviceId 按请求 instanceId 注入。 */
+  /** Knowledge Service (KS :8421) connection config. serviceId is injected per request instanceId. */
   knowledge: { baseUrl: string; authToken: string; timeoutMs: number };
   /**
-   * 启动时为每个实例确保 knowledge-service LLM 绑定（走 proxy 记账）。
-   * sync=false 时完全跳过（不改变现有部署行为）。
+   * At startup, ensure a knowledge-service LLM binding for each instance (billed via the proxy).
+   * Fully skipped when sync=false (existing deployment behavior unchanged).
    */
   knowledgeLlmBinding: {
     sync: boolean;
     proxyBaseUrl: string;
   };
-  /** 默认 Agent 模板文件的本地存储目录根（存 Panel 本地，按 {dir}/{instanceId}/{team_id}/template.json）。 */
+  /** Root directory for local storage of default Agent template files (stored locally in Panel, as {dir}/{instanceId}/{team_id}/template.json). */
   agentTemplateDir: string;
   /**
-   * 「可观测」功能开关（env PANEL_FEATURE_ANALYTICS_ENABLED）。
+   * "Observability" feature switch (env PANEL_FEATURE_ANALYTICS_ENABLED).
    *
-   * 可观测页（线上调用情况）依赖内核侧 ClickHouse 埋点。未配置 CH 的部署打开
-   * 该页只会得到"未配置/不可达"提示，故默认关闭隐藏入口；仅当确实接入了
-   * analytics ClickHouse 时由部署方显式开启。该值经 GET /meta/instances 的
-   * capabilities 下发给前端用于菜单/路由可见性控制。
+   * The observability page (online call stats) depends on kernel-side ClickHouse instrumentation. A deployment without CH configured would only
+   * get "not configured / unreachable" on that page, so the entry is hidden by default; the deployer
+   * enables it explicitly only when analytics ClickHouse is actually connected. This value is sent to the frontend via the capabilities of GET /meta/instances
+   * to control menu/route visibility.
    */
   featureAnalyticsEnabled: boolean;
-  /** 可选 ClickHouse API 调用审计。不配则全静默不上报。 */
+  /** Optional ClickHouse API call audit. When not configured, nothing is reported (fully silent). */
   clickhouse: PanelClickHouseConfig;
   auth: PanelAuthConfig;
 }
@@ -137,28 +137,28 @@ export interface PanelAuthConfig {
     defaultTeamId: string;
     defaultRole: string;
     /**
-     * 写入 core `meta_users.auth_provider` 的外部域标识。
+     * External realm identifier written to core `meta_users.auth_provider`.
      *
-     * 写入（建号/绑定）与读取（find-by-external）都用同一值，保证落在同一个域；
-     * 两侧若不一致会出现"写进 A 域、按 B 域查"的静默失效。
-     * 默认 'local' 与 Core 的 DEFAULT_AUTH_PROVIDER 对齐（零配置即一致）。
+     * Writes (create account / bind) and reads (find-by-external) use the same value so they land in the same realm;
+     * if the two sides disagree, it silently fails as "written to realm A, looked up in realm B".
+     * Default 'local' aligns with Core's DEFAULT_AUTH_PROVIDER (consistent with zero configuration).
      */
     authProvider: string;
   };
   /**
-   * 任务看板「导入 Task」的第三方来源。
+   * Third-party source for the task board "Import Task".
    *
-   * 所有地址与客户端标识**全部来自配置、无内置默认值**：它们属内网基础设施信息，
-   * 硬编码进源码既是信息暴露，也会让漏配退化成「跳到错误地址且无报错」的静默错误。
-   * 缺失时由使用点显式抛错（fail-fast）。
+   * All addresses and client identifiers **come entirely from configuration, with no built-in defaults**: they are internal infrastructure details,
+   * and hardcoding them in source both exposes information and turns a missing config into a silent error of "jumping to the wrong address with no error".
+   * When missing, the point of use throws explicitly (fail-fast).
    */
   taskSource: {
-    /** 启用的来源 id（逗号分隔）。空 → 面板不显示「导入 Task」入口。 */
+    /** Enabled source ids (comma-separated). Empty -> the panel hides the "Import Task" entry. */
     enabled: string[];
     tapd: {
-      /** MCP 资源地址（Core 侧端点）。 */
+      /** MCP resource address (Core-side endpoint). */
       mcpUrl: string;
-      /** 站点根：详情页 URL 构造（task 接口不返回 detail_link）。 */
+      /** Site root: used to build detail page URLs (the task API does not return detail_link). */
       siteBaseUrl: string;
     };
   };
@@ -178,10 +178,10 @@ function buildAuthConfig(): PanelAuthConfig {
   let userKeyEnabled = modes.has('user_key');
   const woaEnabled = modes.has('woa');
   const idpEnabled = woaEnabled || modes.has('idp');
-  // 配置健壮性：user_key 是零配置默认登录方式。
-  // 若解析后既没有 user_key 也没有任何 IdP（例如 PANEL_AUTH_MODE 填了未识别值、
-  // 或未来 legacy 变量被移除后漏配），退化为"启用 user_key"，
-  // 而不是让服务启动失败。这样"没开 WOA 时和 WOA 开发前一样能用"成为强不变量。
+  // Config robustness: user_key is the zero-config default login method.
+  // If after parsing there is neither user_key nor any IdP (e.g. PANEL_AUTH_MODE set to an unrecognized value,
+  // or a missing config after a future removal of legacy variables), fall back to "enable user_key"
+  // rather than failing service startup. This makes "works as before WOA development when WOA is off" a strong invariant.
   if (!userKeyEnabled && !idpEnabled) {
     userKeyEnabled = true;
   }
@@ -194,7 +194,7 @@ function buildAuthConfig(): PanelAuthConfig {
     sessionTtlSeconds: envInt('PANEL_AUTH_SESSION_TTL_SECONDS', 28_800),
     sessionCookieName: env('PANEL_AUTH_SESSION_COOKIE_NAME', 'tdai_idp_session'),
     sessionSecure: envBoolFirst(['PANEL_AUTH_SESSION_SECURE'], appUrl.startsWith('https://')),
-    // 仅在启用 IdP 时才需要密钥；未启用时留空，避免非 WOA 部署也生成密钥文件。
+    // The secret is only needed when an IdP is enabled; left blank otherwise, to avoid non-WOA deployments generating a key file.
     sessionSecret: idpEnabled ? resolveSessionSecret(identityStorePath) : '',
     identityStorePath,
     woa: {
@@ -203,16 +203,16 @@ function buildAuthConfig(): PanelAuthConfig {
       safeMode: envBoolFirst(['PANEL_AUTH_WOA_SAFE_MODE', 'PANEL_AUTH_IDP_WOA_SAFE_MODE'], true),
       requireSignature: envBoolFirst(['PANEL_AUTH_WOA_REQUIRE_SIGNATURE', 'PANEL_AUTH_IDP_WOA_REQUIRE_SIGNATURE'], true),
       appUrl,
-      // 无内置默认值，必须显式配置：这两个地址属内网基础设施信息，硬编码进源码既是
-      // 信息暴露，也会让漏配退化成静默错误（跳到错误地址且无报错）。
-      // 缺失时由 WoaProvider.requiredUrl 在使用点显式抛错。
+      // No built-in defaults; must be configured explicitly: these two addresses are internal infrastructure details, and hardcoding them in source both
+      // exposes information and turns a missing config into a silent error (jumping to the wrong address with no error).
+      // When missing, WoaProvider.requiredUrl throws explicitly at the point of use.
       loginUrl: env('PANEL_AUTH_WOA_LOGIN_URL', ''),
       logoutUrl: env('PANEL_AUTH_WOA_LOGOUT_URL', ''),
       paasId: envFirst(['PANEL_AUTH_WOA_PAAS_ID', 'PANEL_AUTH_IDP_WOA_PAAS_ID'], ''),
       defaultTeamId: envFirst(['PANEL_AUTH_WOA_DEFAULT_TEAM_ID', 'PANEL_AUTH_IDP_WOA_DEFAULT_TEAM_ID'], ''),
       defaultRole: env('PANEL_AUTH_WOA_DEFAULT_ROLE', 'member'),
-      // 与 Core 的 METADATA_EXTERNAL_AUTH_PROVIDER 同名同义：部署时两侧配成同一个
-      // 值即可（Core 侧未设置时回落 'local'，与本默认值一致，零配置即对齐）。
+      // Same name and meaning as Core's METADATA_EXTERNAL_AUTH_PROVIDER: at deploy time, setting both sides to the same
+      // value is enough (when unset on the Core side it falls back to 'local', matching this default; aligned with zero configuration).
       authProvider: envFirst(
         ['METADATA_EXTERNAL_AUTH_PROVIDER', 'PANEL_AUTH_WOA_AUTH_PROVIDER'],
         'local',
@@ -256,7 +256,7 @@ export function loadPanelConfig(): PanelConfig {
       proxyBaseUrl: env('KNOWLEDGE_LLM_PROXY_BASE_URL', 'http://127.0.0.1:8096'),
     },
     agentTemplateDir: env('TDAI_AGENT_TEMPLATE_DIR', './data/agent-templates'),
-    // 默认关闭（保守）：可观测页依赖内核 ClickHouse 埋点，未接入的部署不展示入口。
+    // Off by default (conservative): the observability page depends on kernel ClickHouse instrumentation; deployments without it do not show the entry.
     featureAnalyticsEnabled: envBool('PANEL_FEATURE_ANALYTICS_ENABLED', false),
     clickhouse: {
       enabled: envBool('PANEL_CLICKHOUSE_ENABLED', false),

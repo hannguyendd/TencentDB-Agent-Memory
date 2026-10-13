@@ -1,4 +1,4 @@
-/* 页面内容区通用样式 - 作为 Content.Body 直接子节点 */
+/* Generic styles for the page content area - as a direct child node of Content.Body */
 ._memory-page-body {
   display: flex;
   flex-direction: column;
@@ -6,18 +6,18 @@
 }
 
 /*
- * 圆角对齐 Tea Design 圆角阶梯（2/4/6/8/12/16/20/30/9999px），
- * 已在 tailwind.config.js 的 borderRadius 中统一定义（rounded-md=4px、
- * rounded-lg=6px、rounded-xl=8px、rounded-2xl=12px），此处不再重复覆盖。
+ * Border radii align with the Tea Design radius scale (2/4/6/8/12/16/20/30/9999px),
+ * uniformly defined in the borderRadius of tailwind.config.js (rounded-md=4px,
+ * rounded-lg=6px, rounded-xl=8px, rounded-2xl=12px), so they are not overridden again here.
  */
 
-/* 继承 Tea 字体和颜色 */
+/* Inherit Tea fonts and colors */
 ._memory-page-body {
   font-family: inherit;
   color: var(--tea-color-text-primary);
 }
 
-/* 将 Tailwind border colors 映射到 Tea token */
+/* Map Tailwind border colors to Tea tokens */
 ._memory-page-body .border-border {
   border-color: var(--tea-color-border-primary-default);
 }
@@ -26,14 +26,14 @@
   background: var(--tea-color-bg-primary-default);
 }
 
-/* 使 Tailwind 按钮在视觉上接近 Tea Button */
+/* Make Tailwind buttons visually close to Tea Button */
 ._memory-page-body button:not(.tea-btn) {
   font-family: inherit;
   font-size: 12px;
   border-radius: 2px;
 }
 
-/* 主题色按钮近似 */
+/* Approximation of the theme-color button */
 ._memory-page-body .bg-primary {
   background-color: var(--tea-color-bg-brand-default);
 }
@@ -42,7 +42,7 @@
   color: var(--tea-color-text-on-bg-brand-default);
 }
 
-/* Toast/Sonner 适配 Tea 风格 */
+/* Toast/Sonner adapted to Tea style */
 [data-sonner-toaster] {
   font-family: inherit;
 }

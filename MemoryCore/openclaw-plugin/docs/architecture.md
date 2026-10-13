@@ -1,101 +1,101 @@
-# TencentDB Agent Memory Client — OpenClaw 记忆插件（客户端接入版）
+# TencentDB Agent Memory Client -- OpenClaw Memory Plugin (Client Integration Edition)
 
-> 创建: 2026-05-17 | 状态: 开发中
-> 插件 ID: `memory-tencentdb-client`
-> 显示名称: Memory TencentDB (Client)
+> Created: 2026-05-17 | Status: In development
+> Plugin ID: `memory-tencentdb-client`
+> Display name: Memory TencentDB (Client)
 
-## 1. 背景
+## 1. Background
 
-服务化改造完成后，四层记忆数据（L0 对话/L1 原子/L2 场景/L3 画像）全部托管在远端 Gateway：
-- **数据存储**: TCVDB (向量) + COS (文件) + Redis (状态)
-- **Pipeline**: Gateway Worker 自动完成 L1→L2→L3 抽取
-- **API**: 15 个 v2 REST 端点覆盖全部 CRUD + Search
+After the service-oriented refactoring, all four layers of memory data (L0 conversations / L1 atomic / L2 scenes / L3 persona) are hosted on the remote Gateway:
+- **Data storage**: TCVDB (vectors) + COS (files) + Redis (state)
+- **Pipeline**: the Gateway Worker automatically completes L1->L2->L3 extraction
+- **API**: 15 v2 REST endpoints cover all CRUD + Search
 
-**原插件（memory-tencentdb）**是"全栈"架构：本地 SQLite/VDB + 本地 Pipeline + 本地 Embedding + OpenClaw Hooks + CLI，~15000 行。
+**The original plugin (memory-tencentdb)** is a "full-stack" architecture: local SQLite/VDB + local Pipeline + local Embedding + OpenClaw Hooks + CLI, ~15,000 lines.
 
-**新插件（memory-tencentdb-client）**是纯客户端：只注册 OpenClaw hooks + tools，所有数据操作通过 `@tencentdb-agent-memory/memory-sdk-ts-v2` 委托给远端 Gateway。
+**The new plugin (memory-tencentdb-client)** is a pure client: it only registers OpenClaw hooks + tools, and delegates all data operations to the remote Gateway through `@tencentdb-agent-memory/memory-sdk-ts-v2`.
 
-## 2. 三层架构
+## 2. Three-Layer Architecture
 
 ```
 ┌───────────────────────────────────────────────────────┐
-│  OpenClaw Plugin (memory-tencentdb-client)            │  框架适配层
-│  hooks (recall/capture) + tools + prompt 注入          │  只依赖 SDK，不碰 HTTP/存储
+│  OpenClaw Plugin (memory-tencentdb-client)            │  Framework adaptation layer
+│  hooks (recall/capture) + tools + prompt injection     │  Depends only on the SDK, never touches HTTP/storage
 │  └─ import { MemoryClient, MemoryFileReader } from SDK│
 ├───────────────────────────────────────────────────────┤
-│  @tencentdb-agent-memory/memory-sdk-ts-v2 (独立包)                             │  通用 SDK 层
-│  MemoryClient (14 API) + MemoryFileReader (STS 直读)   │  零框架依赖，纯 fetch
-│  以后 Dify / AutoGen / LangChain 也用这个              │
+│  @tencentdb-agent-memory/memory-sdk-ts-v2 (standalone package)                 │  Generic SDK layer
+│  MemoryClient (14 APIs) + MemoryFileReader (STS direct read)   │  Zero framework dependencies, pure fetch
+│  Dify / AutoGen / LangChain can use this in the future │
 ├───────────────────────────────────────────────────────┤
-│  Gateway v2 API                                        │  远端服务
+│  Gateway v2 API                                        │  Remote service
 │  VDB + COS + Redis + Pipeline Worker                   │
 └───────────────────────────────────────────────────────┘
 ```
 
-## 3. 插件职责（只做框架适配层）
+## 3. Plugin Responsibilities (framework adaptation layer only)
 
-| 功能 | Hook/Tool | 实现 |
+| Feature | Hook/Tool | Implementation |
 |------|-----------|------|
-| **对话捕获** | `agent_end` hook | SDK `client.addConversation()` |
-| **记忆召回** | `before_prompt_build` hook | 并行: `client.searchAtomic()` + `client.readCore()` + `client.listScenarios()` |
-| **标签清理** | `before_message_write` hook | 剥离 `<relevant-memories>` 标签 |
-| **L1 搜索** | `tdai_memory_search` tool | SDK `client.searchAtomic()` |
-| **L0 搜索** | `tdai_conversation_search` tool | SDK `client.searchConversation()` |
-| **文件读取** | `tdai_read_file` tool | SDK `MemoryFileReader.read()` (STS 直读对象存储) |
-| **Prompt 注入** | recall 内部 | 格式化: Persona + L1 记忆 + Scene Navigation + 工具引导 |
+| **Conversation capture** | `agent_end` hook | SDK `client.addConversation()` |
+| **Memory recall** | `before_prompt_build` hook | In parallel: `client.searchAtomic()` + `client.readCore()` + `client.listScenarios()` |
+| **Tag cleanup** | `before_message_write` hook | Strip `<relevant-memories>` tags |
+| **L1 search** | `tdai_memory_search` tool | SDK `client.searchAtomic()` |
+| **L0 search** | `tdai_conversation_search` tool | SDK `client.searchConversation()` |
+| **File reading** | `tdai_read_file` tool | SDK `MemoryFileReader.read()` (STS direct read of object storage) |
+| **Prompt injection** | inside recall | Formatting: Persona + L1 memories + Scene Navigation + tool guide |
 
-### 不做的事
+### What it does not do
 
-- ❌ 不启动 VectorStore / SQLite / TCVDB
-- ❌ 不启动 EmbeddingService
-- ❌ 不启动 Pipeline / Timer / Worker
-- ❌ 不做 L1/L2/L3 抽取
-- ❌ 不管 COS 存储后端
-- ❌ 不管 Redis 状态
-- ❌ 不做本地 Checkpoint
+- ❌ Does not start VectorStore / SQLite / TCVDB
+- ❌ Does not start EmbeddingService
+- ❌ Does not start Pipeline / Timer / Worker
+- ❌ Does not do L1/L2/L3 extraction
+- ❌ Does not manage the COS storage backend
+- ❌ Does not manage Redis state
+- ❌ Does not do local Checkpoint
 
-## 4. 配置项
+## 4. Configuration
 
 ```jsonc
 {
-  // Gateway 连接
+  // Gateway connection
   "gateway.url": "http://127.0.0.1:8420",
   "gateway.apiKey": "",
   "gateway.instanceId": "default",
 
-  // 召回
+  // Recall
   "recall.maxResults": 5,
   "recall.includePersona": true,
   "recall.includeSceneNav": true,
 
-  // 捕获
+  // Capture
   "capture.enabled": true
 }
 ```
 
-## 5. 文件结构
+## 5. File Structure
 
 ```
 memory-tencentdb-client/
-├── openclaw.plugin.json       # 插件清单
+├── openclaw.plugin.json       # Plugin manifest
 ├── package.json               # deps: { "@tencentdb-agent-memory/memory-sdk-ts-v2": "1.0.0-beta.2" }
-├── index.ts                   # 入口：初始化 SDK + 注册 hooks/tools
+├── index.ts                   # Entry: initialize SDK + register hooks/tools
 ├── src/
 │   ├── hooks/
-│   │   ├── recall.ts          # before_prompt_build → SDK 召回 → prompt 注入
+│   │   ├── recall.ts          # before_prompt_build → SDK recall → prompt injection
 │   │   └── capture.ts         # agent_end → SDK addConversation
 │   ├── tools/
 │   │   ├── memory-search.ts   # tdai_memory_search → SDK searchAtomic
 │   │   ├── conversation-search.ts  # → SDK searchConversation
 │   │   └── read-cos.ts        # tdai_read_file → SDK MemoryFileReader.read
-│   └── format.ts              # 召回结果格式化 + 工具引导注入
+│   └── format.ts              # Recall result formatting + tool guide injection
 ├── tests/
-│   └── sdk-cos.ts             # SDK COS 直读手动测试
+│   └── sdk-cos.ts             # Manual test for SDK COS direct read
 ├── .gitignore
 └── README.md
 ```
 
-## 6. SDK 依赖策略
+## 6. SDK Dependency Strategy
 
 ```jsonc
 "dependencies": {
@@ -103,66 +103,66 @@ memory-tencentdb-client/
 }
 ```
 
-SDK 已发布到 npm registry：[`@tencentdb-agent-memory/memory-sdk-ts-v2@1.0.0-beta.2`](https://www.npmjs.com/package/@tencentdb-agent-memory/memory-sdk-ts-v2/v/1.0.0-beta.2)，由 `npm install` 自动拉取，不再走 vendor / 本地 `file:` / tgz。
-SDK 保持独立包，不绑定任何框架，以后出 Dify 插件、Python 版等都复用。
+The SDK has been published to the npm registry: [`@tencentdb-agent-memory/memory-sdk-ts-v2@1.0.0-beta.2`](https://www.npmjs.com/package/@tencentdb-agent-memory/memory-sdk-ts-v2/v/1.0.0-beta.2), pulled automatically by `npm install`; vendor / local `file:` / tgz are no longer used.
+The SDK stays a standalone package, not bound to any framework, and will be reused for a future Dify plugin, a Python version, etc.
 
-## 7. read_cos 工具设计
+## 7. read_cos Tool Design
 
-### COS 直读（STS）
+### COS Direct Read (STS)
 
-- SDK 的 `MemoryFileReader` 通过 Gateway `/v2/cos/secret` 获取 STS 临时凭证
-- 凭证自动缓存，过期前 2 分钟刷新
-- 直接 GET COS 对象（COS V5 签名），不经 Gateway 代理中转
+- The SDK's `MemoryFileReader` obtains temporary STS credentials through the Gateway `/v2/cos/secret`
+- Credentials are cached automatically and refreshed 2 minutes before expiry
+- GETs the COS object directly (COS V5 signature), without proxying through the Gateway
 
-### AI 如何知道可以调 read_cos
+### How the AI knows it can call read_cos
 
-1. **Persona 末尾的 Scene Navigation**：
+1. **Scene Navigation at the end of the Persona**:
    ```
    ## 🗺️ Scene Navigation
-   ### Path: scene_blocks/职业发展与技术实践.md
-   **热度**: 3 | Summary: 后端工程师，Go + TypeScript...
+   ### Path: scene_blocks/career_development_and_tech_practice.md
+   **Heat**: 3 | Summary: Backend engineer, Go + TypeScript...
    ```
-   AI 看到路径后主动调 `tdai_read_file` 读取详情。
+   After seeing the path, the AI proactively calls `tdai_read_file` to read the details.
 
-2. **工具引导（format.ts 注入）**：
+2. **Tool guide (injected by format.ts)**:
    ```
    <memory-tools-guide>
-   - tdai_memory_search: 搜索结构化记忆
-   - tdai_conversation_search: 搜索原始对话
-   - tdai_read_file: 读取场景文件（使用 Scene Navigation 中的路径）
+   - tdai_memory_search: search structured memory
+   - tdai_conversation_search: search raw conversations
+   - tdai_read_file: read scene files (use paths from Scene Navigation)
    </memory-tools-guide>
    ```
 
-3. **工具 description**：
+3. **Tool description**:
    ```
    "Read a file from cloud storage. Use paths from Scene Navigation
     (e.g. 'scene_blocks/xxx.md') or 'persona.md'."
    ```
 
-## 8. 关键设计决策
+## 8. Key Design Decisions
 
-### Q1: session_id 怎么确定？
+### Q1: How is session_id determined?
 
-直接使用 OpenClaw 框架传入的 `ctx.sessionKey`（hook context 自带），与原插件行为一致。不需要自己生成或拼接。
+Use the `ctx.sessionKey` passed in by the OpenClaw framework directly (carried by the hook context), consistent with the original plugin's behavior. There is no need to generate or assemble it yourself.
 
-### Q2: 离线/断连降级？
+### Q2: Offline / disconnection degradation?
 
-第一版不做——Gateway 不可达时 hook 返回空（不注入记忆），capture 失败记 warn。后续可加本地 fallback。
+Not done in the first version -- when the Gateway is unreachable the hook returns empty (no memory injected), and a capture failure logs a warn. A local fallback can be added later.
 
-### Q3: 和原插件冲突吗？
+### Q3: Does it conflict with the original plugin?
 
-插件 ID 不同（`memory-tencentdb-client` vs `memory-tencentdb`），不冲突。但同时启用会重复捕获/注入，建议只启用一个。
+The plugin IDs differ (`memory-tencentdb-client` vs `memory-tencentdb`), so they do not conflict. But enabling both would capture/inject twice, so enabling only one is recommended.
 
-## 9. 实现步骤
+## 9. Implementation Steps
 
-| # | 任务 | 预计 |
+| # | Task | Estimate |
 |---|------|------|
 | 1 | `package.json` + `openclaw.plugin.json` + `.gitignore` + `README.md` | 15 min |
-| 2 | `index.ts` — 初始化 SDK Client/MemoryFileReader + 注册 hooks/tools | 30 min |
-| 3 | `hooks/capture.ts` — agent_end → addConversation | 20 min |
-| 4 | `hooks/recall.ts` + `format.ts` — 并行召回 + prompt 格式化 | 45 min |
-| 5 | `tools/*.ts` — 3 个工具转发 | 30 min |
-| 6 | SDK 测试脚本 (`tests/sdk-cos.ts`) | 15 min |
-| 7 | 本地联调测试 | 30 min |
+| 2 | `index.ts` -- initialize SDK Client/MemoryFileReader + register hooks/tools | 30 min |
+| 3 | `hooks/capture.ts` -- agent_end -> addConversation | 20 min |
+| 4 | `hooks/recall.ts` + `format.ts` -- parallel recall + prompt formatting | 45 min |
+| 5 | `tools/*.ts` -- 3 tool forwarders | 30 min |
+| 6 | SDK test script (`tests/sdk-cos.ts`) | 15 min |
+| 7 | Local integration testing | 30 min |
 
-**总计**: ~3 小时
+**Total**: ~3 hours

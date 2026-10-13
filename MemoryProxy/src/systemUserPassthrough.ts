@@ -198,9 +198,9 @@ async function recordTracesAndUsage(params: {
   upstreamRequestId?: string;
   status: number;
   /**
-   * true = 该请求走的是 custom extraction upstream(用户自定义 base_url + api_key)。
-   * proxy 官方 tpm 桶不记这类 token —— 用户的 quota 用户自己管。
-   * caller 侧的判据:extractionApiKeyOverride 非空 ⇔ resolveExtraction 命中有效 row。
+   * true = this request goes through a custom extraction upstream (user-defined base_url + api_key).
+   * The proxy's official tpm bucket does not count these tokens -- the user manages their own quota.
+   * Caller-side criterion: extractionApiKeyOverride is non-empty <=> resolveExtraction hit a valid row.
    */
   isCustomExtraction?: boolean;
 }): Promise<void> {
@@ -224,7 +224,7 @@ async function recordTracesAndUsage(params: {
   if (usage && Object.keys(usage).length > 0) {
     const isAnthropicMain = /\/v1\/messages$/.test(path);
     const isOpenAiMain = /\/v1\/chat\/completions$/.test(path);
-    // custom extraction upstream 不记 token 桶(与 enforceRateLimit 对称)
+    // custom extraction upstream does not count against the token bucket (symmetric with enforceRateLimit)
     if ((isAnthropicMain || isOpenAiMain) && !isCustomExtraction) {
       await recordInputTokenUsage({
         config,
@@ -491,9 +491,9 @@ export async function handleSystemUserPassthrough(
   // instance has a custom extraction model configured. If so, override the
   // upstream URL and API key.
   //
-  // v2 model groups(§7.4):resolveExtraction 三态优雅回退:
-  //   - 未配置 / enabled=false / base_url 空 → null → 走全局 upstream + alias(不 block)
-  //   - 有效配置 → 替换 upstream + 跳过 alias + 不上报 credit(用户的模型归用户)
+  // v2 model groups (§7.4): resolveExtraction three-state graceful fallback:
+  //   - not configured / enabled=false / base_url empty -> null -> use global upstream + alias (no block)
+  //   - valid config -> replace upstream + skip alias + do not report credit (the user's model is the user's own)
   let extractionApiKeyOverride: string | undefined;
   let extractionModelIdOverride: string | undefined;
   {
@@ -557,9 +557,9 @@ export async function handleSystemUserPassthrough(
   const forwardTimeoutMs = config.server.forwardTimeoutMs ?? 600_000;
 
   let upstreamResp: Response;
-  // custom extraction upstream(用户自定义 extraction base_url + api_key)不走 proxy
-  // 官方限流桶 —— 用户的 quota 自己管。extractionApiKeyOverride 非空 ⇔ resolveExtraction
-  // 命中了有效 row (§7.4:未配置 / disabled / base_url 空 都返 null;此处一定是 override)。
+  // custom extraction upstream (user-defined extraction base_url + api_key) does not go through the proxy's
+  // official rate-limit bucket -- the user manages their own quota. extractionApiKeyOverride non-empty <=> resolveExtraction
+  // hit a valid row (§7.4: not configured / disabled / base_url empty all return null; here it must be an override).
   const isCustomExtraction = extractionApiKeyOverride !== undefined;
   try {
     const isAnthropicMain = /\/v1\/messages$/.test(path);

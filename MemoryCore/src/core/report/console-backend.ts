@@ -1,8 +1,8 @@
 /**
- * Console Observability Backend — 控制台输出实现。
+ * Console Observability Backend — console output implementation.
  *
- * 将所有可观测性数据输出到 stdout/stderr，用于开发调试。
- * 所有方法都是安全的（不抛异常、不阻塞业务）。
+ * Outputs all observability data to stdout/stderr for development and debugging.
+ * All methods are safe (never throw, never block the business).
  */
 
 import type http from "node:http";
@@ -29,7 +29,7 @@ const TAG = "[observability][console]";
 // Console Span
 // ============================
 
-/** Console Span — 输出 Span 生命周期到 stdout */
+/** Console Span — outputs the Span lifecycle to stdout */
 class ConsoleSpan implements ISpan {
   private name: string;
   private attrs: Record<string, string | number | boolean> = {};
@@ -98,7 +98,7 @@ export class ConsoleTraceBackend implements ITraceBackend {
       }
       console.log(`${TAG}[trace] REPORT event=tdai.${event} attrs=${JSON.stringify(filtered)}`);
     } catch {
-      // 静默
+      // silent
     }
   }
 
@@ -174,7 +174,7 @@ export class ConsoleLLMTraceBackend implements ILLMTraceBackend {
   readonly type = "console";
 
   createSpanProcessor(): ISpanProcessor | null {
-    // 返回一个简单的 console processor
+    // return a simple console processor
     return {
       onStart(_span: unknown) {
         // no-op on start
@@ -184,7 +184,7 @@ export class ConsoleLLMTraceBackend implements ILLMTraceBackend {
           const s = span as { name?: string };
           console.log(`${TAG}[llm-trace] SPAN_END name=${s.name ?? "unknown"}`);
         } catch {
-          // 静默
+          // silent
         }
       },
       async forceFlush() {},
@@ -276,12 +276,12 @@ export class ConsoleTracePropagation implements ITracePropagation {
 }
 
 // ============================
-// ConsoleObservabilityBackend — 聚合
+// ConsoleObservabilityBackend — aggregation
 // ============================
 
 /**
- * Console 可观测性后端 — 所有数据输出到 stdout/stderr。
- * 用于开发调试环境。
+ * Console observability backend — all data is output to stdout/stderr.
+ * For development and debugging environments.
  */
 export class ConsoleObservabilityBackend implements IObservabilityBackend {
   readonly type = "console";

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * scan-chinese.mjs — 扫描 src 下（排除 i18n/ locale 文件）的硬编码中文残留
+ * scan-chinese.mjs — scan for leftover hardcoded Chinese under src (excluding i18n/ locale files)
  *
- * 用法：
- *   node scripts/scan-chinese.mjs              # 扫描并输出报告
- *   node scripts/scan-chinese.mjs --strict     # 发现残留时以非零退出码退出（用于 CI）
+ * Usage:
+ *   node scripts/scan-chinese.mjs              # scan and print the report
+ *   node scripts/scan-chinese.mjs --strict     # exit with a non-zero code when leftovers are found (for CI)
  *
- * 规则：
- *   - 扫描 .ts / .tsx 文件
- *   - 排除 src/i18n/ 目录（locale 文件本身就是中文/英文映射表）
- *   - 排除代码注释（// 开头、* 开头、/* 开头的行）
- *   - 检测含 CJK 统一汉字（U+4E00–U+9FFF）的行
+ * Rules:
+ *   - scan .ts / .tsx files
+ *   - exclude the src/i18n/ directory (the locale files themselves are Chinese/English mapping tables)
+ *   - exclude code comments (lines starting with //, *, or /*)
+ *   - detect lines containing CJK unified ideographs (U+4E00–U+9FFF)
  */
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
@@ -21,7 +21,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const srcRoot = join(__dirname, '..', 'src');
 
-/** 递归收集 .ts/.tsx 文件，排除指定目录 */
+/** Recursively collect .ts/.tsx files, excluding the specified directories */
 function walk(dir, excludeDirs = []) {
   const out = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -36,7 +36,7 @@ function walk(dir, excludeDirs = []) {
   return out;
 }
 
-/** 判断一行是否为纯注释行（// 开头、* 开头、/* 开头） */
+/** Determine whether a line is a pure comment line (starting with //, *, or /*) */
 function isCommentLine(line) {
   const trimmed = line.trim();
   return (
@@ -47,13 +47,13 @@ function isCommentLine(line) {
 }
 
 /**
- * 剥离行内注释（// 到行尾），但避免误删字符串字面量中的 //。
- * 粗略方法：从左到右扫描，跟踪引号状态，只在引号外遇到 // 时截断。
+ * Strip inline comments (// to end of line), while avoiding accidentally deleting // inside string literals.
+ * Rough approach: scan left to right, track quote state, and truncate only when // is met outside quotes.
  */
 function stripInlineComment(line) {
-  let inSingle = false;  // 单引号
-  let inDouble = false;  // 双引号
-  let inTemplate = false; // 模板字符串反引号
+  let inSingle = false;  // single quote
+  let inDouble = false;  // double quote
+  let inTemplate = false; // template-string backtick
   let escaped = false;
   for (let i = 0; i < line.length - 1; i++) {
     const ch = line[i];
@@ -104,18 +104,18 @@ function scan() {
 const { results, totalHits } = scan();
 
 console.log('═══════════════════════════════════════════════════════════');
-console.log('  中文残留扫描（排除 src/i18n/，排除代码注释）');
+console.log('  Chinese leftover scan (excluding src/i18n/, excluding code comments)');
 console.log('═══════════════════════════════════════════════════════════\n');
 
 if (results.length === 0) {
-  console.log('✅ 未发现硬编码中文残留。\n');
+  console.log('✅ No hardcoded Chinese leftovers found.\n');
   process.exit(0);
 }
 
-console.log(`发现 ${results.length} 个文件、共 ${totalHits} 行含中文残留：\n`);
+console.log(`Found ${results.length} files with ${totalHits} lines containing Chinese leftovers:\n`);
 
 for (const { file, hits } of results.sort((a, b) => b.hits.length - a.hits.length)) {
-  console.log(`📄 ${file} (${hits.length} 行)`);
+  console.log(`📄 ${file} (${hits.length} lines)`);
   for (const { line, content } of hits) {
     console.log(`   ${String(line).padStart(4)}: ${content.trim().slice(0, 120)}`);
   }
@@ -123,7 +123,7 @@ for (const { file, hits } of results.sort((a, b) => b.hits.length - a.hits.lengt
 }
 
 console.log(`───────────────────────────────────────────────────────────`);
-console.log(`合计：${results.length} 个文件、${totalHits} 行中文残留`);
+console.log(`Total: ${results.length} files, ${totalHits} lines of Chinese leftovers`);
 console.log(`───────────────────────────────────────────────────────────\n`);
 
 if (process.argv.includes('--strict')) {

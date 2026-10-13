@@ -1,11 +1,11 @@
 /**
- * Passthrough ProtocolStrategy (Phase 4) — /direct/* 纯透传。
+ * Passthrough ProtocolStrategy (Phase 4) — /direct/* pure passthrough.
  *
- * 老代码入口: directHandler.ts::handleDirectPassthrough。
- * 无 auth / injection / mem 命令 / session-init / model gate。
- * 只做 URL rewrite + header 剥离 + fetch + response 直返。
+ * Legacy entry point: directHandler.ts::handleDirectPassthrough.
+ * No auth / injection / mem commands / session-init / model gate.
+ * Only URL rewrite + header stripping + fetch + returning the response directly.
  *
- * 大部分 ProtocolStrategy 方法都不适用 —— 保留 throw 以便 caller 早发现误用。
+ * Most ProtocolStrategy methods do not apply — throw is kept so callers discover misuse early.
  */
 
 import type {
@@ -30,7 +30,7 @@ export const passthroughProtocol: ProtocolStrategy = {
     clientStream: ReadableStream<Uint8Array>;
     outcome: Promise<StreamOutcome>;
   } {
-    // passthrough — 客户端流 = 上游流 (无 tap)
+    // passthrough — client stream = upstream stream (no tap)
     return {
       clientStream: upstreamBody,
       outcome: Promise.resolve({}),

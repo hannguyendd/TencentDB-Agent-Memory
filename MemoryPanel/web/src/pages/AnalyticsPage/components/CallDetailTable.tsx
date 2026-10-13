@@ -1,14 +1,14 @@
 /**
- * CallDetailTable — 工具调用明细（trace 视图）。
+ * CallDetailTable -- tool call details (trace view).
  *
- * 数据来自内核 `tool-calls/list`（全量分页，非抽样），支持内核侧四维过滤：
- * kind / user_id / bridge_source / executed_endpoint（后者为 LIKE 模糊匹配）。
+ * Data comes from the kernel `tool-calls/list` (full pagination, not sampled), supporting four kernel-side filters:
+ * kind / user_id / bridge_source / executed_endpoint (the latter is a LIKE fuzzy match).
  *
- * 这是「指标 + trace」中的 trace 落点：每行对应一次真实调用，可看到发起工具、
- * 实际端点、请求体、上游状态与耗时；点击行展开完整请求体。
+ * This is the trace landing point of "metrics + trace": each row is one real call, showing the initiating tool,
+ * actual endpoint, request body, upstream status and latency; click a row to expand the full request body.
  *
- * 表格自身只保留端点关键字搜索；按成员 / 资产类别的下钻已改为抽屉，不再由本表
- * 承接联动过滤（成员列点击即可呼出该成员的下钻抽屉）。
+ * The table itself keeps only the endpoint keyword search; drill-down by member / asset category now uses the drawer, and this table
+ * no longer handles linked filtering (clicking the member column opens that member's drill-down drawer).
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';

@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# 发布 Memory Hub 多架构镜像到 Docker Hub。
+# Publish the Memory Hub multi-arch image to Docker Hub.
 #
-# 流程：
-#   1) secret-scan 源码（MemoryPanel + MemoryKnowledge）
-#   2) PREPARE_ONLY 准备 context，再扫一遍 context
-#   3) docker buildx 构建 linux/amd64 + linux/arm64 并 push
+# Flow:
+#   1) secret-scan the source (MemoryPanel + MemoryKnowledge)
+#   2) PREPARE_ONLY to prepare the context, then scan the context again
+#   3) docker buildx builds linux/amd64 + linux/arm64 and pushes
 #
-# 用法：
-#   ./publish.sh                              # 默认 VERSION=1.0.0-beta.1，并推 :beta
-#   VERSION=1.0.0-beta.2 ./publish.sh         # 版本 tag + 浮动 :beta（默认 ALSO_BETA=1）
-#   ALSO_BETA=0 VERSION=1.0.0-beta.2 ./publish.sh   # 只推版本 tag，不挪 :beta
-#   DRY_RUN=1 ./publish.sh                    # 只扫描 + 准备 context，不 build/push
-#   PUSH=0 ./publish.sh                       # 本地 --load 单架构（默认 amd64）供抽查
-#   ALSO_LATEST=1 ./publish.sh                # 额外打 agentmemory/memory-hub:latest（正式版再用）
+# Usage:
+#   ./publish.sh                              # default VERSION=1.0.0-beta.1, and also push :beta
+#   VERSION=1.0.0-beta.2 ./publish.sh         # version tag + floating :beta (default ALSO_BETA=1)
+#   ALSO_BETA=0 VERSION=1.0.0-beta.2 ./publish.sh   # push only the version tag, do not move :beta
+#   DRY_RUN=1 ./publish.sh                    # only scan + prepare the context, no build/push
+#   PUSH=0 ./publish.sh                       # local --load single arch (default amd64) for spot checks
+#   ALSO_LATEST=1 ./publish.sh                # additionally tag agentmemory/memory-hub:latest (use for official releases)
 #
-# 前置：
-#   - 已 docker login（账号需有 agentmemory org 推送权限）
-#   - docker buildx 可用；默认 builder 名 multiarch（不存在则自动 create）
+# Prerequisites:
+#   - docker login done (the account needs push permission on the agentmemory org)
+#   - docker buildx available; default builder name multiarch (created automatically if missing)
 #
 set -euo pipefail
 
@@ -41,14 +41,14 @@ SECRET_SCAN="${SECRET_SCAN:-$TMC_DIR/scripts/secret-scan.sh}"
 err() { echo "[publish-hub] error: $*" >&2; exit 1; }
 log() { echo "[publish-hub] $*"; }
 
-[[ -f "$TMC_DIR/package.json" ]] || err "MemoryPanel 不在 $TMC_DIR"
-[[ -f "$KNOWLEDGE_DIR/package.json" ]] || err "MemoryKnowledge 不在 $KNOWLEDGE_DIR"
-[[ -f "$SECRET_SCAN" ]] || err "secret-scan 不在 $SECRET_SCAN"
-[[ -f "$SCRIPT_DIR/Dockerfile" ]] || err "Dockerfile 缺失"
-command -v docker >/dev/null || err "需要 docker"
-command -v rsync >/dev/null || err "需要 rsync"
+[[ -f "$TMC_DIR/package.json" ]] || err "MemoryPanel not found at $TMC_DIR"
+[[ -f "$KNOWLEDGE_DIR/package.json" ]] || err "MemoryKnowledge not found at $KNOWLEDGE_DIR"
+[[ -f "$SECRET_SCAN" ]] || err "secret-scan not found at $SECRET_SCAN"
+[[ -f "$SCRIPT_DIR/Dockerfile" ]] || err "Dockerfile missing"
+command -v docker >/dev/null || err "docker is required"
+command -v rsync >/dev/null || err "rsync is required"
 
-# ── 1) 源码 secret-scan ─────────────────────────────────────────────
+# ── 1) Source secret-scan ─────────────────────────────────────────────
 log "secret-scan: MemoryPanel"
 (
   cd "$TMC_DIR"
@@ -60,13 +60,13 @@ log "secret-scan: MemoryKnowledge"
   bash "$SECRET_SCAN" src .env.example package.json
 )
 
-# ── 2) 准备 context ─────────────────────────────────────────────────
+# ── 2) Prepare context ─────────────────────────────────────────────────
 log "prepare context → $CTX_DIR"
 KEEP_CTX=1 PREPARE_ONLY=1 CTX_DIR="$CTX_DIR" IMAGE_TAG="scan-$VERSION" \
   bash "$SCRIPT_DIR/build.sh"
 
 [[ -f "$CTX_DIR/panel/package.json" && -f "$CTX_DIR/knowledge/package.json" ]] \
-  || err "context 准备失败：$CTX_DIR"
+  || err "context preparation failed: $CTX_DIR"
 
 log "secret-scan: build context"
 (
@@ -75,13 +75,13 @@ log "secret-scan: build context"
 )
 
 if [[ "$DRY_RUN" == "1" ]]; then
-  log "DRY_RUN=1 → 跳过 build/push。context 保留在 $CTX_DIR"
+  log "DRY_RUN=1 → skipping build/push. Context kept at $CTX_DIR"
   exit 0
 fi
 
 # ── 3) buildx multi-arch ────────────────────────────────────────────
-# 注意：--push 只会推 TAG_ARGS 里的名字。本地名 team-memory-panel-knowledge
-# 不能出现在 --push 里，否则会被当成 docker.io/library/... 导致 authorization failed。
+# Note: --push only pushes the names in TAG_ARGS. The local name team-memory-panel-knowledge
+# must not appear in --push, otherwise it is treated as docker.io/library/... and causes authorization failed.
 HUB_TAGS=(-t "${HUB_IMAGE}:${VERSION}")
 if [[ "$ALSO_BETA" == "1" ]]; then
   HUB_TAGS+=(-t "${HUB_IMAGE}:beta")
@@ -124,11 +124,11 @@ else
   trap cleanup EXIT
   if docker export "$cid" | tar -t 2>/dev/null \
     | grep -E '(\.env$|metadata-instances\.json|/app/panel/\.env)' ; then
-    err "镜像内出现疑似敏感路径，中止"
+    err "Suspected sensitive path found in the image, aborting"
   fi
   cleanup
   trap - EXIT
-  log "local image ready: ${LOCAL_NAME}:${VERSION}（未 push）"
+  log "local image ready: ${LOCAL_NAME}:${VERSION} (not pushed)"
 fi
 
-log "done. 验证: docker pull ${HUB_IMAGE}:${VERSION} && docker buildx imagetools inspect ${HUB_IMAGE}:${VERSION}"
+log "done. Verify: docker pull ${HUB_IMAGE}:${VERSION} && docker buildx imagetools inspect ${HUB_IMAGE}:${VERSION}"

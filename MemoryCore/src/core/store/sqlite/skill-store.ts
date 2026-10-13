@@ -1,17 +1,17 @@
 /**
- * SqliteSkillStore — 新版 skill 数据访问层。
+ * SqliteSkillStore — new skill data access layer.
  *
- * 设计目标：
- *   - 单表多行多版本：每条 (skill_id, version) 一行，is_head=1 标记当前版本
- *   - 五元组身份硬字段：user_id / owner_agent_id / team_id / task_id / skill_id
- *   - 不感知绑定 / 浮动 / 草稿 / 冲突
- *   - 写入路径：旧 head 改 0 → INSERT 新行 → fts5 同步（事务原子）
- *   - 读取路径：所有查询强制 team_id 过滤
+ * Design goals:
+ *   - single table with multiple rows and versions: one row per (skill_id, version), is_head=1 marks the current version
+ *   - 5-tuple identity hard fields: user_id / owner_agent_id / team_id / task_id / skill_id
+ *   - unaware of binding / floating / draft / conflict
+ *   - write path: old head set to 0 → INSERT new row → fts5 sync (atomic in a transaction)
+ *   - read path: all queries force team_id filtering
  *
- * 详见 docs/design/2026-06-17-skill-redesign-v2.md §2 / §5.
+ * See docs/design/2026-06-17-skill-redesign-v2.md §2 / §5 for details.
  *
- * 注：此文件是 Phase 2 新增。Phase 10 清理时旧 `skill-store.ts` 删除，
- * 本文件改名为 `skill-store.ts`。
+ * Note: this file was added in Phase 2. When Phase 10 cleans up, the old `skill-store.ts` is deleted
+ * and this file is renamed to `skill-store.ts`.
  */
 
 import type { DatabaseSync } from "node:sqlite";
@@ -31,7 +31,7 @@ import type {
 } from "../../skill/types.js";
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Logger 接口
+//  Logger interface
 // ═══════════════════════════════════════════════════════════════════════
 
 export interface StoreLogger {
@@ -47,23 +47,23 @@ export interface StoreLogger {
 
 export interface SqliteSkillStoreOptions {
   db: DatabaseSync;
-  /** Embedding 维度。0 = 不创建 skill_vec 虚拟表。 */
+  /** Embedding dimension. 0 = do not create the skill_vec virtual table. */
   dimensions: number;
   logger?: StoreLogger;
-  /** 注入的 now（毫秒）。默认 Date.now。便于测试。 */
+  /** Injected now (ms). Default Date.now. Convenient for tests. */
   now?: () => number;
-  /** 注入的 ULID 生成器。默认见 mkUlid()。便于测试。 */
+  /** Injected ULID generator. See mkUlid() for the default. Convenient for tests. */
   ulid?: () => string;
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  内部辅助
+//  Internal helpers
 // ═══════════════════════════════════════════════════════════════════════
 
 /**
- * row_id 生成器 —— 每行的物理主键（TEXT PRIMARY KEY）。
- * 与 skill_id 分离：skill_id 在版本间共享，row_id 每一行唯一。
- * base62 12 字符（~71 bit CSPRNG 真熵）；无 base36 的伪随机隐患。
+ * row_id generator — the physical primary key of each row (TEXT PRIMARY KEY).
+ * Separate from skill_id: skill_id is shared across versions, row_id is unique per row.
+ * base62 12 characters (~71 bits of CSPRNG true entropy); no base36 pseudo-random hazard.
  */
 function defaultUlid(): string {
   return randomBase62(12);
@@ -124,7 +124,7 @@ function toSkill(raw: SkillRowRaw): Skill {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Store 实现
+//  Store implementation
 // ═══════════════════════════════════════════════════════════════════════
 
 export class SqliteSkillStore implements ISkillStore {
@@ -144,13 +144,13 @@ export class SqliteSkillStore implements ISkillStore {
     this.ulid = opts.ulid ?? defaultUlid;
   }
 
-  /** 创建表与索引。幂等。同时迁移旧索引与 FTS schema。 */
+  /** Create tables and indexes. Idempotent. Also migrates old indexes and the FTS schema. */
   init(): void {
     this.db.exec(SKILLS_DDL);
-    // 迁移：删除旧版 (team_id, name) 唯一索引（v2 重构后改为 team_id + owner_agent_id + name）
+    // Migration: drop the old (team_id, name) unique index (after the v2 refactor it became team_id + owner_agent_id + name)
     this.db.exec("DROP INDEX IF EXISTS uniq_skills_team_name_head");
     this.db.exec(SKILL_FTS_DDL);
-    // 迁移：检测 skill_fts 是否缺少 owner_agent_id 列（旧 schema 只有 5 列）
+    // Migration: detect whether skill_fts is missing the owner_agent_id column (the old schema has only 5 columns)
     this.migrateFtsSchema();
     if (this.dimensions > 0) {
       try {
@@ -165,34 +165,34 @@ export class SqliteSkillStore implements ISkillStore {
   }
 
   /**
-   * 检测并迁移 skill_fts 表 schema。
+   * Detect and migrate the skill_fts table schema.
    *
-   * 问题背景：旧版 FTS DDL 只有 5 列（name, description, content, skill_id, team_id），
-   * 新版增加了 owner_agent_id / task_id / user_id 三列。但 CREATE VIRTUAL TABLE IF NOT EXISTS
-   * 不会修改已存在的表，导致新代码中按 8 列查询/写入时出现 "no such column" 错误。
+   * Background: the old FTS DDL had only 5 columns (name, description, content, skill_id, team_id),
+   * and the new version adds three columns: owner_agent_id / task_id / user_id. But CREATE VIRTUAL TABLE IF NOT EXISTS
+   * does not modify an existing table, so new code querying/writing 8 columns hits a "no such column" error.
    *
-   * 迁移策略：检测缺少 owner_agent_id → DROP 旧 FTS 表 → 重建 → 从 skills 主表回填 head 行。
-   * 这比 ALTER 安全（FTS5 不支持 ALTER），且不丢失任何数据（主表是唯一数据源）。
+   * Migration strategy: detect missing owner_agent_id → DROP the old FTS table → rebuild → backfill head rows from the skills main table.
+   * This is safer than ALTER (FTS5 does not support ALTER) and loses no data (the main table is the only data source).
    */
   private migrateFtsSchema(): void {
-    // 检测：如果 skill_fts 表不存在则跳过（首次启动会由 SKILL_FTS_DDL 自动创建）
+    // Detect: if the skill_fts table does not exist, skip (on first startup SKILL_FTS_DDL creates it automatically)
     const tableCheck = this.db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skill_fts'")
       .get() as { name: string } | undefined;
     if (!tableCheck) return;
 
-    // 检测现有 skill_fts 是否包含 owner_agent_id 列
+    // detect whether the existing skill_fts contains the owner_agent_id column
     const cols = this.db
       .prepare("PRAGMA table_info('skill_fts')")
       .all() as Array<{ cid: number; name: string; type: string; notnull: number; dflt_value: unknown; pk: number }>;
     const colNames = new Set(cols.map((c) => c.name));
 
-    // 新版需要 owner_agent_id / task_id / user_id，旧版只有 5 列缺这 3 个
-    if (colNames.has("owner_agent_id")) return; // 已是新版 schema，无需迁移
+    // the new version needs owner_agent_id / task_id / user_id; the old one has only 5 columns, missing these 3
+    if (colNames.has("owner_agent_id")) return; // already the new schema, no migration needed
 
     this.logger?.info("[skill-store] migrating skill_fts schema: old columns missing owner_agent_id/task_id/user_id");
 
-    // Step 1: 从主表读取所有 head 行（回填用）
+    // Step 1: read all head rows from the main table (for backfill)
     interface HeadRow {
       skill_id: string;
       name: string;
@@ -207,13 +207,13 @@ export class SqliteSkillStore implements ISkillStore {
       .prepare("SELECT skill_id, name, description, content, team_id, owner_agent_id, task_id, user_id FROM skills WHERE is_head=1 AND status='active'")
       .all() as unknown as HeadRow[];
 
-    // Step 2: DROP 旧表 → 重建新 schema（事务内原子操作）
+    // Step 2: DROP the old table → rebuild with the new schema (atomic operation inside a transaction)
     this.db.exec("BEGIN");
     try {
       this.db.exec("DROP TABLE IF EXISTS skill_fts");
       this.db.exec(SKILL_FTS_DDL);
 
-      // Step 3: 回填所有 head 行到 FTS
+      // Step 3: backfill all head rows into FTS
       const insertStmt = this.db.prepare(
         "INSERT INTO skill_fts (name, description, content, skill_id, team_id, owner_agent_id, task_id, user_id) VALUES (?,?,?,?,?,?,?,?)",
       );
@@ -238,17 +238,17 @@ export class SqliteSkillStore implements ISkillStore {
     } catch (e) {
       this.db.exec("ROLLBACK");
       this.logger?.error(`[skill-store] fts migration failed: ${(e as Error).message}`);
-      // 即使迁移失败也不抛异常——gateway 仍可启动，只是 skill search 可能降级
-      // 下次重启会重试（因为 skill_fts 被 drop 后 SKILL_FTS_DDL 会重建空表）
+      // Even if the migration fails, do not throw — the gateway can still start, only skill search may degrade
+      // It retries on the next restart (because after skill_fts is dropped, SKILL_FTS_DDL rebuilds an empty table)
     }
   }
 
-  /** 是否处于降级模式（SQLite 连接异常等） */
+  /** Whether in degraded mode (SQLite connection abnormal, etc.) */
   isDegraded(): boolean {
     return this.degraded;
   }
 
-  /** 获取 store 能力声明 */
+  /** Get the store capability declaration */
   getCapabilities(): SkillStoreCapabilities {
     return {
       vectorSearch: this.vecAvailable,
@@ -258,7 +258,7 @@ export class SqliteSkillStore implements ISkillStore {
     };
   }
 
-  /** 关闭 store（SQLite 模式下为 no-op，连接由外部管理） */
+  /** Close the store (a no-op in SQLite mode; the connection is managed externally) */
   close(): void {
     this.degraded = true;
   }
@@ -266,15 +266,15 @@ export class SqliteSkillStore implements ISkillStore {
   // ────────────────────────────────────────────────────────────────────
   //  appendVersion
   //
-  //  注意：store 不再做 content_hash 的幂等检查 —— 这一层只管"写一行新版本"。
-  //  幂等语义（content + manifest 都没变 → 不写新版本）由 skill-versioning 在
-  //  上层判断，因为只有它同时知道 content_hash 与新 manifest_json。
+  //  Note: the store no longer does the content_hash idempotency check — this layer only handles "write one new version row".
+  //  Idempotency semantics (content + manifest both unchanged → do not write a new version) are decided by skill-versioning at the
+  //  upper layer, because only it knows both content_hash and the new manifest_json.
   // ────────────────────────────────────────────────────────────────────
   async appendVersion(input: AppendVersionInput): Promise<Skill> {
     const tid = input.team_id ?? "default";
     const head = await this.getHead(input.skill_id, tid);
 
-    // [4] 同 team 同 agent 同 name 已 active head（且不是同一 skill_id 的更新） → 重名
+    // [4] same team, same agent, same name already has an active head (and it is not an update of the same skill_id) → duplicate name
     if (!head) {
       const oid = input.owner_agent_id ?? "default";
       const dupRaw = this.db
@@ -286,7 +286,7 @@ export class SqliteSkillStore implements ISkillStore {
         throw new SkillStoreError("SKILL_NAME_DUPLICATE", `name '${input.name}' already exists for agent in team`);
       }
     } else {
-      // 已有同 skill_id 的历史 → name 不可变
+      // there is already history for the same skill_id → name is immutable
       if (head.name !== input.name) {
         throw new SkillStoreError("SKILL_NAME_DUPLICATE", "name change is not allowed across versions");
       }
@@ -294,14 +294,14 @@ export class SqliteSkillStore implements ISkillStore {
 
     const newVersion = head ? head.version + 1 : 1;
     const ownerForRow = head ? head.owner_agent_id : (input.owner_agent_id ?? "default");
-    // user_id 记录的是本次操作者，而非首次创建者。后续版本取 input.user_id。
+    // user_id records the operator of this operation, not the first creator. Later versions take input.user_id.
     const userIdForRow = input.user_id ?? "default";
     const ts = this.now();
     const newRowId = this.ulid();
 
-    // 事务：旧 head 翻 0 → INSERT 新行 → 同步 fts5
-    // node:sqlite 暂无 db.transaction() helper，使用 BEGIN/COMMIT 手写。
-    // 必须保持 synchronous（不要在中间 await），与 sqlite-transaction-guard 同思路。
+    // Transaction: flip the old head to 0 → INSERT the new row → sync fts5
+    // node:sqlite has no db.transaction() helper yet, so BEGIN/COMMIT is written by hand.
+    // Must stay synchronous (do not await in the middle), same idea as sqlite-transaction-guard.
     this.db.exec("BEGIN IMMEDIATE");
     try {
       if (head) {
@@ -340,13 +340,13 @@ export class SqliteSkillStore implements ISkillStore {
           ts,
         );
 
-      // FTS 同步：删除该 skill_id 的所有旧索引行 → 仅插入新 head
+      // FTS sync: delete all old index rows of this skill_id → insert only the new head
       this.db.prepare("DELETE FROM skill_fts WHERE skill_id=?").run(input.skill_id);
       const ftsContent = input.content.length > FTS_CONTENT_MAX
         ? input.content.slice(0, FTS_CONTENT_MAX)
         : input.content;
-      // 使用 jieba 预分词（与 L0/L1 FTS 一致的方案），让 unicode61 tokenizer 能按空格切中文。
-      // 如果 jieba 不可用，tokenizeForFts 会直接返回原文。
+      // Use jieba pre-tokenization (the same approach as L0/L1 FTS) so the unicode61 tokenizer can split Chinese by spaces.
+      // If jieba is unavailable, tokenizeForFts returns the original text directly.
       const ftsName = tokenizeForFts(input.name);
       const ftsDescription = tokenizeForFts(input.description);
       const ftsContentTokenized = tokenizeForFts(ftsContent);
@@ -362,7 +362,7 @@ export class SqliteSkillStore implements ISkillStore {
       throw e;
     }
 
-    // 取回新行（事务外读取，节省持锁时间）
+    // fetch the new row (read outside the transaction to save lock-holding time)
     const inserted = this.db
       .prepare("SELECT * FROM skills WHERE row_id=?")
       .get(newRowId) as SkillRowRaw;
@@ -379,13 +379,13 @@ export class SqliteSkillStore implements ISkillStore {
       .prepare(`UPDATE skills SET status='archived', updated_at_ms=? WHERE ${where}`)
       .run(...args);
 
-    // archived 后从 fts 中移除（不再可搜索到）
+    // remove from fts after archiving (no longer searchable)
     if ((r.changes ?? 0) > 0) {
       this.db.prepare("DELETE FROM skill_fts WHERE skill_id=?").run(skillId);
       return { archived: true };
     }
 
-    // 检查是否之前已 archived（仍算成功 / 幂等）
+    // check whether it was already archived before (still counts as success / idempotent)
     const checkWhere = teamId
       ? "skill_id=? AND team_id=? AND is_head=1 AND status='archived'"
       : "skill_id=? AND is_head=1 AND status='archived'";
@@ -398,10 +398,10 @@ export class SqliteSkillStore implements ISkillStore {
   //  getHead / getByVersion / listVersions
   // ────────────────────────────────────────────────────────────────────
   /**
-   * 获取当前 head，且强制 `status='active'`。archived skill 视同不存在。
+   * Get the current head, forcing `status='active'`. An archived skill is treated as nonexistent.
    *
-   * 与 TCVDB 侧 `_getHeadAsync` 语义对齐（那边 filter 一直带 `status="active"`）。
-   * 想拿到 archived 行请用 {@link getHeadIncludingArchived}。
+   * Aligned with the semantics of the TCVDB side's `_getHeadAsync` (whose filter always carries `status="active"`).
+   * To get an archived row use {@link getHeadIncludingArchived}.
    */
   async getHead(skillId: string, teamId?: string): Promise<Skill | null> {
     if (teamId) {
@@ -417,8 +417,8 @@ export class SqliteSkillStore implements ISkillStore {
   }
 
   /**
-   * 获取当前 head，不管 status。仅供 delete 幂等回读 / 补偿任务 / 管控台使用。
-   * 普通读写路径 **不应** 调用本方法。
+   * Get the current head regardless of status. For delete idempotent readback / compensation tasks / the admin console only.
+   * Ordinary read/write paths **should not** call this method.
    */
   async getHeadIncludingArchived(skillId: string, teamId?: string): Promise<Skill | null> {
     if (teamId) {
@@ -465,7 +465,7 @@ export class SqliteSkillStore implements ISkillStore {
     return rows.map(toSkill);
   }
 
-  /** 该 skill_id 下的版本总数（team_id 可选过滤）。 */
+  /** Total number of versions under this skill_id (team_id optional filter). */
   async countVersions(skillId: string, teamId?: string): Promise<number> {
     if (teamId) {
       const row = this.db
@@ -490,7 +490,7 @@ export class SqliteSkillStore implements ISkillStore {
     const where: string[] = ["is_head=1"];
     const args: unknown[] = [];
 
-    // 四个 ID：传了就过滤，不传不限制
+    // four IDs: filter if passed, no restriction if not
     if (opts.team_id) {
       where.push("team_id=?");
       args.push(opts.team_id);
@@ -527,17 +527,17 @@ export class SqliteSkillStore implements ISkillStore {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  //  searchSkills（仅 BM25 实现；vec 部分由 hybrid 调用方组合）
+  //  searchSkills (BM25 implementation only; the vec part is composed by the hybrid caller)
   // ────────────────────────────────────────────────────────────────────
   async searchSkills(opts: SearchSkillsOptions): Promise<SkillSearchResult[]> {
     const topK = Math.min(Math.max(opts.topK ?? 10, 1), 50);
     const query = (opts.query ?? "").trim();
     if (!query) return [];
 
-    // mode 透传：当前 store 仅实现 BM25 路径。
-    // - 'bm25' / 未传  → 直接走 BM25（默认）
-    // - 'embedding' / 'hybrid' 但 vec 不可用或未给 queryEmbedding → 降级到 BM25 + 一条 warn
-    // 真实 hybrid (RRF) / 纯 vec 路径是后置项；契约层面 mode 不会被静默吞掉。
+    // mode passthrough: the current store implements only the BM25 path.
+    // - 'bm25' / omitted  → go straight to BM25 (default)
+    // - 'embedding' / 'hybrid' but vec is unavailable or queryEmbedding not given → degrade to BM25 + one warn
+    // The real hybrid (RRF) / pure vec path is a follow-up item; at the contract level mode is not silently swallowed.
     const requestedMode = opts.mode ?? "bm25";
     const wantsVec = requestedMode === "embedding" || requestedMode === "hybrid";
     if (wantsVec && (!this.vecAvailable || !opts.queryEmbedding)) {
@@ -546,19 +546,19 @@ export class SqliteSkillStore implements ISkillStore {
           `(vec_available=${this.vecAvailable}, has_embedding=${!!opts.queryEmbedding})`,
       );
     }
-    // pure embedding 路径暂未实现 → 仍回 BM25；hybrid 同样回 BM25（后续 RRF 融合）。
+    // the pure embedding path is not yet implemented → still falls back to BM25; hybrid likewise falls back to BM25 (RRF fusion later).
 
-    // FTS5 查询：使用 buildFtsQuery（与 L0/L1 一致的 jieba 分词 + 引号包裹 + OR 连接）。
-    // jieba cutForSearch 能正确处理中文分词；fallback 到 Unicode 正则切分。
-    // 每个 token 用双引号包裹，避免 FTS5 保留词（AND/OR/NOT/NEAR）被误解析为布尔运算符。
+    // FTS5 query: use buildFtsQuery (the same jieba tokenization + quote wrapping + OR joining as L0/L1).
+    // jieba cutForSearch handles Chinese tokenization correctly; falls back to Unicode regex splitting.
+    // Each token is wrapped in double quotes, to prevent FTS5 reserved words (AND/OR/NOT/NEAR) from being misparsed as boolean operators.
     const ftsQuery = buildFtsQuery(query);
     if (!ftsQuery) return [];
 
     // FTS5 snippet(table, col, prefix, suffix, ellipsis, tokenCount)
-    // col=2 → skill_fts.content（DDL 列序：name=0, description=1, content=2, skill_id=3, team_id=4, owner_agent_id=5, task_id=6, user_id=7）。
-    // 16 token 片段，带 <mark> 高亮。
+    // col=2 → skill_fts.content (DDL column order: name=0, description=1, content=2, skill_id=3, team_id=4, owner_agent_id=5, task_id=6, user_id=7).
+    // 16-token snippet, with <mark> highlighting.
     //
-    // 四个 ID 在 FTS5 层直接过滤（传了就加），避免先搜全集再回查过滤的低效路径。
+    // the four IDs are filtered directly at the FTS5 layer (added if passed), avoiding the inefficient path of searching the full set first and then looking up to filter.
     let ftsRows: Array<{ skill_id: string; bm25: number; snippet: string }>;
     try {
       const ftsArgs: Array<string | number> = [ftsQuery];
@@ -595,7 +595,7 @@ export class SqliteSkillStore implements ISkillStore {
       return [];
     }
 
-    // 回查主表：验证 is_head=1 AND status='active'（FTS5 没有这两个字段）
+    // look up the main table: verify is_head=1 AND status='active' (FTS5 does not have these two fields)
     const hits: Array<{ skill: Skill; score: number; snippet: string }> = [];
     for (const r of ftsRows) {
       const row = this.db
@@ -604,7 +604,7 @@ export class SqliteSkillStore implements ISkillStore {
         )
         .get(r.skill_id) as SkillRowRaw | undefined;
       if (!row) continue;
-      // bm25 越小越相关 → 转为越大越好的 score
+      // smaller bm25 means more relevant → convert to a score where larger is better
       hits.push({
         skill: toSkill(row),
         score: -r.bm25,
@@ -616,10 +616,10 @@ export class SqliteSkillStore implements ISkillStore {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  //  TTL 清理
+  //  TTL cleanup
   // ────────────────────────────────────────────────────────────────────
 
-  /** 查询 created_at_ms < cutoffMs 的过期非 head 版本。 */
+  /** Query expired non-head versions with created_at_ms < cutoffMs. */
   async findExpiredVersions(cutoffMs: number): Promise<ExpiredVersionMeta[]> {
     const rows = this.db
       .prepare(
@@ -645,7 +645,7 @@ export class SqliteSkillStore implements ISkillStore {
     }));
   }
 
-  /** 物理删除指定版本行（仅 is_head=0 安全锁）。 */
+  /** Physically delete the specified version row (is_head=0 safety lock only). */
   async deleteVersion(skillId: string, version: number): Promise<boolean> {
     const r = this.db
       .prepare("DELETE FROM skills WHERE skill_id=? AND version=? AND is_head=0")
@@ -654,20 +654,20 @@ export class SqliteSkillStore implements ISkillStore {
   }
 
   /**
-   * 物理删除同 skill_id 下的所有版本行（含 head + archived）+ 清 fts / vec。
-   * 返回实际删除的行数。`SkillCore.delete` 走此路径，权限校验由调用方负责。
+   * Physically delete all version rows under the same skill_id (including head + archived) + clear fts / vec.
+   * Returns the number of rows actually deleted. `SkillCore.delete` goes through this path; permission checks are the caller's responsibility.
    */
   async deleteAllVersions(skillId: string, teamId?: string): Promise<number> {
     const where = teamId ? "skill_id=? AND team_id=?" : "skill_id=?";
     const args: unknown[] = teamId ? [skillId, teamId] : [skillId];
     const r = this.db.prepare(`DELETE FROM skills WHERE ${where}`).run(...args);
     const changes = r.changes ?? 0;
-    // 仅当主表真的删掉了行时才 DELETE 附属表 —— 避免跨 team 校验失败时误清 fts
+    // DELETE the auxiliary tables only when the main table actually deleted rows — avoids wrongly clearing fts when cross-team validation fails
     if (changes > 0) {
       try {
         this.db.prepare("DELETE FROM skill_fts WHERE skill_id=?").run(skillId);
       } catch {
-        // fts 可能已被 archiveHead 清过，二次删除幂等
+        // fts may already have been cleared by archiveHead; the second delete is idempotent
       }
       if (this.vecAvailable) {
         try {
@@ -681,7 +681,7 @@ export class SqliteSkillStore implements ISkillStore {
   }
 
   // ────────────────────────────────────────────────────────────────────
-  //  Embedding 维护
+  //  Embedding maintenance
   // ────────────────────────────────────────────────────────────────────
   upsertEmbedding(skillId: string, embedding: Float32Array): void {
     if (!this.vecAvailable) return;

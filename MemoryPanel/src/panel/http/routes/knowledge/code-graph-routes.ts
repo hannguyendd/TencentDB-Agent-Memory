@@ -1,9 +1,9 @@
 /**
- * /api/v1/knowledge/code-graph/* —— Panel Code-Graph 业务路由（stateless）。
+ * /api/v1/knowledge/code-graph/* -- Panel Code-Graph business routes (stateless).
  *
- * 实现冻结契约 docs/api/knowledge-panel-api.md §2.0 Code 最小端点集，透传
- * HttpKnowledgeClient → KS /v3/code-graph/*。查询端点（search/explore）统一
- * 返回 KS 的 { text, isError } 文本块。
+ * Implements the frozen contract docs/api/knowledge-panel-api.md §2.0 minimal Code endpoint set, passing through to
+ * HttpKnowledgeClient -> KS /v3/code-graph/*. Query endpoints (search/explore) uniformly
+ * return KS's { text, isError } text blocks.
  */
 import type { Hono } from 'hono';
 import { validatePanelMetaHeaders } from '../../middleware/validate-panel-headers.js';
@@ -27,7 +27,7 @@ import {
 export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): void {
   const mw = validatePanelMetaHeaders(deps);
 
-  // C2 list — @deprecated 面板 UI 已改用 team-assets / my-assets
+  // C2 list -- @deprecated the panel UI now uses team-assets / my-assets
   api.post('/knowledge/code-graph/list', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -44,7 +44,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return runKs(c, () => kc.codeGraphList(teamId, opts));
   });
 
-  // C1 create — team 门控；KS create 后自动 build，meta 在 ready callback 登记
+  // C1 create -- team gated; KS builds automatically after create, and meta is registered in the ready callback
   api.post('/knowledge/code-graph/create', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -56,7 +56,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     if ('error' in gate) return gate.error;
     const branch = str(body, 'branch') ?? undefined;
     const repoName = str(body, 'repo_name') ?? undefined;
-    // 私有仓：provider_id + secret(+ username) 透传给 KS，入队前落凭据（消除时序窗口）。
+    // Private repo: provider_id + secret(+ username) are passed through to KS, and credentials are stored before enqueuing (eliminating the timing window).
     const providerId = str(body, 'provider_id') ?? undefined;
     const secret = str(body, 'secret') ?? undefined;
     const username = str(body, 'username') ?? undefined;
@@ -67,8 +67,8 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
         secret,
         username,
       });
-      // stash owner key 供 status-callback ready 时以 owner 身份注册 meta asset
-      // （callback 是 S2S、无 user_key；详见 knowledge-task-registry.ts）
+      // stash the owner key so that status-callback can register the meta asset as owner when ready
+      // (the callback is S2S with no user_key; see knowledge-task-registry.ts)
       if (ctx.userKey) {
         deps.knowledgeTaskRegistry.record({
           knowledge_id: detail.code_graph_id,
@@ -93,7 +93,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     }
   });
 
-  // C3b register-meta — code ready 后 owner 登记 meta（create 时不写 meta）
+  // C3b register-meta -- after code is ready the owner registers meta (create does not write meta)
   api.post('/knowledge/code-graph/register-meta', mw, async (c) => {
     const ctx = buildCtx(c);
     const log = deps.logger;
@@ -139,7 +139,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return respondEnvelope(c, okEnvelope(c, { registered: true, code_graph_id: cgId }));
   });
 
-  // C3 get — id-only（构建中无 meta 时 owner 可读）
+  // C3 get -- id-only (the owner can read it while building when there is no meta yet)
   api.post('/knowledge/code-graph/get', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
@@ -163,7 +163,7 @@ export function registerKnowledgeCodeGraphRoutes(api: Hono, deps: PanelDeps): vo
     return runKs(c, () => kc.codeGraphSync(cgId));
   });
 
-  // C5 delete — 删三处：KS + entity_knowledge 明细 + meta_asset（见 §0.6）
+  // C5 delete -- delete in three places: KS + entity_knowledge detail + meta_asset (see §0.6)
   api.post('/knowledge/code-graph/delete', mw, async (c) => {
     const ctx = buildCtx(c);
     const body = await readJson(c);
