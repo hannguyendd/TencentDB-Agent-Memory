@@ -1,13 +1,13 @@
 /**
- * memory-tencentdb-client — OpenClaw 记忆插件（v3 客户端）
+ * memory-tencentdb-client — OpenClaw memory plugin (v3 client)
  *
- * 通过 @tencentdb-agent-memory/memory-sdk-ts-v2 连接远端 Memory Gateway，
- * 使用 /v3/* API 与强制 team/agent/user isolation，
- * 提供四层记忆的自动捕获、召回和工具调用能力。
+ * Connects to a remote Memory Gateway via @tencentdb-agent-memory/memory-sdk-ts-v2,
+ * uses the /v3/* API with mandatory team/agent/user isolation,
+ * and provides automatic capture, recall and tool-calling for the four memory layers.
  *
- * COS 读文件旁路：createMemoryFileReader（/v2/cos/secret + STS），工具 tdai_read_file。
- * 本插件不包含任何数据处理逻辑（无 VDB/Embedding/Pipeline），也不含 Offload；
- * 所有记忆操作委托给远端 Gateway。
+ * COS file-read bypass: createMemoryFileReader (/v2/cos/secret + STS), tool tdai_read_file.
+ * This plugin contains no data-processing logic (no VDB/Embedding/Pipeline) and no Offload;
+ * all memory operations are delegated to the remote Gateway.
  */
 
 import { MemoryClient, createMemoryFileReader } from "@tencentdb-agent-memory/memory-sdk-ts-v2";
@@ -76,8 +76,8 @@ export default function register(api: any) {
     rejectUnauthorized,
   });
 
-  // COS STS 旁路；无独立配置块。
-  // STS 凭证仍走 POST /v2/cos/secret，鉴权复用 server.apiKey / instanceId。
+  // COS STS bypass; no dedicated config block.
+  // STS credentials still go through POST /v2/cos/secret, with auth reusing server.apiKey / instanceId.
   const fileReader = createMemoryFileReader({
     endpoint: serverUrl,
     apiKey,

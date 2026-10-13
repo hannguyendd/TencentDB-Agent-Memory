@@ -1,5 +1,5 @@
 /**
- * LanguageSwitcher — 顶部语言切换器
+ * LanguageSwitcher - top language switcher
  */
 import { Dropdown, List } from 'tea-component';
 import { InternetIcon } from 'tea-icons-react';

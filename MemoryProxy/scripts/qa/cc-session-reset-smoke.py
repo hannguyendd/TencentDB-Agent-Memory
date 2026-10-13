@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-cc-session-reset-smoke.py —— 用 pexpect PTY 起真 Claude Code 交互式会话,
-验证 mem:session-reset 命令的完整端到端链路。
+cc-session-reset-smoke.py —— use a pexpect PTY to start a real interactive Claude Code session,
+and verify the full end-to-end flow of the mem:session-reset command.
 
-测试流程:
-  1. 启动 CC → 等 form 弹出(asset_confirm)
-  2. 选"否，本次不关联" → bypass
-  3. 发正常消息验证 bypass 生效(无注入)
-  4. 发 `mem:session-reset` → 看到重置文案
-  5. 再发一条消息 → form 再次弹出(证明 reset 生效)
+Test flow:
+    1. Start CC -> wait for the form to pop up (asset_confirm)
+    2. Choose "No, do not link this time" -> bypass
+    3. Send a normal message to verify bypass took effect (no injection)
+    4. Send `mem:session-reset` -> see the reset message
+    5. Send another message -> the form pops up again (proves reset took effect)
 
-依赖: pexpect (`pip install pexpect`)
-环境变量:
-    CLAUDE_CONFIG_DIR   指向一个已配好 proxy base_url 的 CC 配置目录
-                        (若未设, 透传当前环境, 让 claude 自己找)
+Dependency: pexpect (`pip install pexpect`)
+Environment variables:
+        CLAUDE_CONFIG_DIR   points to a CC config dir already configured with the proxy base_url
+                                                (if unset, the current environment is passed through and claude finds it itself)
 
-用法:
+Usage:
     CLAUDE_CONFIG_DIR=~/.my-claude-cfg python3 scripts/qa/cc-session-reset-smoke.py
     python3 scripts/qa/cc-session-reset-smoke.py --log /tmp/cc-reset.log
 """
@@ -29,7 +29,7 @@ import pexpect
 
 
 def strip_ansi(data):
-    """去掉 ANSI escape 让 log 可读"""
+    """Strip ANSI escapes so the log is readable"""
     try:
         txt = data.decode(errors="ignore") if isinstance(data, bytes) else data
     except Exception:
@@ -41,7 +41,7 @@ def strip_ansi(data):
 
 
 class Sink:
-    """pexpect logfile_read hook — 写文件 + 打屏（stripped）"""
+    """pexpect logfile_read hook -- write to file + print to screen (stripped)"""
 
     def __init__(self, path):
         self.f = open(path, "wb")
@@ -56,34 +56,34 @@ class Sink:
         self.f.flush()
 
 
-# CC 交互式会话的 ready 标志:提示符出现时会显示项目路径或 ">" 或 "❯"
+# CC interactive session ready marker: when the prompt appears it shows the project path, ">" or "❯"
 CC_READY_RE = rb">|\xe2\x9d\xaf|claude"
-# asset_confirm form 的识别模式(中文 utf-8 编码)
+# Pattern to recognize the asset_confirm form (Chinese, utf-8 encoded; matches "是否关联" / "关联团队" / "团队资产")
 FORM_RE = rb"\xe6\x98\xaf\xe5\x90\xa6\xe5\x85\xb3\xe8\x81\x94|\xe5\x85\xb3\xe8\x81\x94\xe5\x9b\xa2\xe9\x98\x9f|\xe5\x9b\xa2\xe9\x98\x9f\xe8\xb5\x84\xe4\xba\xa7|asset_confirm|AskUserQuestion"
-# reset 成功文案 (utf-8: "已重置" / "已恢复" / "团队资产选择")
+# Reset success message (utf-8: "已重置" / "已恢复" / "团队资产选择")
 RESET_OK_RE = rb"\xe5\xb7\xb2\xe9\x87\x8d\xe7\xbd\xae|\xe5\xb7\xb2\xe6\x81\xa2\xe5\xa4\x8d|\xe5\x9b\xa2\xe9\x98\x9f\xe8\xb5\x84\xe4\xba\xa7\xe9\x80\x89\xe6\x8b\xa9"
 
 
 def send_text(child, text, submit=True):
-    """模拟键盘输入文本 + 提交 (Ctrl+J = newline submit in CC)"""
+    """Simulate keyboard input text + submit (Ctrl+J = newline submit in CC)"""
     child.send(text)
     time.sleep(0.5)
     if submit:
-        # CC 交互式用 Enter 提交
+        # CC interactive mode submits with Enter
         child.send("\r")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cwd", default="/tmp", help="启动目录")
+    ap.add_argument("--cwd", default="/tmp", help="launch directory")
     ap.add_argument("--log", default="/tmp/cc-session-reset-smoke.log")
-    ap.add_argument("--timeout", type=int, default=60, help="每步超时秒数")
+    ap.add_argument("--timeout", type=int, default=60, help="timeout in seconds per step")
     args = ap.parse_args()
 
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
-    # 若调用方已设 CLAUDE_CONFIG_DIR 则沿用, 否则不动, 让 claude 走默认
-    # 防止 CC 自动更新检查
+    # If the caller already set CLAUDE_CONFIG_DIR, keep it; otherwise leave it alone and let claude use the default
+    # Prevent CC auto-update check
     env["CLAUDE_DISABLE_UPDATE_CHECK"] = "1"
 
     print(f"[INFO] CLAUDE_CONFIG_DIR={env.get('CLAUDE_CONFIG_DIR', '<default>')}")
@@ -113,92 +113,92 @@ def main():
             print(f"       {note}")
         print(f"{'='*60}\n")
 
-    # ── Step 0: 过"trust folder"前置提示 ──────────────────────────────────
-    # CC 首次进入一个目录会问"Is this a project you trust?"
-    # 选 "Yes, I trust this folder" (第 1 项,直接 Enter)
-    print("\n=== Step 0: 处理 trust folder 提示 (如果出现) ===")
+    # ── Step 0: get past the "trust folder" prompt ────────────────────
+    # The first time CC enters a directory it asks "Is this a project you trust?"
+    # Choose "Yes, I trust this folder" (item 1, just press Enter)
+    print("\n=== Step 0: handle the trust folder prompt (if it appears) ===")
     try:
         i = child.expect([rb"trust", FORM_RE], timeout=args.timeout)
         if i == 0:
-            # 出现 trust 提示 → Enter 选 Yes
+            # trust prompt appeared -> Enter to choose Yes
             time.sleep(1)
             child.send("\r")
-            print("  → trust 提示已过 (选 Yes)")
+            print("  -> trust prompt passed (chose Yes)")
             time.sleep(3)
-            # 继续等 form
+            # keep waiting for the form
             child.expect(FORM_RE, timeout=args.timeout)
-        # i == 1: 直接看到了 form,trust 没出现
+        # i == 1: saw the form directly, no trust prompt
     except pexpect.TIMEOUT:
-        # 可能 CC 启动慢,再等一次
+        # CC may be slow to start, wait once more
         pass
     except pexpect.EOF:
-        report("S1", "首帧弹出 asset_confirm form", False, "CC 进程退出")
+        report("S1", "asset_confirm form pops up on first frame", False, "CC process exited")
         return print_summary(results)
 
-    # ── Step 1: 等 CC 首帧弹 form ─────────────────────────────────────────
-    print("\n=== Step 1: 等 CC 首帧弹 form ===")
-    # 如果 Step 0 已经 match 到 FORM_RE,这里直接 pass;
-    # 否则再等一次(可能首条用户消息还没发出去,CC 等用户输入)
-    # CC 交互模式:用户需要先输入一条消息才会触发 proxy 请求
-    # → 发一条 "hello" 触发
+    # ── Step 1: wait for CC to pop the form on the first frame ────────────────────
+    print("\n=== Step 1: wait for CC to pop the form on the first frame ===")
+    # If Step 0 already matched FORM_RE, pass straight through here;
+    # otherwise wait once more (the first user message may not have been sent yet, CC waits for user input)
+    # CC interactive mode: the user must enter a message first to trigger a proxy request
+    # -> send a "hello" to trigger it
     send_text(child, "hello")
     try:
         child.expect(FORM_RE, timeout=args.timeout)
-        report("S1", "首帧弹出 asset_confirm form", True)
+        report("S1", "asset_confirm form pops up on first frame", True)
     except pexpect.TIMEOUT:
-        report("S1", "首帧弹出 asset_confirm form", False, "超时未见 form")
+        report("S1", "asset_confirm form pops up on first frame", False, "timed out waiting for form")
         child.terminate(force=True)
         return print_summary(results)
     except pexpect.EOF:
-        report("S1", "首帧弹出 asset_confirm form", False, "CC 进程退出")
+        report("S1", "asset_confirm form pops up on first frame", False, "CC process exited")
         return print_summary(results)
 
     time.sleep(2)
 
-    # ── Step 2: 选"否" → bypass ────────────────────────────────────────────
-    print("\n=== Step 2: 选 '否，本次不关联' → bypass ===")
-    # CC AskUserQuestion form: 第 1 项是"是", Down 到第 2 项是"否"
+    # ── Step 2: choose "No" -> bypass ────────────────────
+    print("\n=== Step 2: choose 'No, do not link this time' -> bypass ===")
+    # CC AskUserQuestion form: item 1 is "Yes", Down to item 2 is "No"
     child.send("\x1b[B")  # Down
     time.sleep(0.8)
-    child.send("\r")  # Enter 提交
-    time.sleep(3)  # 等 bypass 完成 + 模型回复
+    child.send("\r")  # Enter to submit
+    time.sleep(3)  # wait for bypass to finish + model reply
 
-    # 等模型回复完成(看到 token 计数或 > 提示符)
+    # wait for the model reply to finish (see the token count or the > prompt)
     try:
         child.expect(rb"tokens|>|\xe2\x9d\xaf", timeout=args.timeout)
-        report("S2", "bypass 选择完成, 模型回复", True)
+        report("S2", "bypass choice done, model replied", True)
     except pexpect.TIMEOUT:
-        report("S2", "bypass 选择完成, 模型回复", False, "超时")
+        report("S2", "bypass choice done, model replied", False, "timeout")
         child.terminate(force=True)
         return print_summary(results)
 
     time.sleep(2)
 
-    # ── Step 3: 发 mem:session-reset ─────────────────────────────────────────
-    print("\n=== Step 3: 发 mem:session-reset ===")
+    # ── Step 3: send mem:session-reset ────────────────────
+    print("\n=== Step 3: send mem:session-reset ===")
     send_text(child, "mem:session-reset")
 
     try:
         child.expect(RESET_OK_RE, timeout=args.timeout)
-        report("S3", "mem:session-reset 返回重置文案", True)
+        report("S3", "mem:session-reset returns the reset message", True)
     except pexpect.TIMEOUT:
-        report("S3", "mem:session-reset 返回重置文案", False, "超时未见重置文案")
+        report("S3", "mem:session-reset returns the reset message", False, "timed out waiting for the reset message")
         child.terminate(force=True)
         return print_summary(results)
 
     time.sleep(3)
 
-    # ── Step 4: 再发一条消息 → 期望弹 form ─────────────────────────────────
-    print("\n=== Step 4: 发 'hi' → 期望弹 form ===")
+    # ── Step 4: send another message -> expect the form to pop up ────────────────────
+    print("\n=== Step 4: send 'hi' -> expect the form to pop up ===")
     send_text(child, "hi")
 
     try:
         child.expect(FORM_RE, timeout=args.timeout)
-        report("S4", "reset 后弹出 asset_confirm form", True)
+        report("S4", "asset_confirm form pops up after reset", True)
     except pexpect.TIMEOUT:
-        report("S4", "reset 后弹出 asset_confirm form", False, "超时未见 form")
+        report("S4", "asset_confirm form pops up after reset", False, "timed out waiting for form")
 
-    # ── 清理 ─────────────────────────────────────────────────────────────────
+    # ── Cleanup ────────────────────
     time.sleep(1)
     child.sendcontrol("c")
     time.sleep(0.5)
@@ -214,7 +214,7 @@ def main():
 
 def print_summary(results):
     print("\n" + "=" * 70)
-    print("  SESSION-RESET E2E 汇总 (真实 CC CLI PTY)")
+    print("  SESSION-RESET E2E summary (real CC CLI PTY)")
     print("=" * 70)
     passed = sum(1 for _, _, p, _ in results if p)
     failed = sum(1 for _, _, p, _ in results if not p)

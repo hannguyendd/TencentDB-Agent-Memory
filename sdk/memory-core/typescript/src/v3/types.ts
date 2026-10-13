@@ -31,11 +31,11 @@ export interface V3MemoryClientConfig extends MemoryClientConfig {
   /** Optional task ID carried in isolation fields. */
   taskId?: string;
   /**
-   * 可选的用户 API 密钥，透传为 `x-tdai-user-key` 头。
+   * Optional user API key, forwarded as the `x-tdai-user-key` header.
    *
-   * L0–L3 数据面与 `clearChatMemory()` 都**不需要**它 —— 内核不做用户级鉴权。
-   * 保留这个可选项是为了与 `MetadataClient` 对齐：当 gateway 前面挂了会校验
-   * 用户身份的网关/面板时，可以让请求带上调用方身份。
+   * The L0-L3 data plane and `clearChatMemory()` do **not** need it -- the kernel does no user-level auth.
+   * This option is kept for parity with `MetadataClient`: when a gateway/panel that validates
+   * user identity sits in front of the gateway, requests can carry the caller identity.
    */
   userKey?: string;
 }
@@ -83,13 +83,13 @@ export interface V3ConversationSearchRequest {
 export type V3ConversationSearchData = ConversationSearchData;
 
 export interface V3ConversationDeleteRequest {
-  /** 待删除的消息 id列表，单次至多 5000 条（自动去重）。 */
+  /** Message ids to delete, at most 5000 per call (auto-deduplicated). */
   message_ids?: string[];
-  /** 待清空的会话 id 列表，单次至多 100 条（自动去重）。 */
+  /** Session ids to clear, at most 100 per call (auto-deduplicated). */
   session_ids?: string[];
   /**
-   * @deprecated 改用 `session_ids`。保留仅为兼容旧调用方，会被合并进
-   * `session_ids`。注意：删除路径**不会**回退到构造函数里的 session_id。
+   * @deprecated Use `session_ids` instead. Kept only for compatibility with old callers; it is merged into
+   * `session_ids`. Note: the delete path does **not** fall back to the session_id from the constructor.
    */
   session_id?: string;
 }
@@ -130,7 +130,7 @@ export interface V3AtomicSearchRequest {
 export type V3AtomicSearchData = AtomicSearchData;
 
 export interface V3AtomicDeleteRequest {
-  /** 待删除的 L1 笔记 id 列表，单次至多 5000 条（自动去重）。 */
+  /** L1 note ids to delete, at most 5000 per call (auto-deduplicated). */
   ids: string[];
   session_id?: string;
 }
@@ -139,30 +139,30 @@ export type V3AtomicDeleteData = AtomicDeleteData;
 // -- Chat Memory (asset-level) ---------------------------------------------
 
 export interface V3ChatMemoryClearRequest {
-  /** 待清空的 chat memory 资产 id 列表，1–100 个（自动去重）。 */
+  /** Chat memory asset ids to clear, 1-100 items (auto-deduplicated). */
   memory_ids: string[];
 }
 
-/** 单个 memory 的清空结果。 */
+/** Clear result for a single memory. */
 export interface V3ChatMemoryClearItem {
   memory_id: string;
-  /** 是否清空成功。false 时内容可能残留。 */
+  /** Whether the clear succeeded. When false, some content may remain. */
   cleared: boolean;
   l0_deleted: number;
   l1_deleted: number;
-  /** L2/L3 profile 记录数（VDB 行 + 存储文件）。 */
+  /** Number of L2/L3 profile records (VDB rows + stored files). */
   profile_deleted: number;
-  /** 失败原因；成功时不返回。 */
+  /** Failure reason; not returned on success. */
   reason?: string;
-  /**失败是否值得重试（服务端已自动重试过）。 */
+  /** Whether the failure is worth retrying (the server has already retried automatically). */
   retryable?: boolean;
-  /** 服务端实际尝试次数。 */
+  /** Actual number of attempts made by the server. */
   attempts?: number;
 }
 
 export interface V3ChatMemoryClearData {
   items: V3ChatMemoryClearItem[];
-  /** 全部成功时为 true。 */
+  /** True when all succeeded. */
   all_cleared: boolean;
 }
 

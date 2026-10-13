@@ -1,8 +1,8 @@
 /**
- * GlobalHeader — 全局顶栏（跨越侧边栏 + 内容区，最外层通栏）
+ * GlobalHeader - global top bar (spans the sidebar + content area, outermost full-width bar)
  *
- *   左侧：品牌 Logo「Memory Hub」 + 分隔线 + 团队切换器（TeamSwitcher）
- *   右侧：同步状态指示 + 语言切换 + 用户头像菜单
+ *   Left: brand Logo "Memory Hub" + divider + team switcher (TeamSwitcher)
+ *   Right: sync status indicator + language switch + user avatar menu
  */
 import { useState } from 'react';
 import {
@@ -37,7 +37,7 @@ export function GlobalHeader({
   userRole: TeamRole | null;
   currentUser: string;
   currentUserId?: string;
-  /** 当前登录所在的 memory 实例名（来自 auth.instance_name），用于「我的资料」展示 */
+  /** Name of the memory instance the current login belongs to (from auth.instance_name), shown in "My Profile" */
   instanceName?: string;
   onLogout: () => void;
 }) {
@@ -49,7 +49,7 @@ export function GlobalHeader({
 
   return (
     <header className="_memory-global-header">
-      {/* 左侧：品牌 + 团队切换器 */}
+      {/* Left: brand + team switcher */}
       <div className="_memory-global-header-left">
         <div className="_memory-global-header-brand">
           <img src="/logo.png" alt="Memory Hub" className="_memory-global-header-logo" />
@@ -58,14 +58,14 @@ export function GlobalHeader({
         <TeamSwitcher userRole={userRole} />
       </div>
 
-      {/* 右侧：同步状态 + 语言切换 + 用户菜单 */}
+      {/* Right: sync status + language switch + user menu */}
       <div className="_memory-global-header-right">
         {/* <span className="_memory-global-header-sync" title={t('header.sync.title')}>
         <span className="_memory-global-header-sync-dot" />
         {t('header.sync')}
       </span> */}
 
-        {/* 使用说明：进入独立引导页；当前在该页时展示激活态 */}
+        {/* Guide: enters the standalone guide page; shows active state while on that page */}
         <button
           type="button"
           className={`_memory-global-header-guide-btn${location.pathname === '/guide' ? ' is-active' : ''}`}
@@ -136,7 +136,7 @@ export function GlobalHeader({
 
 // =================== Profile Modal ===================
 
-/** TeamRole → 展示文案 + Tag 主题色 */
+/** TeamRole → display text + Tag theme color */
 function roleDisplay(role: TeamRole | null): { label: string; theme: 'primary' | 'default' | 'warning' } {
   if (role === 'admin') return { label: 'admin', theme: 'primary' };
   if (role === 'reviewer') return { label: 'reviewer', theme: 'warning' };
@@ -144,12 +144,12 @@ function roleDisplay(role: TeamRole | null): { label: string; theme: 'primary' |
 }
 
 /**
- * 「我的资料」弹窗：tea Avatar + Justify + Text/Tag 描述型展示。
+ * "My Profile" dialog: tea Avatar + Justify + Text/Tag descriptive display.
  *
- * 关键设计：
- *   - 头部 Avatar + 用户名 + 角色 Tag 一行展示（Justify 左右对齐）
- *   - User ID 用 InputAdornment + Copy 一行可复制，避免单独开块
- *   - 所属实例（如有）用 Card.Body 单独分组，与 User ID 区分语义
+ * Key design:
+ *   - Header Avatar + username + role Tag on one line (Justify left/right aligned)
+ *   - User ID uses InputAdornment + Copy on one line, copyable, avoiding a separate block
+ *   - Owning instance (if any) is grouped separately with Card.Body, distinguishing its semantics from User ID
  */
 function ProfileModal({
   currentUser,
@@ -171,7 +171,7 @@ function ProfileModal({
   return (
     <Modal visible size="s" onClose={onClose} caption={t('header.profile.caption')}>
       <Modal.Body>
-        {/* 头部：Avatar + 用户名 + 角色 Tag */}
+        {/* Header: Avatar + username + role Tag */}
         <Justify
           left={
             <div className="_memory-profile-identity">
@@ -196,7 +196,7 @@ function ProfileModal({
 
         <div className="_memory-profile-divider" />
 
-        {/* User ID：单独成块 + Copy，admin 给成员邀请用 */}
+        {/* User ID: its own block + Copy, for admin to use when inviting members */}
         <div className="_memory-profile-section">
           <Text theme="label" parent="div" className="_memory-profile-section-label">
             {t('header.profile.userId')}
@@ -209,7 +209,7 @@ function ProfileModal({
           </Text>
         </div>
 
-        {/* Username：明文提示，方便用户核对自己注册名 */}
+        {/* Username: plain-text hint, so users can verify their registered name */}
         <div className="_memory-profile-section">
           <Text theme="label" parent="div" className="_memory-profile-section-label">
             {t('header.profile.username')}
@@ -220,7 +220,7 @@ function ProfileModal({
           </Text>
         </div>
 
-        {/* 所属实例（可选）—— 多实例用户知道现在连的是哪个 */}
+        {/* Owning instance (optional) - lets multi-instance users know which one they are connected to now */}
         {instanceName && (
           <div className="_memory-profile-section">
             <Text theme="label" parent="div" className="_memory-profile-section-label">

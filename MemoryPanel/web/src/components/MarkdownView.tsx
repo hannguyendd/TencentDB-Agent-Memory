@@ -1,9 +1,9 @@
 /**
- * MarkdownView — 统一的 Markdown 渲染组件。
+ * MarkdownView — Unified Markdown rendering component.
  *
- * Skill 详情 / Memory 详情等页面共用同一套渲染与展示风格：
- * ReactMarkdown + remark-gfm，外壳为 Tea token 边框盒
- * （见 markdown-view.css），不使用 tailwind 语义色与内联 style。
+ * Skill Skill detail / Memory detail and other pages share the same rendering and display style:
+ * ReactMarkdown + remark-gfm, with a Tea-token bordered box as the shell
+ * (see markdown-view.css); no tailwind semantic colors or inline styles.
  */
 
 import ReactMarkdown from 'react-markdown';

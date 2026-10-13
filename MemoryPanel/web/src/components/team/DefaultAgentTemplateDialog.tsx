@@ -1,12 +1,12 @@
 /**
- * DefaultAgentTemplateDialog —— 默认 Agent 模板配置弹窗（仅全局 admin）。
+ * DefaultAgentTemplateDialog - default Agent template configuration dialog (global admin only).
  *
- * 表单字段与「创建 Agent」对齐，但只允许选择**团队公共资产**
- * （useTeamAssets 内部已按 visibility=team 过滤 skill / code_graph / wiki；
- * 模板的 asset_ids 不支持 chat_memory，故不提供记忆勾选）。
+ * Form fields align with "Create Agent", but only **team public assets** may be selected
+ * (useTeamAssets already filters skill / code_graph / wiki by visibility=team;
+ * the template's asset_ids does not support chat_memory, so no memory checkbox is offered).
  *
- * 保存走 agent/set-default-template（覆盖式写入，一次回传完整 template）。
- * 已配置时打开弹窗会用 get-default-template 的返回值预填。
+ * Saving goes through agent/set-default-template (overwrite write, sending the full template back at once).
+ * When already configured, opening the dialog prefills from the get-default-template response.
  */
 
 import { useState } from 'react';
@@ -20,7 +20,7 @@ import { getErrorMessage } from '@/lib/error-message';
 import { LightField, CollapseGroup, AssetCheckList, selectableAssetKeys } from './shared';
 import { useTeamAssets } from './useAgentAssets';
 
-/** 从模板 metadata_json（JSON 字符串）读取 ui.role_prompt / ui.rules_prompt。 */
+ /** Read ui.role_prompt / ui.rules_prompt from template metadata_json (a JSON string). */
 function readTemplatePrompts(tpl: AgentTemplateConfig): { rolePrompt: string; rulesPrompt: string } {
   let rolePrompt = '';
   let rulesPrompt = '';
@@ -30,10 +30,10 @@ function readTemplatePrompts(tpl: AgentTemplateConfig): { rolePrompt: string; ru
       rolePrompt = meta?.ui?.role_prompt ?? '';
       rulesPrompt = meta?.ui?.rules_prompt ?? '';
     } catch {
-      /* metadata_json 不合法按空处理 */
+      /* invalid metadata_json is treated as empty */
     }
   }
-  // 没有 ui 拆分时回退到整体 prompt（与 Agent 详情展示口径一致）
+  // Without a ui split, fall back to the whole prompt (consistent with the Agent detail display)
   if (!rolePrompt && tpl.prompt) rolePrompt = tpl.prompt;
   return { rolePrompt, rulesPrompt };
 }
@@ -45,7 +45,7 @@ export default function DefaultAgentTemplateDialog({
   onSaved,
 }: {
   team: { team_id: string; name: string };
-  /** 已配置的模板（用于预填表单）；null = 首次新建 */
+  /** Configured template (used to prefill the form); null = first-time creation */
   initial: AgentTemplateConfig | null;
   onClose: () => void;
   onSaved: (tpl: AgentTemplateConfig) => void;
@@ -63,7 +63,7 @@ export default function DefaultAgentTemplateDialog({
   const [llmWikis, setLlmWikis] = useState<string[]>(initial?.asset_ids?.wikis ?? []);
   const [busy, setBusy] = useState(false);
 
-  // 团队公共资产（skill / code_graph / wiki，后端 bootstrap 已按 visibility=team 过滤）
+  // Team public assets (skill / code_graph / wiki; backend bootstrap already filters by visibility=team)
   const assets = useTeamAssets(team.team_id);
 
   const canSubmit = name.trim().length > 0 && !busy;

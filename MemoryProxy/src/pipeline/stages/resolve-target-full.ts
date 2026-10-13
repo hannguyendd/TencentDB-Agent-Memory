@@ -1,16 +1,16 @@
 /**
- * stages/resolve-target-full.ts — 完整 cost-guard target 解析 stage。
+ * stages/resolve-target-full.ts — full cost-guard target resolution stage.
  *
- * 提取自 openai-chat + anthropic runner ~35 行 相同的 target 解析块:
- *   1. per-agent effectiveApiKey (agents map 优先, 缺失走 upstream.apiKey)
+ * Extracted from the identical ~35-line target resolution block in the openai-chat + anthropic runners:
+ *   1. per-agent effectiveApiKey (agents map first, falling back to upstream.apiKey if missing)
  *   2. defaultUpstreamUrl (per-agent → protocol-specific fallback → upstream.url)
- *   3. forwardEndpoint (匹配 whitelist / 兜底)
+ *   3. forwardEndpoint (matches whitelist / fallback)
  *   4. costGuardMode (markerOptIn=false → "full"; true → resolveCostGuardMode)
- *   5. resolveForwardTarget → 拿最终 ForwardTarget
+ *   5. resolveForwardTarget → get the final ForwardTarget
  *
- * 与 stages/resolve-target.ts 区别: 老那个是 raw resolveForwardTarget wrapper
- * (只做一件事); 本 stage 是"完整装配"流水线, 包含所有相关的 upstream URL /
- * apiKey / endpoint 计算 (与 runner 内 inline 完全对齐)。
+ * Difference from stages/resolve-target.ts: the old one is a raw resolveForwardTarget wrapper
+ * (does one thing only); this stage is a "full assembly" pipeline, including all related upstream URL /
+ * apiKey / endpoint computation (fully aligned with the runners' inline code).
  */
 
 import type { Context } from "hono";
@@ -43,7 +43,7 @@ export interface ResolveTargetFullResult {
   effectiveApiKey: string;
   forwardEndpoint: string;
   costGuardMode: string;
-  /** agentUpstreamEntry — 保留供 caller 判断 case (a)/(b)/(c) */
+  /** agentUpstreamEntry — kept for the caller to determine case (a)/(b)/(c) */
   hasAgentEntry: boolean;
 }
 
@@ -57,7 +57,7 @@ export async function stageResolveTargetFull(
     ? (agentUpstreamEntry.apiKey ?? "")
     : config.upstream.apiKey;
 
-  // defaultUpstreamUrl: openai 走 upstream.url; anthropic 有额外 anthropicUpstream fallback
+  // defaultUpstreamUrl: openai uses upstream.url; anthropic has an additional anthropicUpstream fallback
   const defaultUpstreamUrl = protocol === "anthropic"
     ? (agentUpstreamEntry?.url || config.costGuard.anthropicUpstream?.url || config.upstream.url)
     : (agentUpstreamEntry?.url ?? config.upstream.url);
@@ -80,8 +80,8 @@ export async function stageResolveTargetFull(
     traceId: input.traceId,
     startTime: input.startTime,
     spaceId: input.spaceId,
-    // markerOptIn=false (default/prod): 每个请求都走 router (`/cost-guard` 路径 404)
-    // markerOptIn=true (test): 只有带 marker 才启用 router; 裸路径 passthrough
+    // markerOptIn=false (default/prod): every request goes through the router (the `/cost-guard` path 404s)
+    // markerOptIn=true (test): the router is enabled only when the marker is present; bare paths passthrough
     useGuard: config.costGuard.markerOptIn ? hasCostGuardMarker(c.req.path) : true,
     agentName: agentFromPath,
     costGuardMode,

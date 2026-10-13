@@ -1,11 +1,11 @@
 /**
- * stages/identity.ts — identity 埋点 stage (Phase 4 stage 化)。
+ * stages/identity.ts — identity tracking stage (Phase 4 stage-ification).
  *
- * 提取自 openai-chat / anthropic 各一处的 inspectAndRecord 调用。
- * 老 codex/wb 缺失 (handler-audit bug B5, P1) — 后续如需修 bug 只需在
- * codex/wb runner 加同一行调用。
+ * Extracted from the inspectAndRecord calls, one each in openai-chat / anthropic.
+ * Missing in old codex/wb (handler-audit bug B5, P1) — to fix the bug later, just
+ * add the same call line in the codex/wb runner.
  *
- * 语义: fire-and-forget, 绝不阻塞业务流。
+ * Semantics: fire-and-forget, never blocks the business flow.
  */
 
 import type { Context } from "hono";
@@ -23,6 +23,6 @@ export function stageIdentity(
   try {
     inspectAndRecord("POST", c.req.path, reqHeaders, body, agentSource);
   } catch {
-    // fire-and-forget: 绝不阻塞业务
+    // fire-and-forget: never block the business flow
   }
 }

@@ -1,10 +1,10 @@
 /**
- * bearer —— PAT / token 类认证。
+ * bearer -- PAT / token style authentication.
  *
- * 用户只填一个"访问令牌"字段；basic-auth 用户名由各平台协议规定，
- * 由 provider 通过 `cloneUsername` 声明（具体取值不在本文档固化）。
+ * The user fills in a single "access token" field; the basic-auth username is dictated by each platform's protocol,
+ * and is declared by the provider via `cloneUsername` (concrete values are not fixed in this document).
  *
- * URL 形态：`https://<cloneUsername>:<secret>@host/repo.git`
+ * URL form: `https://<cloneUsername>:<secret>@host/repo.git`
  */
 
 import { injectBasicAuth } from "../clone-url.js";

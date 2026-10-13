@@ -1,8 +1,8 @@
 /**
- * 共享类型定义：`MemoryClientConfig` / `Transport`。
+ * Shared type definitions: `MemoryClientConfig` / `Transport`.
  *
- * v2 版本的 `MemoryClient` 类已移除；本 SDK 只导出 v3 API（严格 isolation）。
- * 这些 interface 保留是因为 `v3/*.ts` 里的 client 会消费它们。
+ * The v2 `MemoryClient` class has been removed; this SDK only exports the v3 API (strict isolation).
+ * These interfaces are kept because the clients in `v3/*.ts` consume them.
  */
 
 export interface MemoryClientConfig {

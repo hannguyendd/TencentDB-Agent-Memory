@@ -32,10 +32,10 @@ def _id_fields(
     user_id: Optional[str],
     task_id: Optional[str],
 ) -> Dict[str, Any]:
-    """团队记忆 4 ID 隔离字段，全部可选。
+    """Team-memory 4-ID isolation fields, all optional.
 
-    服务端 ``resolveIsolation`` 优先取 body 字段，缺失时回退 ``x-tdai-*`` header。
-    详见 docs/team-api-仅memory.yaml 中的 IdFields 组件。
+    The server's ``resolveIsolation`` prefers body fields and falls back to ``x-tdai-*`` headers when they are missing.
+    See the IdFields component in docs/team-api-仅memory.yaml.
     """
     return _strip_none({
         "team_id": team_id,
@@ -185,7 +185,7 @@ class MemoryClient:
         user_id: Optional[str] = None,
         task_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /conversation/delete`` — *message_ids* 和 *session_id* 二选一。"""
+        """``POST /conversation/delete`` — provide either *message_ids* or *session_id*."""
         return self._stub.post(
             f"{_V2}/conversation/delete",
             _strip_none({
@@ -419,21 +419,21 @@ class MemoryClient:
         prompt: Optional[str] = None,
         recent_messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """``POST /v2/offload/ingest`` — 上报工具调用对，触发 L1 异步处理。
+        """``POST /v2/offload/ingest`` — report tool-call pairs and trigger async L1 processing.
 
-        可 fire-and-forget 使用（忽略返回值）。
+        Can be used fire-and-forget (ignore the return value).
 
         Parameters
         ----------
         session_id : str
-            会话 ID。
+            Session ID.
         tool_pairs : list[dict]
-            工具调用对列表，每个元素包含 ``tool_name``、``tool_call_id``、
-            ``params``、``result``、``timestamp``，可选 ``duration_ms``。
+            List of tool-call pairs; each item contains ``tool_name``, ``tool_call_id``,
+            ``params``, ``result``, ``timestamp``, and optionally ``duration_ms``.
         prompt : str, optional
-            最新 user message，用于 L1.5 任务判断。
+            Latest user message, used for L1.5 task judgment.
         recent_messages : list[dict], optional
-            近期历史消息列表（``role`` + ``content``），辅助 L1 提取上下文。
+            Recent message history (``role`` + ``content``), helps L1 extract context.
         """
         return self._stub.post(
             f"{_V2}/offload/ingest",
@@ -455,28 +455,28 @@ class MemoryClient:
         context_window: Optional[int] = None,
         message_tokens: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
-        """``POST /v2/offload/compact`` — 对 messages 执行服务端上下文压缩。
+        """``POST /v2/offload/compact`` — run server-side context compaction on messages.
 
         Parameters
         ----------
         session_id : str
-            会话 ID。
+            Session ID.
         messages : list[dict]
-            当前完整对话消息列表。
+            Current full conversation message list.
         ratio : float
-            当前 token 使用比例（已用 / context_window），触发压缩策略判断。
+            Current token usage ratio (used / context_window), used to decide the compaction strategy.
         total_tokens : int
-            当前完整上下文的总 token 数（包含 system prompt、tool schemas 等不在
-            messages 中的隐性开销）。服务端用于计算 fixed overhead 和校准 token 估算。
+            Total token count of the full current context (including hidden overhead not in
+            messages, such as the system prompt and tool schemas). Used by the server to compute fixed overhead and calibrate token estimates.
         context_window : int, optional
-            模型 context window 大小（token 数）。
+            Model context window size (in tokens).
         message_tokens : list[int], optional
-            每条消息对应的 token 数，提供时可跳过服务端估算，提升性能。
+            Token count per message; when provided, the server can skip estimation for better performance.
 
         Returns
         -------
         dict
-            ``messages``（压缩后消息列表）+ ``report``（压缩报告）。
+            ``messages``(compacted message list) + ``report`` (compaction report).
         """
         return self._stub.post(
             f"{_V2}/offload/compact",
@@ -496,20 +496,20 @@ class MemoryClient:
         *,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """``POST /v2/offload/query-mmd`` — 查询 session 的任务流程图（MMD 文件）。
+        """``POST /v2/offload/query-mmd`` — query the session's task flow diagrams (MMD files).
 
         Parameters
         ----------
         session_id : str
-            会话 ID。
+            Session ID.
         limit : int, optional
-            最多返回几个 MMD 文件。``limit=1`` 时走快速路径只返回当前活跃 MMD。
+            Maximum number of MMD files to return. With ``limit=1`` the fast path returns only the currently active MMD.
 
         Returns
         -------
         dict
-            ``mmds``（列表，每项含 ``filename``、``content``、``version``）+
-            ``current_mmd``（当前活跃 MMD 文件名，无则为 ``None``）。
+            ``mmds``(list; each item has ``filename``, ``content``, ``version``) +
+            ``current_mmd``(filename of the currently active MMD, or ``None`` if there is none).
         """
         return self._stub.post(
             f"{_V2}/offload/query-mmd",
@@ -774,7 +774,7 @@ class AsyncMemoryClient:
         prompt: Optional[str] = None,
         recent_messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """``POST /v2/offload/ingest``（异步）"""
+        """``POST /v2/offload/ingest``(async)"""
         return await self._stub.post(
             f"{_V2}/offload/ingest",
             _strip_none({
@@ -795,7 +795,7 @@ class AsyncMemoryClient:
         context_window: Optional[int] = None,
         message_tokens: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
-        """``POST /v2/offload/compact``（异步）"""
+        """``POST /v2/offload/compact``(async)"""
         return await self._stub.post(
             f"{_V2}/offload/compact",
             _strip_none({
@@ -814,7 +814,7 @@ class AsyncMemoryClient:
         *,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """``POST /v2/offload/query-mmd``（异步）"""
+        """``POST /v2/offload/query-mmd``(async)"""
         return await self._stub.post(
             f"{_V2}/offload/query-mmd",
             _strip_none({

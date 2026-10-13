@@ -1,6 +1,6 @@
 /**
- * AgentGrid —— team 内 Agent 管理：卡片/列表视图、搜索与 Owner 筛选。
- * 权限与数据走真实后端链路。
+ * AgentGrid - Agent management within a team: card/list views, search and Owner filter.
+ * Permissions and data go through the real backend.
  */
 
 import { useCallback, useMemo, useState } from 'react';
@@ -21,8 +21,8 @@ import { Mounted } from './shared';
 const { scrollable } = Table.addons;
 
 /**
- * Agent owner 标签：可见文本显示 display_name（缓存未命中先回退 id），
- * title 保留 user_id 供排查。抽子组件是 Rules of Hooks 要求（不能在 .map 里循环调 hook）。
+ * Agent owner label: visible text shows display_name (falls back to id on cache miss),
+ * title keeps user_id for troubleshooting. Extracted as a subcomponent because Rules of Hooks forbids calling hooks in a loop inside .map.
  */
 function AgentOwnerTag({ ownerId, isMe }: { ownerId: string; isMe: boolean }) {
   const { t } = useTranslation();
@@ -59,13 +59,13 @@ export default function AgentGrid({
   activeTeam: Team;
   agents: StoreAgent[];
   agentsLoading: boolean;
-  /** agent-overview/bootstrap 计数是否仍在加载：未返回时保持骨架屏，不提前跳出加载态 */
+  /** Whether agent-overview/bootstrap counts are still loading: keep the skeleton until they return, do not leave the loading state early */
   countsLoading: boolean;
   mountedCounts: Record<string, AgentMountedCounts>;
   currentUser: string;
-  /** 保留接口兼容；admin 不再有特殊权限。 */
+  /** Kept for interface compatibility; admin no longer has special permissions. */
   isAdmin: boolean;
-  /** 是否有权限看到 team 内全部 agent（admin / team admin）。普通用户只能看到自己的，无需 Owner 筛选。 */
+  /** Whether the user may see all agents in the team (admin / team admin). Regular users only see their own, so no Owner filter is needed. */
   canSeeAllAgents: boolean;
   onCreateAgent: () => void;
   onEditAgent: (agent: StoreAgent) => void;
@@ -83,7 +83,7 @@ export default function AgentGrid({
     try {
       localStorage.setItem('agentGrid.viewMode', mode);
     } catch {
-      /* localStorage 不可用则忽略 */
+      /* ignore if localStorage is unavailable */
     }
   }, []);
 
@@ -93,7 +93,7 @@ export default function AgentGrid({
     return Array.from(new Set([...memberIds, ...agentOwnerIds]));
   }, [activeTeam.members, agents]);
 
-  // user_id → display_name 解析（筛选下拉 / tooltip 等批量场景；与 owner 标签同套缓存）
+  // user_id → display_name resolution (batch scenarios such as filter dropdown / tooltip; shares the cache with the owner label)
   const resolveUserName = useDisplayNameResolver();
 
   const filteredAgents = useMemo(() => {
@@ -110,7 +110,7 @@ export default function AgentGrid({
   }, [agents, keyword, ownerFilter]);
 
   function canEdit(agent: StoreAgent): boolean {
-    // admin 与 member 一致：只能操作自己 owner 的 agent（不再有全局 admin 特权）。
+    // admin is the same as member: can only operate agents they own (no more global admin privilege).
     return canManageAsset(
       { owner_user_id: agent.owner_user_id, team_id: agent.team_id },
       activeTeam,
@@ -213,14 +213,14 @@ export default function AgentGrid({
         />
       </Table.ActionPanel>
 
-      {/* 加载编排两段式：
-          1) 首屏 agents 还没回来 → 4 个骨架卡占位（不知道实际数量，按视觉预设 4 张）
-          2) agents 已就绪 → 立刻渲染真实卡片，counts 还在加载时只在「资产计数 chip」显示骨架占位
-            —— 不再用整网格骨架覆盖，避免「4 骨架 → 1 真实卡」的过渡突兀 */}
+      {/* Two-stage loading orchestration:
+          1) First screen, agents not back yet → 4 skeleton cards (actual count unknown, visually preset to 4)
+          2) agents ready → render real cards immediately; while counts are still loading only the "asset count chip" shows a skeleton
+            - no longer cover the whole grid with a skeleton, avoiding the abrupt "4 skeletons → 1 real card" transition */}
       {agentsLoading && agents.length === 0 ? (
         viewMode === 'card' ? (
-          // 卡片视图骨架屏：4 个占位卡 + shimmer 动画，风格与 AssetListPanel 一致；
-          // 卡片逐张错峰入场（60ms 步进，编排式加载），骨架卡不闪切
+          // Card view skeleton: 4 placeholder cards + shimmer animation, same style as AssetListPanel;
+          // cards enter one by one, staggered (60ms step, orchestrated loading), skeleton cards don't flicker
           <div className="_memory-agents-skeleton-grid" aria-label="loading">
             {[0, 1, 2, 3].map((i) => (
               <div
@@ -228,24 +228,24 @@ export default function AgentGrid({
                 className="_memory-agents-skeleton-card"
                 style={{ animationDelay: `${i * 60}ms` }}
               >
-                {/* 1. head：名称 + chevron，对齐真实 _memory-agents-card-head */}
+                {/* 1. head: name + chevron, aligned with real _memory-agents-card-head */}
                 <div className="_memory-agents-skeleton-head">
                   <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--name" />
                   <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--chevron" />
                 </div>
-                {/* 2. id：等宽小字，对齐 _memory-agents-card-id */}
+                {/* 2. id: monospace small text, aligned with _memory-agents-card-id */}
                 <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--id" />
-                {/* 3. desc：两行，对齐 _memory-agents-card-desc（min-height 40px） */}
+                {/* 3. desc: two lines, aligned with _memory-agents-card-desc (min-height 40px) */}
                 <div className="_memory-agents-skeleton-desc">
                   <div className="_memory-agents-skeleton-line" />
                   <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--desc-short" />
                 </div>
-                {/* 4. owner 行：label + pill，对齐 _memory-agents-owner-row */}
+                {/* 4. owner row: label + pill, aligned with _memory-agents-owner-row */}
                 <div className="_memory-agents-skeleton-owner">
                   <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--owner-label" />
                   <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--owner-tag" />
                 </div>
-                {/* 5. stats：2 列 4 个 mounted chip，对齐 _memory-agents-stats */}
+                {/* 5. stats: 2 columns, 4 mounted chips, aligned with _memory-agents-stats */}
                 <div className="_memory-agents-skeleton-stats">
                   {[0, 1, 2, 3].map((j) => (
                     <div key={j} className="_memory-agents-skeleton-chip">
@@ -254,7 +254,7 @@ export default function AgentGrid({
                     </div>
                   ))}
                 </div>
-                {/* 6. actions：右对齐删除按钮，对齐 _memory-agents-card-actions */}
+                {/* 6. actions: right-aligned delete button, aligned with _memory-agents-card-actions */}
                 <div className="_memory-agents-skeleton-actions">
                   <div className="_memory-agents-skeleton-line _memory-agents-skeleton-line--action" />
                 </div>
@@ -290,7 +290,7 @@ export default function AgentGrid({
                   {renderOwner(agent)}
                   {!editable && <span className="_memory-agents-readonly">{t('agentGrid.card.readonly')}</span>}
                 </div>
-                {/* 资产计数区：counts 还在加载时只把 4 个数字换成小骨架占位，主体立刻可见 */}
+                {/* Asset count area: while counts are loading only the 4 numbers become small skeleton placeholders; the body is visible immediately */}
                 {renderAssets(agent, countsLoading)}
                 <div className="_memory-agents-card-actions">
                   <Button
@@ -329,7 +329,7 @@ export default function AgentGrid({
               header: t('agentGrid.table.assets'),
               render: (agent: StoreAgent) => {
                 const counts = mountedCounts[agent.agent_id] ?? emptyMountedCounts();
-                // 列表视图同样：counts 在加载时用「—」占位，而不是整行消失
+                // List view likewise: while counts load, use "-" as placeholder instead of the whole row disappearing
                 if (countsLoading) {
                   return <span className="_memory-agents-list-assets _memory-agents-list-assets--loading">—</span>;
                 }

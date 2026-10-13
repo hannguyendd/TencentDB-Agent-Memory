@@ -1,17 +1,17 @@
 /**
- * stages/asset-capabilities.ts — session-init 后拉取 AssetCapabilityFlags 包装。
+ * stages/asset-capabilities.ts — wrapper that fetches AssetCapabilityFlags after session-init.
  *
- * 抽自 4 runner (openai-chat / anthropic / codex / workbuddy) 同构的:
+ * Extracted from the same-shaped code in the 4 runners (openai-chat / anthropic / codex / workbuddy):
  *   if (!bypassed && sessionInfo) {
  *     try { fetchAssetCapabilities(...); [log success] }
  *     catch { console.warn(...) }
  *   }
  *
- * 差异保留 (参数化):
- *   - callerUserKey 来源: openai-chat 用 apiKey, 其他 3 家用 callerUserKey
- *   - logSuccess: openai-chat / anthropic 走 [asset-capability] 成功日志,
- *     codex/wb 老代码没打 → 抽出后统一都打 (可观测性增强, 无回归风险)
- *   - warnPrefix: 各 runner 独立 (显式传参)
+ * Differences preserved (parameterized):
+ *   - callerUserKey source: openai-chat uses apiKey, the other 3 use callerUserKey
+ *   - logSuccess: openai-chat / anthropic emit the [asset-capability] success log,
+ *     codex/wb legacy code did not -> now unified to always emit (better observability, no regression risk)
+ *   - warnPrefix: independent per runner (passed explicitly)
  */
 
 import type { ProxyConfig } from "../../types.js";
@@ -22,9 +22,9 @@ export interface AssetCapabilitiesInput {
   sessionInfo: unknown;
   config: ProxyConfig;
   spaceId?: string;
-  /** TDAI ACL x-tdai-user-key; openai-chat 传 apiKey||null, 其他传 callerUserKey */
+  /** TDAI ACL x-tdai-user-key; openai-chat passes apiKey||null, the others pass callerUserKey */
   userKey: string | null | undefined;
-  /** warn 前缀 (含冒号 + 空格前, 与老日志格式一致) */
+  /** warn prefix (including the colon, before the space, consistent with the old log format) */
   warnPrefix: string;
 }
 
@@ -45,7 +45,7 @@ export async function stageAssetCapabilities(
       userKey: input.userKey ?? null,
       timeoutMs: input.config.tdai.memory.timeoutMs,
     });
-    // Round 17b: 统一打成功日志 (openai-chat/anthropic 老代码打, codex/wb 老代码不打)
+    // Round 17b: unified success logging (openai-chat/anthropic legacy code logged, codex/wb legacy code did not)
     console.log(`[asset-capability] user=${userId ?? "-"} flags=${JSON.stringify(flags)}`);
     return flags;
   } catch (err) {

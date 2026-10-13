@@ -1,15 +1,15 @@
 /**
  * Claude Code Session Init — Extractor.
  *
- * 解析用户从 `AskUserQuestion` form 的回复。
- * Claude Code 用户选择在 `role: "tool"` 消息中，格式为 JSON tool_result。
+ * Parses the user's reply from the `AskUserQuestion` form.
+ * Claude Code user selections arrive in `role: "tool"` messages as a JSON tool_result.
  *
- * 支持的回复格式：
+ * Supported reply formats:
  *   1. AskUserQuestion tool_result: `{ answers: { "q": "label" } }`
  *   2. multi_question_result envelope
- *   3. 纯文本 label（用户选择了某个选项后 CLI 返回的字符串）
+ *   3. Plain-text label (the string the CLI returns after the user picks an option)
  *
- * 不含任何 CodeBuddy XML 解析逻辑。
+ * Contains no CodeBuddy XML parsing logic.
  */
 
 import type { SessionInitData, TeamOption } from "../types.js";
@@ -17,49 +17,49 @@ import { SKIP_LABEL, MORE_LABEL, ASSET_CONFIRM_YES, ASSET_CONFIRM_NO } from "./f
 
 // ── Markers ────────────────────────────────────────────────────────────────────
 
-// SKIP_RE（`/跳过|不关联|skip/i` 自由文本正则）已于 2026-09-21 删除：它历史上
-// 作为"用户自由文本回复 → BYPASS"的兜底路径，但 team/agent/task 阶段的 CC
-// form 现在**不再提供主动跳过按钮**（唯一入口是 asset_confirm 的
-// ASSET_CONFIRM_NO），这条兜底既无正当业务场景又会误伤。删除后契约变成：
-// extractor 只识别 SKIP_LABEL 精确文本；匹配失败一律 return null → 上层
-// attemptCount ≥ maxRetries 兜底。
+// SKIP_RE (the `/跳过|不关联|skip/i` free-text regex) was removed on 2026-09-21: it historically
+// served as a fallback path for "free-text user reply -> BYPASS", but the CC
+// form for the team/agent/task stages **no longer offers an explicit skip button** (the only entry is asset_confirm's
+// ASSET_CONFIRM_NO), so this fallback had no legitimate use case and caused false positives. After removal the contract is:
+// the extractor only recognizes the exact SKIP_LABEL text; any match failure returns null -> the upper layer's
+// attemptCount >= maxRetries fallback takes over.
 export const BYPASS_MARKER = "__bypass__" as const;
 export const MORE_MARKER = "__more__" as const;
 
 /**
- * 从用户答复中提取 asset_confirm 选择。
- * 返回 true=是（关联资产），false=否（bypass），null=未识别。
+ * Extracts the asset_confirm choice from the user's reply.
+ * Returns true = yes (associate assets), false = no (bypass), null = not recognized.
  *
- * 格式兼容：
- *   1. 精准选项: "是，关联团队资产" / "否，本次不关联"
- *   2. Q&A 格式: "Your questions have been answered: \"Q?\"=\"A\"."
- *   3. "Chat about this" / 自由文本 → 降级返回 null（bypass）
+ * Format compatibility:
+ *   1. Exact option: "Yes, associate team assets" / "No, do not associate this time"
+ *   2. Q&A format: "Your questions have been answered: \"Q?\"=\"A\"."
+ *   3. "Chat about this" / free text -> degrade to null (bypass)
  */
 export function extractAssetConfirm(content: string): boolean | null {
   const answer = extractAnswerFromJson(content);
   if (!answer) return null;
 
-  // 先检查是否是拒绝/跳过/自由文本（Chat about this / declined / rejected）
-  // 增加中文"非回答"模式：用户可能直接输入了与问句无关的内容
+  // First check for rejection / skip / free text (Chat about this / declined / rejected)
+  // Chinese "non-answer" patterns added: the user may have typed something unrelated to the question
   if (/declined to answer|doesn't want to proceed|tool use was rejected|clarify these questions|declined/i.test(answer)) {
     return null;
   }
 
-  // Claude Code 返回格式可能包含完整问答上下文，如:
-  // "Your questions have been answered: \"问题？\"=\"答案\"."
-  // 提取最后一个 = 后面引号中的内容作为实际答案
+  // Claude Code's return format may include the full Q&A context, e.g.:
+  // "Your questions have been answered: \"Question?\"=\"Answer\"."
+  // Take the quoted content after the last = as the actual answer
   let answerOnly = answer;
   const eqMatch = answer.match(/="([^"]+)"[^"]*$/);
   if (eqMatch) {
     answerOnly = eqMatch[1];
   }
 
-  // 安全阀：如果提取后超过 80 字符，大概率不是纯用户答案而是包含 Q&A 全文
-  // 此时拒绝走 loose regex，避免把问题中的"是否要关联"误判为"是"
-  // （只有精准匹配 ASSET_CONFIRM_YES / ASSET_CONFIRM_NO 可以通过）
+  // Safety valve: if the extracted text exceeds 80 characters, it is most likely not a pure user answer but contains the full Q&A text.
+  // In that case skip the loose regex, to avoid misreading "whether to associate" in the question as "yes"
+  // (only an exact match on ASSET_CONFIRM_YES / ASSET_CONFIRM_NO may pass)
   const allowLoosePattern = answerOnly.length <= 80;
 
-  // 精准匹配：完整选项文本
+  // Exact match: the full option text
   if (answerOnly.includes(ASSET_CONFIRM_YES)) {
     return true;
   }
@@ -68,12 +68,12 @@ export function extractAssetConfirm(content: string): boolean | null {
   }
 
   if (allowLoosePattern) {
-    // 宽松"是"匹配：必须以"是"或"确认"开头，避免"是否"、"不是"等误匹配
-    if (/^(?:是|确认)[，,\s]/i.test(answerOnly.trim())) {
+    // Loose "yes" match: must start with "是" or "确认" (yes / confirm), avoiding false matches on "是否", "不是", etc.
+    if (/^(?:是|确认|yes|confirm)[，,\s]/i.test(answerOnly.trim())) {
       return true;
     }
-    // 宽松"否"匹配
-    if (/^(?:否|不[，,\s]|跳过|skip)/i.test(answerOnly.trim())) {
+    // Loose "no" match
+    if (/^(?:否|不[，,\s]|跳过|skip|no[，,\s])/i.test(answerOnly.trim())) {
       return false;
     }
   }
@@ -81,14 +81,14 @@ export function extractAssetConfirm(content: string): boolean | null {
   return null;
 }
 
-// ── JSON 解析 helpers ──────────────────────────────────────────────────────────
+// ── JSON parsing helpers ──────────────────────────────────────────────────────
 
 /**
- * 从 Claude Code tool_result JSON 中提取答案文本。
- * 支持格式：
- *   - `{ answers: { "q": "label" } }` (AskUserQuestion 标准)
+ * Extracts the answer text from a Claude Code tool_result JSON.
+ * Supported formats:
+ *   - `{ answers: { "q": "label" } }` (standard AskUserQuestion)
  *   - `{ type: "multi_question_result", questions: [...] }`
- *   - 纯文本字符串（用户自由输入）
+ *   - Plain-text string (free user input)
  */
 function extractAnswerFromJson(content: string): string | null {
   try {
@@ -123,10 +123,10 @@ function extractAnswerFromJson(content: string): string | null {
 
     return null;
   } catch {
-    // Not JSON — Claude Code tool_result 常常是拼串格式：
+    // Not JSON — Claude Code tool_results are often in a concatenated format:
     //   Your questions have been answered: "<question>"="<answer>".
-    // 只取 ="..." 里的 answer；这样问题文案里出现的 "跳过 / 可跳过"
-    // 等词不会污染下游 SKIP_RE 匹配（回归 session1.json Bug）。
+    // Only take the answer inside ="..."; this way words like "跳过 / 可跳过" (skip / skippable) in the question text
+    // do not pollute downstream SKIP_RE matching (regression for the session1.json bug).
     const eq = content.match(/="([^"]+)"[^"]*$/);
     if (eq) return eq[1].trim() || null;
     return content.trim() || null;
@@ -134,7 +134,7 @@ function extractAnswerFromJson(content: string): string | null {
 }
 
 /**
- * 从 JSON 中提取 agent 和 task 答案（轮2 多 question 场景）。
+ * Extracts the agent and task answers from JSON (round 2, multi-question scenario).
  */
 function extractAgentTaskFromJson(content: string): { agentText: string | null; taskText: string | null } {
   let agentText: string | null = null;
@@ -153,7 +153,7 @@ function extractAgentTaskFromJson(content: string): { agentText: string | null; 
       const answers = parsed.answers as Record<string, string>;
       for (const val of Object.values(answers)) {
         if (typeof val === "string" && val.trim()) {
-          // CC form 轮2 只有 1 个 question (agent)，第一个非空答案就是 agent
+          // The CC form's round 2 has only 1 question (agent); the first non-empty answer is the agent
           if (!agentText) agentText = val.trim();
           break;
         }
@@ -182,7 +182,7 @@ function extractAgentTaskFromJson(content: string): { agentText: string | null; 
       }
     }
   } catch {
-    // Not JSON — 兼容 Claude Code 拼串格式 `…"question"="answer".`
+    // Not JSON — compatible with Claude Code's concatenated format `…"question"="answer".`
     const raw = content.trim();
     const eq = raw.match(/="([^"]+)"[^"]*$/);
     agentText = (eq ? eq[1].trim() : raw) || null;
@@ -191,17 +191,17 @@ function extractAgentTaskFromJson(content: string): { agentText: string | null; 
   return { agentText, taskText };
 }
 
-// ── Team 匹配 ──────────────────────────────────────────────────────────────────
+// ── Team matching ──────────────────────────────────────────────────────────────
 
 /**
- * 轮1 提取：从用户答复中识别选定的 team_id。
- * Claude Code: 用户选择在 `role: "tool"` 消息中，走 JSON 解析。
+ * Round 1 extraction: identify the selected team_id from the user's reply.
+ * Claude Code: the user's selection is in a `role: "tool"` message, handled via JSON parsing.
  *
- * 返回值（对齐 extractTaskFromOptionText 三档姿势）：
- *   - team_id string：命中真实 team
- *   - MORE_MARKER：用户点了 "更多 →"，调用方翻页（team 分页 2026-09-03 新增）
- *   - BYPASS_MARKER：用户选 SKIP / declined
- *   - null：未识别
+ * Return values (aligned with the three-tier approach of extractTaskFromOptionText):
+ *   - team_id string: matched a real team
+ *   - MORE_MARKER: the user clicked "More →"; the caller pages forward (team pagination added 2026-09-03)
+ *   - BYPASS_MARKER: the user chose SKIP / declined
+ *   - null: not recognized
  */
 export function extractTeamFromOptionText(
   content: string,
@@ -209,25 +209,25 @@ export function extractTeamFromOptionText(
 ): string | typeof MORE_MARKER | typeof BYPASS_MARKER | null {
   if (cachedTeams.length === 0) return null;
 
-  // 先检查是否是拒绝/跳过（Chat about this / declined）
+  // First check for rejection / skip (Chat about this / declined)
   if (/declined to answer|doesn't want to proceed|tool use was rejected|clarify these questions/i.test(content)) {
     return null;
   }
 
   const teamText = extractAnswerFromJson(content);
 
-  // 检测"本次不关联"→ bypass（只识别 SKIP_LABEL 精确文本，SKIP_RE 自由文本
-  // 兜底已删，见文件顶部说明）
+  // Detect "do not associate this time" -> bypass (only the exact SKIP_LABEL text is recognized; the SKIP_RE free-text
+  // fallback has been removed, see the note at the top of the file)
   if (teamText && teamText.includes(SKIP_LABEL)) {
     return BYPASS_MARKER;
   }
 
-  // 检测 "更多 →" → 翻页 (与 extractFromOptionText / extractTaskFromOptionText 一致)
+  // Detect "More →" -> page forward (consistent with extractFromOptionText / extractTaskFromOptionText)
   if (teamText && teamText.includes(MORE_LABEL)) {
     return MORE_MARKER;
   }
 
-  // 匹配策略
+  // Matching strategy
   const hay = teamText ?? content;
   const trimmed = hay.trim();
 
@@ -255,7 +255,7 @@ export function extractTeamFromOptionText(
   return null;
 }
 
-// ── Agent / Task 匹配 ─────────────────────────────────────────────────────────
+// ── Agent / Task matching ─────────────────────────────────────────────────────
 
 function matchAgentInTeam(text: string, team: TeamOption): string | null {
   const trimmed = text.trim();
@@ -311,26 +311,26 @@ function matchTaskInTeam(text: string, team: TeamOption): string | undefined {
 }
 
 /**
- * task_select 阶段提取：只解析 answers 里的 label 而非 tool_result 全文。
- * 这里不再复用 extractFromOptionText 的旧路径 —— 那条路径把 tool_result 原文
- * 当 fallback 传给 matchTaskInTeam，会因问题文案（"…（可跳过）："）里包含
- * "跳过"而把用户明确选中的 task 误判成 bypass（历史 Bug）。
+ * task_select stage extraction: parse only the labels in answers, not the full tool_result text.
+ * The old path of extractFromOptionText is no longer reused here -- it passed the raw tool_result
+ * as a fallback to matchTaskInTeam, and because the question text ("...(skippable):") contains
+ * "skip" (跳过), it misjudged a task the user explicitly chose as bypass (historical bug).
  *
- * 返回值：
- *   - task_id string：命中；
- *   - MORE_MARKER：用户点了 "更多 →"，调用方翻页；
- *   - BYPASS_MARKER：declined / 空答复 / 兼容旧表单的显式跳过；
- *   - null：identify 得到答案但匹配不到 team.tasks（调用方按未识别 → bypass 处理）。
+ * Return values:
+ *   - task_id string: matched;
+ *   - MORE_MARKER: the user clicked "More →"; the caller pages forward;
+ *   - BYPASS_MARKER: declined / empty reply / explicit skip from an older form;
+ *   - null: an answer was identified but matches no team.tasks (the caller treats it as unrecognized -> bypass).
  *
- * defaultTaskId 兜底关联通过 fetchTeamsAndAgents 头部注入实现 —— 用户选"本次
- * 不关联任务" label 时走 matchTaskInTeam 命中虚拟条目、返回 defaultTaskId，无
- * 需在此单独分支。
+ * The defaultTaskId fallback association is implemented by injection at the head of fetchTeamsAndAgents -- when the user picks the "do not
+ * associate a task this time" label, matchTaskInTeam hits the virtual entry and returns defaultTaskId, so no
+ * separate branch is needed here.
  */
 export function extractTaskFromOptionText(
   content: string,
   team: import("../types.js").TeamOption | undefined,
 ): string | typeof MORE_MARKER | typeof BYPASS_MARKER | null {
-  // declined / rejected → bypass（与其它阶段一致）
+  // declined / rejected -> bypass (consistent with the other stages)
   if (/declined to answer|doesn't want to proceed|tool use was rejected|clarify these questions/i.test(content)) {
     return BYPASS_MARKER;
   }
@@ -339,12 +339,12 @@ export function extractTaskFromOptionText(
   const answer = extractAnswerFromJson(content);
   if (!answer) return BYPASS_MARKER;
 
-  // 翻页
+  // Page forward
   if (answer.includes(MORE_LABEL)) return MORE_MARKER;
 
-  // 先尝试正常匹配 —— defaultTaskId 虚拟条目的 label 是"暂时跳过"，能命中
-  // matchTaskInTeam 返回 defaultTaskId（不算 BYPASS）。SKIP_RE 自由文本兜底
-  // 已删（见文件顶部说明），未命中一律 return null，交由上层 attemptCount 兜底。
+  // Try normal matching first -- the label of the defaultTaskId virtual entry is "Skip for now", which hits
+  // matchTaskInTeam and returns defaultTaskId (not counted as BYPASS). The SKIP_RE free-text fallback
+  // has been removed (see the note at the top of the file); a miss always returns null, left to the upper layer's attemptCount fallback.
   const taskId = matchTaskInTeam(answer, team);
   if (taskId) return taskId;
 
@@ -352,15 +352,15 @@ export function extractTaskFromOptionText(
 }
 
 /**
- * 轮2 提取：从用户答复中识别 agent + task。
- * Claude Code: 走 JSON 解析。仅在已选定的 team 内匹配。
+ * Round 2 extraction: identify agent + task from the user's reply.
+ * Claude Code: handled via JSON parsing. Matches only within the already selected team.
  */
 export function extractFromOptionText(
   content: string,
   cachedTeams: TeamOption[],
   selectedTeamId?: string,
 ): SessionInitData | null {
-  // 先检查是否是拒绝/跳过（Chat about this / declined）
+  // First check for rejection / skip (Chat about this / declined)
   if (/declined to answer|doesn't want to proceed|tool use was rejected|clarify these questions/i.test(content)) {
     return null;
   }
@@ -374,13 +374,13 @@ export function extractFromOptionText(
 
   const { agentText, taskText } = extractAgentTaskFromJson(content);
 
-  // 检测 "更多 →" → 翻页
+  // Detect "More →" -> page forward
   if (agentText && agentText.includes(MORE_LABEL)) {
     return { agent_id: MORE_MARKER };
   }
 
-  // 检测 "本次不关联" → bypass（只识别 SKIP_LABEL 精确文本，SKIP_RE 自由文本
-  // 兜底已删，见文件顶部说明）
+  // Detect "do not associate this time" -> bypass (only the exact SKIP_LABEL text is recognized; the SKIP_RE free-text
+  // fallback has been removed, see the note at the top of the file)
   if (agentText && agentText.includes(SKIP_LABEL)) {
     return { agent_id: BYPASS_MARKER };
   }
@@ -391,8 +391,8 @@ export function extractFromOptionText(
   if (!agentId) agentId = matchAgentInTeam(content, team);
   if (!agentId) return null;
 
-  // Resolve task —— SKIP_RE 自由文本兜底已删（见文件顶部说明），无条件调用
-  // matchTaskInTeam；未命中即保持 taskId=undefined 走默认 task 逻辑。
+  // Resolve task -- the SKIP_RE free-text fallback has been removed (see the note at the top of the file), so
+  // matchTaskInTeam is called unconditionally; a miss leaves taskId=undefined and uses the default task logic.
   let taskId: string | undefined;
   const taskHay = taskText ?? content;
   taskId = matchTaskInTeam(taskHay, team);

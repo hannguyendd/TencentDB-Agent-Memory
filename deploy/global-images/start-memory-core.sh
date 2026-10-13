@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 单独拉起 memory-core（内核 gateway，端口 8420），首次启动自动 init-admin +
-# 把生成的 user_key 持久化到 .admin-key 供 proxy / claude-code 使用。
+# Start memory-core on its own (core gateway, port 8420); on first start, automatically run init-admin +
+# persist the generated user_key to .admin-key for use by proxy / claude-code.
 #
-# 用法：
+# Usage:
 #   ./start-memory-core.sh
 #
-# 数据持久化到 named volume（默认 tdai-memory-core-data，可在 .env 改 MEMORY_CORE_VOLUME）。
-# 重复执行会先移除旧容器再启新的，volume 数据保留 —— admin user_key 也随之保留。
+# Data is persisted to a named volume (default tdai-memory-core-data; change MEMORY_CORE_VOLUME in .env).
+# Re-running removes the old container before starting a new one; volume data is kept -- so is the admin user_key.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,44 +16,44 @@ source "$SCRIPT_DIR/_lib.sh"
 load_env
 require_vars MEMORY_CORE_IMAGE MEMORY_CORE_PORT MEMORY_CORE_VOLUME
 
-# ── Gateway 内部管理凭据 ─────────────────────────────────────────
-# 用 ${VAR-default}（不是 :-default）：允许 .env 里显式设为空字符串来关闭 Bearer gate。
+# ── Gateway internal admin credentials ─────────────────────────────────────────
+# Use ${VAR-default} (not :-default): allows .env to explicitly set an empty string to disable the Bearer gate.
 #
-# 当前 memory-core 的 Bearer gate 与 proxy auth 存在**已知不兼容**：proxy 调
-# /v3/meta/auth/verify 时不带 Bearer（源码遗漏，见 MemoryProxy/src/auth.ts），
-# 所以 proxy 启用 auth 时必须把 MEMORY_CORE_GATEWAY_API_KEY 留空。默认已置空。
+# The current memory-core Bearer gate has a **known incompatibility** with proxy auth: the proxy calls
+# /v3/meta/auth/verify without a Bearer (a source oversight, see MemoryProxy/src/auth.ts),
+# so MEMORY_CORE_GATEWAY_API_KEY must be left empty when the proxy enables auth. It is empty by default.
 MEMORY_CORE_GATEWAY_API_KEY="${MEMORY_CORE_GATEWAY_API_KEY-}"
 MEMORY_CORE_ADMIN_USERNAME="${MEMORY_CORE_ADMIN_USERNAME:-admin}"
 
-# admin user_key 持久化位置（宿主机侧；volume 数据被清后需一并删掉此文件）
+# Where the admin user_key is persisted (host side; delete this file along with the volume data when it is cleared)
 ADMIN_KEY_FILE="${MEMORY_CORE_ADMIN_KEY_FILE:-$SCRIPT_DIR/.admin-key}"
 
 if [[ -n "$MEMORY_CORE_GATEWAY_API_KEY" ]]; then
-  warn "MEMORY_CORE_GATEWAY_API_KEY 非空 —— proxy 的 sessionInit/auth 目前会因缺 Bearer 而失败。"
-  warn "本地体验请把 .env 里的 MEMORY_CORE_GATEWAY_API_KEY 留空。"
+  warn "MEMORY_CORE_GATEWAY_API_KEY is non-empty -- proxy sessionInit/auth currently fails because of the missing Bearer."
+  warn "For a local experience, leave MEMORY_CORE_GATEWAY_API_KEY empty in .env."
 fi
 
 CONTAINER=tdai-memory-core
 NETWORK=tdai-memory-stack
 
-# 创建共享网络（幂等）
+# Create the shared network (idempotent)
 if ! $DOCKER network inspect "$NETWORK" >/dev/null 2>&1; then
-  info "创建 docker 网络 $NETWORK"
+  info "Creating docker network $NETWORK"
   $DOCKER network create "$NETWORK" >/dev/null
 fi
 
-# ── 存储后端：sqlite（默认）/ mongodb ─────────────────────────────────────
-# MEMORY_CORE_STORE_MODE=mongodb 时数据面走 MongoDB（L0/L1/profile/skill +
-# mongot 原生 BM25）。要求目标 Mongo 7.0+ 且带 mongot —— core 首次建连会拨测，
-# 无 mongot 直接 init 报错（FTS 是刚需，不静默降级）。
-#   MONGODB_ENDPOINT 已设   → 用外部 Mongo（Atlas 或自建带 mongot 的副本集）
-#   MONGODB_ENDPOINT 未设   → 自动在同网络起一个 mongodb-atlas-local 容器
-#                             （mongod + mongot 一体，数据卷 mongo-local-* 持久化）
+# ── Storage backend: sqlite (default) / mongodb ─────────────────────────────────────
+# When MEMORY_CORE_STORE_MODE=mongodb the data plane uses MongoDB (L0/L1/profile/skill +
+# mongot native BM25). The target Mongo must be 7.0+ with mongot -- core probes on first connect,
+# and init fails outright without mongot (FTS is mandatory, no silent degradation).
+#   MONGODB_ENDPOINT set     → use external Mongo (Atlas or a self-hosted replica set with mongot)
+#   MONGODB_ENDPOINT unset   → automatically start a mongodb-atlas-local container on the same network
+#                             (mongod + mongot combined, data persisted in mongo-local-* volumes)
 #
-# 元数据后端（meta_* 团队/用户/agent/task/ACL）：
-#   MEMORY_CORE_METADATA_BACKEND=auto（默认，跟随 STORE_MODE）/ sqlite / mongodb
-#   mongodb 时默认复用同一个 Mongo（TDAI_METADATA_MONGO_URI 可另行覆盖）；
-#   元数据用多文档事务，目标必须是副本集（atlas-local 单节点 RS 满足）。
+# Metadata backend (meta_* team/user/agent/task/ACL):
+#   MEMORY_CORE_METADATA_BACKEND=auto(default, follows STORE_MODE)/ sqlite / mongodb
+#   with mongodb, the same Mongo is reused by default (TDAI_METADATA_MONGO_URI can override);
+#   metadata uses multi-document transactions, so the target must be a replica set (atlas-local single-node RS qualifies).
 MEMORY_CORE_STORE_MODE="${MEMORY_CORE_STORE_MODE:-sqlite}"
 MEMORY_CORE_METADATA_BACKEND="${MEMORY_CORE_METADATA_BACKEND:-auto}"
 MONGODB_DATABASE="${MONGODB_DATABASE:-tdai_memory}"
@@ -71,12 +71,12 @@ fi
 
 if [[ "$MEMORY_CORE_STORE_MODE" == "mongodb" || "$MEMORY_CORE_METADATA_BACKEND" == "mongodb" ]]; then
   if [[ -z "${MONGODB_ENDPOINT:-}" ]]; then
-    info "未设 MONGODB_ENDPOINT → 启动本地 atlas-local（$MONGO_LOCAL_IMAGE）"
+    info "MONGODB_ENDPOINT not set → starting local atlas-local ($MONGO_LOCAL_IMAGE)"
     if ! $DOCKER ps --format '{{.Names}}' 2>/dev/null | grep -qx "$MONGO_LOCAL_CONTAINER"; then
       rm_container_if_exists "$MONGO_LOCAL_CONTAINER"
-      # --hostname 必须固定：atlas-local 用容器主机名初始化单节点 RS 成员。
-      # 不固定时容器重建 → 主机名变化 → RS 配置里的旧成员名失配 → 永远无 primary
-      # （not primary / ReplicaSetNoPrimary），只能清卷重来。
+      # --hostname must be fixed: atlas-local uses the container hostname to initialize the single-node RS member.
+      # If not fixed, recreating the container → hostname changes → the old member name in the RS config mismatches → no primary ever
+      # (not primary / ReplicaSetNoPrimary), and the only fix is to wipe the volume and start over.
       $DOCKER run -d --name "$MONGO_LOCAL_CONTAINER" \
         --hostname mongo-search \
         --network "$NETWORK" \
@@ -86,50 +86,50 @@ if [[ "$MEMORY_CORE_STORE_MODE" == "mongodb" || "$MEMORY_CORE_METADATA_BACKEND" 
         -v mongo-local-mongot:/data/mongot \
         "$MONGO_LOCAL_IMAGE" >/dev/null
     fi
-    info "等待 mongo 就绪..."
+    info "Waiting for mongo to be ready..."
     mongo_ready=0
     for _ in $(seq 1 30); do
-      # ping 在 RS 无 primary 时也会成功 —— 必须等到 isWritablePrimary，
-      # 否则 core 会在 RS 选举完成前启动，启动期 ensureIndex/事务全部报错。
+      # ping also succeeds when the RS has no primary -- we must wait for isWritablePrimary,
+      # otherwise core starts before the RS election completes and all startup ensureIndex/transactions fail.
       if $DOCKER exec "$MONGO_LOCAL_CONTAINER" mongosh --quiet --eval \
           'if (db.adminCommand("hello").isWritablePrimary === true) quit(0); else quit(1)' >/dev/null 2>&1; then
         mongo_ready=1; break
       fi
       sleep 2
     done
-    [[ "$mongo_ready" == "1" ]] || die "mongo 容器 60s 内未就绪，docker logs $MONGO_LOCAL_CONTAINER 排查"
-    ok "mongo 就绪（容器 $MONGO_LOCAL_CONTAINER，网络内别名 mongo-search）"
+    [[ "$mongo_ready" == "1" ]] || die "mongo container not ready within 60s; check docker logs $MONGO_LOCAL_CONTAINER"
+    ok "mongo ready (container $MONGO_LOCAL_CONTAINER, in-network alias mongo-search)"
     MONGODB_ENDPOINT="mongodb://mongo-search:27017/?directConnection=true"
   fi
 fi
 
 if [[ "$MEMORY_CORE_STORE_MODE" == "mongodb" ]]; then
   MONGO_ENV_ARGS+=( -e "MONGODB_ENDPOINT=$MONGODB_ENDPOINT" -e "MONGODB_DATABASE=$MONGODB_DATABASE" )
-  info "memory-core 数据面后端 = mongodb（endpoint=$MONGODB_ENDPOINT, db=$MONGODB_DATABASE）"
+  info "memory-core data plane backend = mongodb（endpoint=$MONGODB_ENDPOINT, db=$MONGODB_DATABASE）"
 fi
 
 if [[ "$MEMORY_CORE_METADATA_BACKEND" == "mongodb" ]]; then
-  # 元数据默认与数据面共用同一 Mongo 实例（不同库：{prefix}_{instance_id}，默认前缀 tdai_metadata）。
-  # 注意：元数据 client 自建、不经共享连接池，且不继承数据面的 w:1（事务持久性依赖服务端默认 majority）。
+  # Metadata shares the same Mongo instance as the data plane by default (different databases: {prefix}_{instance_id}, default prefix tdai_metadata).
+  # Note: the metadata client is self-built, bypasses the shared connection pool, and does not inherit the data plane's w:1 (transaction durability relies on the server default majority).
   TDAI_METADATA_MONGO_URI="${TDAI_METADATA_MONGO_URI:-$MONGODB_ENDPOINT}"
   MONGO_ENV_ARGS+=( -e "TDAI_METADATA_MONGO_URI=$TDAI_METADATA_MONGO_URI" )
-  info "memory-core 元数据后端 = mongodb（uri=$TDAI_METADATA_MONGO_URI, 库名 tdai_metadata_<instance>）"
+  info "memory-core metadata backend = mongodb (uri=$TDAI_METADATA_MONGO_URI, database name tdai_metadata_<instance>)"
 else
-  info "memory-core 元数据后端 = sqlite（容器 volume 内）"
+  info "memory-core metadata backend = sqlite (inside the container volume)"
 fi
 
 pull_image "$MEMORY_CORE_IMAGE"
 rm_container_if_exists "$CONTAINER"
 
-# ── 生成 gateway config.yaml，挂到容器 /data/config/tdai-gateway.yaml ──
-# 默认镜像里没 config，memory-core 走编译时的默认（skill / knowledge 模块关闭）。
-# 从 .env 里的 MEMORY_LLM_* 生成一份 standalone+skill 的最小配置。
+# ── Generate gateway config.yaml and mount it at /data/config/tdai-gateway.yaml in the container ──
+# The default image has no config; memory-core uses its compile-time defaults (skill / knowledge modules off).
+# Generate a minimal standalone+skill config from MEMORY_LLM_* in .env.
 CORE_CONFIG_DIR="${MEMORY_CORE_CONFIG_DIR:-$SCRIPT_DIR/.memory-core-config}"
 mkdir -p "$CORE_CONFIG_DIR"
 CORE_CONFIG_FILE="$CORE_CONFIG_DIR/tdai-gateway.yaml"
-info "生成 gateway config → $CORE_CONFIG_FILE"
+info "Generating gateway config → $CORE_CONFIG_FILE"
 cat > "$CORE_CONFIG_FILE" <<YAML
-# 由 start-memory-core.sh 自动生成 —— 每次启动覆盖，请不要手动改。
+# Auto-generated by start-memory-core.sh -- overwritten on every start, do not edit by hand.
 deployMode: standalone
 stateBackend: local
 
@@ -148,10 +148,10 @@ llm:
   timeoutMs: 300000
 
 memory:
-  # promptMode: code（默认，代码工程场景，抽取项目事实/任务/决策/SOP/禁忌等团队共享记忆）
-  #           | chat（通用聊天/教学场景，抽取 persona/episodic/instruction 个人记忆）
-  # 通过 .env 里 MEMORY_PROMPT_MODE 覆盖。
-  # 注意：code 模式下，纯闲聊对话可能抽出 0 条记忆（LLM 认为没有可沉淀的工程内容）。
+  # promptMode: code(default, for code engineering scenarios; extracts team-shared memory such as project facts/tasks/decisions/SOPs/taboos)
+  #           | chat(for general chat/teaching scenarios; extracts personal memory such as persona/episodic/instruction)
+  # Override via MEMORY_PROMPT_MODE in .env.
+  # Note: in code mode, pure casual conversation may yield 0 memories (the LLM sees no engineering content worth retaining).
   promptMode: ${MEMORY_PROMPT_MODE:-code}
   capture: { enabled: true }
   extraction:
@@ -174,13 +174,13 @@ memory:
     scoreThreshold: 0.3
     strategy: hybrid
     timeoutMs: 5000
-  # gateway 形态下存储后端实际由 STORE_MODE 环境变量决定（见 docker run -e STORE_MODE），
-  # 此处保持同值仅为可读性；插件/SDK 形态才读这个字段。
+  # In gateway form the storage backend is actually determined by the STORE_MODE environment variable (see docker run -e STORE_MODE);
+  # the same value is kept here only for readability; only plugin/SDK forms read this field.
   storeBackend: ${MEMORY_CORE_STORE_MODE}
   embedding:
     provider: none
 
-# ── Skill 模块 ──
+# ── Skill module ──
 skill:
   enabled: true
   routing:
@@ -200,7 +200,7 @@ skill:
     maxResourceSizeBytes: 5000000
 YAML
 
-info "启动 memory-core (image=$MEMORY_CORE_IMAGE, port=$MEMORY_CORE_PORT)"
+info "Starting memory-core (image=$MEMORY_CORE_IMAGE, port=$MEMORY_CORE_PORT)"
 $DOCKER run -d --name "$CONTAINER" \
   --network "$NETWORK" \
   --network-alias memory-core \
@@ -216,26 +216,26 @@ $DOCKER run -d --name "$CONTAINER" \
   "$MEMORY_CORE_IMAGE" >/dev/null
 
 wait_healthy "$CONTAINER" 90
-ok "memory-core 已启动 → http://localhost:${MEMORY_CORE_PORT}/"
+ok "memory-core started → http://localhost:${MEMORY_CORE_PORT}/"
 
-# ── Admin user 生命周期 ─────────────────────────────────────────
-# 首次启动：init-admin 时**传入我们生成的随机 user_key**，返回体里读回来存文件。
-# 重启且已初始化（409）：优先读 .admin-key；若 volume 是新造的但 .admin-key 是
-#   旧的，无法恢复（volume/key 必须同步；提示用户清理）。
+# ── Admin user lifecycle ─────────────────────────────────────────
+# First start: pass **our generated random user_key** to init-admin, read it back from the response body and save it to a file.
+# Restart when already initialized (409): read .admin-key first; if the volume is newly created but .admin-key is
+#   stale, it cannot be recovered (volume/key must stay in sync; prompt the user to clean up).
 #
-# init-admin 接口尊重传入的 user_key（见 MemoryCore/src/metadata/store/sqlite-adapter.ts
-# defaultKeyValue = input.default_key_value ?? generateUserKey()）；只要 volume 空、
-# 我们传固定 key，就能拿到自己指定的 key。首次启动时脚本生成一把 32 字节随机
-# base32url —— 每台机器/每次 purge 都是独立 key，不会撞车。
+# The init-admin endpoint honors the passed-in user_key (see MemoryCore/src/metadata/store/sqlite-adapter.ts
+# defaultKeyValue = input.default_key_value ?? generateUserKey()); as long as the volume is empty
+# and we pass a fixed key, we get the key we specified. On first start the script generates a 32-byte random
+# base32url -- every machine / every purge gets an independent key, so there are no collisions.
 
 generate_user_key() {
-  # sk-mem-<32 chars A-Za-z0-9>，与 metadata/utils/user-key.ts 的格式一致
-  # 用 openssl（可移植；tr 过滤 base64 里的 +/= 到 32 位）
+  # sk-mem-<32 chars A-Za-z0-9>, consistent with the format in metadata/utils/user-key.ts
+  # Use openssl (portable; tr filters +/= out of base64 down to 32 chars)
   local raw
   if command -v openssl >/dev/null 2>&1; then
     raw=$(openssl rand -base64 48 | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 32)
   else
-    # 兜底：读足够多的 urandom 保证过滤后 >=32
+    # Fallback: read enough urandom to guarantee >=32 after filtering
     raw=$(head -c 256 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c 32)
   fi
   echo "sk-mem-${raw}"
@@ -253,12 +253,12 @@ verify_user_key() {
   [[ "$code" == "200" ]]
 }
 
-info "初始化 admin user（username=${MEMORY_CORE_ADMIN_USERNAME}, key 持久化 → ${ADMIN_KEY_FILE}）..."
+info "Initializing admin user (username=${MEMORY_CORE_ADMIN_USERNAME}, key persisted → ${ADMIN_KEY_FILE})..."
 
-# 生成随机 key（首次 init-admin 用；若之前有 file 就复用）
+# Generate a random key (used for the first init-admin; reuse the file if one exists)
 if [[ -s "$ADMIN_KEY_FILE" ]]; then
   ADMIN_KEY=$(cat "$ADMIN_KEY_FILE")
-  info "  复用已保存的 admin key（.admin-key 已存在）"
+  info "  Reusing saved admin key (.admin-key already exists)"
 else
   ADMIN_KEY=$(generate_user_key)
 fi
@@ -274,37 +274,37 @@ init_resp=$(/usr/bin/curl -sS -o /tmp/init-admin.$$ -w "%{http_code}" \
 
 case "$init_resp" in
   200)
-    ok "admin user 已创建"
-    # 落盘 key（把宿主机 file 的权限收紧）
+    ok "admin user created"
+    # Write the key to disk (tighten the permissions of the host file)
     umask 077
     echo -n "$ADMIN_KEY" > "$ADMIN_KEY_FILE"
-    ok "  admin user_key 已保存到 $ADMIN_KEY_FILE"
+    ok "  admin user_key saved to $ADMIN_KEY_FILE"
     ;;
   409)
     if [[ -s "$ADMIN_KEY_FILE" ]]; then
-      ok "admin user 已存在（跳过 init-admin，用 $ADMIN_KEY_FILE 里的 key）"
+      ok "admin user already exists (skipping init-admin, using the key in $ADMIN_KEY_FILE)"
     else
-      warn "admin user 已存在，但 $ADMIN_KEY_FILE 缺失，无法恢复 user_key。"
-      warn "选项 A: 清理 volume 重建 —— ./stop-all.sh --purge && ./start-memory-core.sh"
-      warn "选项 B: 手动创建新 admin user_key（需要旧 key 或 gateway apiKey）"
+      warn "admin user already exists, but $ADMIN_KEY_FILE is missing, so user_key cannot be recovered."
+      warn "Option A: purge the volume and rebuild -- ./stop-all.sh --purge && ./start-memory-core.sh"
+      warn "Option B: manually create a new admin user_key (requires the old key or the gateway apiKey)"
     fi
     ;;
   *)
-    warn "init-admin 返回 HTTP=${init_resp}，可能需要手动排查："
+    warn "init-admin returned HTTP=${init_resp}; manual investigation may be needed:"
     cat /tmp/init-admin.$$ 2>/dev/null; echo
     ;;
 esac
 rm -f /tmp/init-admin.$$
 
-# ── 校验 admin key 可用 ─────────────────────────────────────────
+# ── Verify the admin key works ─────────────────────────────────────────
 if [[ -s "$ADMIN_KEY_FILE" ]]; then
   ADMIN_KEY=$(cat "$ADMIN_KEY_FILE")
   if verify_user_key "$ADMIN_KEY"; then
-    # 只在末尾做脱敏输出：整串路径 masked，让终端历史里不留全值
+    # Only print a masked value at the end: the whole string is masked so the terminal history does not keep the full value
     masked="${ADMIN_KEY:0:11}****${ADMIN_KEY: -4}"
-    ok "admin user_key 校验通过（auth/verify 200）—— $masked"
+    ok "admin user_key verified (auth/verify 200) -- $masked"
     ok "  key file: $ADMIN_KEY_FILE"
   else
-    warn "admin user_key 校验失败（auth/verify 非 200）。检查 $ADMIN_KEY_FILE 与 volume 是否匹配。"
+    warn "admin user_key verification failed (auth/verify not 200). Check whether $ADMIN_KEY_FILE matches the volume."
   fi
 fi

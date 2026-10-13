@@ -1,12 +1,12 @@
 /**
- * DefaultAgentTemplateSection —— 「默认 Agent 模板」管理区（仅全局 admin 可见）。
+ * DefaultAgentTemplateSection - "Default Agent template" management area (visible to global admin only).
  *
- * 放置于 Agents 页面的 AgentGrid 上方：
- *   - 未配置：展示「新建默认 Agent」入口；
- *   - 已配置：展示当前模板摘要 + 「修改配置」入口。
+ * Placed above AgentGrid on the Agents page:
+ *   - Not configured: shows the "Create default Agent" entry;
+ *   - Configured: shows the current template summary + the "Edit configuration" entry.
  *
- * 数据源：agent/get-default-template（无权限校验）；写操作 agent/set-default-template
- * 仅 system_admin 可调用，因此本组件只在 isAdmin=true 时渲染。
+ * Data source: agent/get-default-template (no permission check); the write op agent/set-default-template
+ * can only be called by system_admin, so this component renders only when isAdmin=true.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -35,7 +35,7 @@ export default function DefaultAgentTemplateSection({
     setLoading(true);
     try {
       const data = await agentsApi.getDefaultTemplate(teamId);
-      // 未配置时后端返回 {}；以 name 是否存在判断是否已配置
+      // When not configured the backend returns {}; configured is determined by whether name exists
       setTemplate(data && data.name ? data : null);
     } catch (err) {
       tea.notify.error(getErrorMessage(err));

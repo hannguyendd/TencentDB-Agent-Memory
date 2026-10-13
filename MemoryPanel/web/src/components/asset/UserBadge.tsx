@@ -1,10 +1,10 @@
 /**
- * UserBadge —— 通用「用户徽章」组件。
+ * UserBadge —— Generic "user badge" component.
  *
- * 此前 Skills（SkillOwnerTag）与 Memory（UploaderBadge）各自实现了相同的
- * 「AssetBadge + UserIcon + displayName 展示 + 当前用户追加“你”标记」结构。
- * 这里统一收口；displayName 通过 useUserDisplayName 全局缓存获取，title /
- * youText / getTitle 由调用方注入以兼容各页 i18n。
+ * Previously Skills (SkillOwnerTag) and Memory (UploaderBadge) each implemented the same
+ * "AssetBadge + UserIcon + displayName display + append a "You" marker for the current user" structure.
+ * This consolidates them; displayName comes from the useUserDisplayName global cache, and title /title /
+ * youText / getTitle are injected by the caller to stay compatible with each page's i18n.
  */
 import { UserIcon } from 'tea-icons-react';
 import { useUserDisplayName } from '@/services/user-profile-store';
@@ -18,13 +18,13 @@ export function UserBadge({
   getTitle,
 }: {
   userId: string;
-  /** 是否为当前用户（决定是否追加“你”标记） */
+  /** Whether this is the current user (decides whether to append the "You" marker) */
   isCurrentUser: boolean;
-  /** hover 提示文本；默认 userId。若需基于 displayName 拼装（如 skills），用 getTitle */
+  /** hover tooltip text; defaults to userId. If it must be built from displayName (e.g. skills), use getTitle getTitle */
   title?: string;
-  /** “你”标记文案 */
+  /** "You" marker text */
   youText: string;
-  /** 基于 displayName 生成 hover 提示的回调（优先于 title） */
+  /** Callback that generates the hover tooltip from displayName (takes precedence over title) */
   getTitle?: (displayName: string) => string;
 }) {
   const displayName = useUserDisplayName(userId);

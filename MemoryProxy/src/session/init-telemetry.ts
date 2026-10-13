@@ -1,43 +1,43 @@
 /**
- * Session-init 埋点装饰器（内部使用埋点 §7.2 Chunk 2 A/B）。
+ * Session-init telemetry decorator (internal telemetry §7.2 Chunk 2 A/B).
  *
- * 设计：不改 handleSessionInit 内部 30+ 个 `store.set(status:"initialized")` 点位，
- *      而是在**顶层入口的前后各读一次 state**，只在
- *      `prev !== "initialized" && after === "initialized"` 时发一条埋点。
+ * Design: do not touch the 30+ `store.set(status:"initialized")` sites inside handleSessionInit;
+ *      instead read the state once before and once after the **top-level entry**, and emit one telemetry entry only when
+ *      `prev !== "initialized" && after === "initialized"`.
  *
- * 硬约束（§7.-1）：
- *   - 同步返回 void，永远不抛
- *   - sink 内部异常静默吞掉
- *   - 无 state / 状态未变 / pending → pending 场景 no-op
+ * Hard constraints (§7.-1):
+ *   - Returns void synchronously, never throws
+ *   - Exceptions inside the sink are silently swallowed
+ *   - No state / state unchanged / pending → pending scenarios are no-ops
  */
 import type { SessionInitStatus } from "./types.js";
 import type { SessionStore } from "./store.js";
 import { writeSessionInitRow, type SessionInitLogInput } from "../clickhouse.js";
 
-/** 埋点装饰器输入。sink 默认为真实的 writeSessionInitRow，可注入用于测试。 */
+/** Telemetry decorator input. The sink defaults to the real writeSessionInitRow and can be injected for testing. */
 export interface EmitSessionInitTelemetryArgs {
   store: SessionStore;
   compositeKey: string;
-  /** handleSessionInit 进入时的 store.get(...)?.status（如 undefined 传 "uninitialized"） */
+  /** store.get(...)?.status at handleSessionInit entry (pass "uninitialized" if undefined) */
   prevStatus: SessionInitStatus;
   /** "claude-code" | "codebuddy" */
   agentSource: string;
-  /** 走 bypass 分支时从 log 抓的原文首句（可选） */
+  /** First sentence of the original text captured from the log when taking the bypass branch (optional) */
   bypassReason?: string;
-  /** 测试注入点；默认调用 clickhouse.writeSessionInitRow */
+  /** Test injection point; defaults to clickhouse.writeSessionInitRow */
   sink?: (input: SessionInitLogInput) => void;
 }
 
 /**
- * 若状态刚从非 initialized 迁移到 initialized，发一条 session_init 埋点。
- * 其他情况全部 no-op。
+ * If the state just moved from non-initialized to initialized, emit one session_init telemetry entry.
+ * All other cases are no-ops.
  */
 export function emitSessionInitTelemetryIfCompleted(args: EmitSessionInitTelemetryArgs): void {
   try {
     if (args.prevStatus === "initialized") return; // steady state, nothing to emit
     const state = args.store.get(args.compositeKey);
-    if (!state) return; // 未 set 过 → 例如 sessionKey=unknown
-    if (state.status !== "initialized") return; // 中途 pending → 未完成
+    if (!state) return; // never set → e.g. sessionKey=unknown
+    if (state.status !== "initialized") return; // still pending midway → not completed
 
     const info = state.sessionInfo;
     const input: SessionInitLogInput = {
@@ -56,9 +56,9 @@ export function emitSessionInitTelemetryIfCompleted(args: EmitSessionInitTelemet
     try {
       sink(input);
     } catch {
-      // sink 抛异常 → 装饰器静默；埋点绝不阻塞业务
+      // sink threw → decorator stays silent; telemetry never blocks business logic
     }
   } catch {
-    // 装饰器自身也不允许 throw
+    // The decorator itself must not throw either
   }
 }

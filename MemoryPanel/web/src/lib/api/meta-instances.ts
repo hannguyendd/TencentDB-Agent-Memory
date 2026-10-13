@@ -1,16 +1,16 @@
 /**
- * api/meta-instances.ts — 登录前选实例（GET /api/v1/meta/instances）。
+ * api/meta-instances.ts - choose an instance before login (GET /api/v1/meta/instances).
  */
 import { request, dedupeInFlight } from './base';
 
 /**
- * 客户端可见的实例元信息。
- *   - `api_key`（真 secret）不下发。
- *   - `gateway_endpoint` 是后端 → 内核的转发地址，也是"客户端接入 baseUrl"。
- *     不属于 secret；每个实例独立，前端不能硬编码。
- *   - `proxy_endpoint` 可选。本地部署时 core 和 proxy 分开，客户端要接的是
- *     proxy，需要显式配置这个字段。仅前端 UI "客户端接入地址" 卡片使用；后端
- *     转发始终走 `gateway_endpoint`，不受它影响。
+ * Instance metadata visible to the client.
+ *   - `api_key` (the real secret) is not sent down.
+ *   - `gateway_endpoint` is the forwarding address from backend → kernel, and also the "client access baseUrl".
+ *     It is not a secret; each instance has its own, and the frontend must not hardcode it.
+ *   - `proxy_endpoint` is optional. In local deployments core and proxy are separate, and the client must connect to
+ *     the proxy, so this field must be configured explicitly. Used only by the frontend UI "Client access address" card; the backend
+ *     forwarding always goes through `gateway_endpoint` and is not affected by it.
  */
 export interface MetadataInstance {
   instance_id: string;
@@ -19,26 +19,26 @@ export interface MetadataInstance {
   proxy_endpoint?: string;
 }
 
-/** 面板级能力开关（随实例列表顺带下发，用于菜单/路由可见性控制）。 */
+/** Panel-level capability switches (delivered along with the instance list, used to control menu/route visibility). */
 export interface PanelCapabilities {
-  /** 「可观测」入口是否开放（面板 env PANEL_FEATURE_ANALYTICS_ENABLED，默认关）。 */
+  /** Whether the "Observability" entry is open (panel env PANEL_FEATURE_ANALYTICS_ENABLED, off by default). */
   analyticsEnabled: boolean;
 }
 
-/** 老版本 Panel 未下发 capabilities 时的兜底值（保守：不展示入口）。 */
+/** Fallback value when an older Panel does not deliver capabilities (conservative: do not show the entry). */
 const DEFAULT_CAPABILITIES: PanelCapabilities = { analyticsEnabled: false };
 
 export const metaInstancesApi = {
-  /** 登录前选实例；GET /api/v1/meta/instances，公开、无需鉴权、无分页 */
+  /** Choose an instance before login; GET /api/v1/meta/instances, public, no auth needed, no pagination */
   list: () =>
     dedupeInFlight('meta/instances', () =>
       request<{ instances: MetadataInstance[] }>('GET', '/api/v1/meta/instances').then((r) => r.instances),
     ),
 
   /**
-   * 面板能力开关。与 list() 同一去重 key：并发时共享同一次网络请求，
-   * 各自从响应中提取所需字段（list 取 instances、本函数取 capabilities）。
-   * 老版本 Panel 响应中没有该字段 → 按关闭兜底。
+   * Panel capability switches. Same dedupe key as list(): when concurrent they share one network request,
+   * each extracting the fields it needs from the response (list takes instances, this function takes capabilities).
+   * An older Panel response has no such field → treated as off.
    */
   capabilities: () =>
     dedupeInFlight('meta/instances', () =>

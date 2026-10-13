@@ -1,20 +1,20 @@
 /**
- * Direct passthrough runner — 完整实现 (Phase 4)。
+ * Direct passthrough runner — full implementation (Phase 4).
  *
- * 迁移自 directHandler.ts::handleDirectPassthrough (756 行)。
- * 与老实现语义 1:1 等价, 但改由 pipeline runner 承载:
- *   - stripDirectPrefix / buildDirectUpstreamUrl / detectProtocol 复用老 helper
- *   - buildDirectRequestHeaders → 走 pipeline SKIP_REQUEST_HEADERS_HOP_BY_HOP
- *     (Phase 0.4 addendum §2.4 记录的 latent leak 一并修:
- *      HOP_BY_HOP 版本改用 WITH_INTERNAL 版本, 防客户端主动带 x-tdai-user-key 透传)
- *   - flatten + obs / stream tap / non-stream parse 全部内联 (与老代码逐段对齐)
+ * Migrated from directHandler.ts::handleDirectPassthrough (756 lines).
+ * Semantically 1:1 equivalent to the old implementation, but now hosted by the pipeline runner:
+ *   - stripDirectPrefix / buildDirectUpstreamUrl / detectProtocol reuse the old helpers
+ *   - buildDirectRequestHeaders -> uses pipeline SKIP_REQUEST_HEADERS_HOP_BY_HOP
+ *     (the latent leak recorded in Phase 0.4 addendum §2.4 is fixed as well:
+ *      the HOP_BY_HOP version is replaced by the WITH_INTERNAL version, so a client-supplied x-tdai-user-key is not passed through)
+ *   - flatten + obs / stream tap / non-stream parse are all inlined (aligned segment by segment with the old code)
  *
- * ⚠️ 与老实现的唯一行为变化 (刻意修的 latent leak, addendum §2.4):
- *   老版用 HOP_BY_HOP (4 项) SKIP_REQUEST_HEADERS, 若客户端主动带
- *   `x-tdai-user-key` 会透传给上游 (proxy 内部身份泄漏)。新 pipeline 用
- *   WITH_INTERNAL (5 项), 顺手拦截。
- *   → 若测试 pin 了老行为需要透传, 会检出这个变化并 fail; 视 pin 目的决定
- *     是否放行 (通常应放行, 因为老行为本身是 bug)。
+ * WARNING: the only behavior change from the old implementation (a deliberate latent-leak fix, addendum §2.4):
+ *   The old version used HOP_BY_HOP (4 items) SKIP_REQUEST_HEADERS; if a client supplied
+ *   `x-tdai-user-key` it was passed through to upstream (leaking the proxy's internal identity). The new pipeline uses
+ *   WITH_INTERNAL (5 items) and blocks it along the way.
+ *   -> If a test pinned the old behavior of passthrough, it will detect this change and fail; decide by the pin's purpose
+ *     whether to allow it (usually it should be allowed, since the old behavior was itself a bug).
  */
 
 import type { Context } from "hono";
@@ -41,8 +41,8 @@ import {
 
 // ─── Header helpers ─────────────────────────────────────────────────────────
 
-/** 复制请求头 (剥离 hop-by-hop + x-tdai-user-key 内部身份头 —
- * addendum §2.4 记录的 latent leak 一并修)。 */
+/** Copy request headers (strip hop-by-hop + the x-tdai-user-key internal identity header —
+ * the latent leak recorded in addendum §2.4 is fixed as well). */
 function buildDirectRequestHeaders(c: Context): Record<string, string> {
   const headers: Record<string, string> = {};
   for (const [k, v] of c.req.raw.headers.entries()) {
@@ -60,11 +60,11 @@ function extractApiKey(c: Context): string {
   return extractBearerToken(authHeader);
 }
 
-// ─── Anthropic messages flatten (与老 directHandler 独立实现完全一致) ────────
+// ─── Anthropic messages flatten (fully identical to the old directHandler's standalone implementation) ────────
 
-// flattenAnthropicMessagesForOpik 复用 anthropic runner 的完整版实现
-// (原 direct 独立版本与 anthropic 版本内容完全一致, 唯一差别是不接受 system 参数;
-// 直接不传 system 即达到原行为)。
+// flattenAnthropicMessagesForOpik reuses the full implementation from the anthropic runner
+// (the original standalone direct version is identical in content to the anthropic version; the only difference is that it does not accept a system parameter;
+// simply not passing system achieves the original behavior).
 import { flattenAnthropicMessagesForOpik } from "./anthropic.js";
 
 // ─── Observability context + reporters ──────────────────────────────────────
@@ -269,11 +269,11 @@ function parseOpenAiResponse(respText: string): {
 // ─── Main runner ────────────────────────────────────────────────────────────
 
 /**
- * runDirectPipeline — /direct/* 完整处理链, 与 handleDirectPassthrough 语义等价。
+ * runDirectPipeline — full /direct/* processing chain, semantically equivalent to handleDirectPassthrough.
  *
- * runPipeline() 分派到本函数当且仅当:
+ * runPipeline() dispatches to this function if and only if:
  *   - protocol.name === "passthrough" (passthroughProtocol)
- *   - agent === null (passthrough 不绑 agent)
+ *   - agent === null (passthrough is not bound to an agent)
  */
 export async function runDirectPipeline(c: Context, config: ProxyConfig): Promise<Response> {
   const traceId = uuidv7();
@@ -284,7 +284,7 @@ export async function runDirectPipeline(c: Context, config: ProxyConfig): Promis
   const method = c.req.method.toUpperCase();
   const protocol = method === "POST" ? detectProtocol(stripped) : null;
 
-  // ── 分支 A: 无观测极简透传 ─────────────────────────────────────────
+  // ── Branch A: minimal passthrough without observation ──────────────
   if (!protocol) {
     const headers = buildDirectRequestHeaders(c);
     const hasBody = method !== "GET" && method !== "HEAD";
@@ -313,13 +313,13 @@ export async function runDirectPipeline(c: Context, config: ProxyConfig): Promis
     });
   }
 
-  // ── 分支 B: 观测 + 透传 ─────────────────────────────────────────────
+  // ── Branch B: observation + passthrough ────────────────────────────
   const rawBody = await c.req.arrayBuffer();
   const bodyText = new TextDecoder().decode(rawBody);
   let parsedBody: Record<string, unknown> | null = null;
   try {
     parsedBody = JSON.parse(bodyText) as Record<string, unknown>;
-  } catch { /* non-JSON → 降级为纯透传 (不做观测) */ }
+  } catch { /* non-JSON → degrade to pure passthrough (no observation) */ }
 
   const modelId = parsedBody && typeof parsedBody.model === "string" ? parsedBody.model : "unknown";
   const messages = parsedBody && Array.isArray(parsedBody.messages) ? parsedBody.messages : [];
@@ -381,7 +381,7 @@ export async function runDirectPipeline(c: Context, config: ProxyConfig): Promis
     upstreamUrl, modelId, spaceId, upstreamRequestId, flatMessages,
   };
 
-  // ── 流式 ──
+  // ── Streaming ──
   if (isStream) {
     if (!upstreamResp.body) {
       return new Response(null, { status: upstreamResp.status, headers: respHeaders });
@@ -396,7 +396,7 @@ export async function runDirectPipeline(c: Context, config: ProxyConfig): Promis
     return new Response(clientStream, { status: upstreamResp.status, headers: respHeaders });
   }
 
-  // ── 非流式 ──
+  // ── Non-streaming ──
   const respBuf = await upstreamResp.arrayBuffer();
   const respText = new TextDecoder().decode(respBuf);
   const endTime = new Date().toISOString();

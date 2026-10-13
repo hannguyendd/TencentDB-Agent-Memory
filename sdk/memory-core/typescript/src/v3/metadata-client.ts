@@ -1,8 +1,8 @@
 /**
- * v3 MetadataClient — 封装 `/v3/meta/*` 公开管理面接口（与 Panel Control `META_ACTIONS` 对齐，54 条）。
+ * v3 MetadataClient — wraps the public management-plane endpoints under `/v3/meta/*` (aligned with Panel Control `META_ACTIONS`, 54 in total).
  *
- * 另含 `/v3/knowledge/*` Knowledge 实体 CRUD（5 条，非 meta 前缀）。
- * 鉴权：Bearer + x-tdai-service-id + x-tdai-user-key（`auth/verify` 仅 body 传 user_key）。
+ * Also includes Knowledge entity CRUD under `/v3/knowledge/*` (5 endpoints, not under the meta prefix).
+ * Auth: Bearer + x-tdai-service-id + x-tdai-user-key (`auth/verify` passes user_key only in the body).
  */
 
 import { ParamError } from "../errors.js";
@@ -60,7 +60,7 @@ import type {
   GetUserRequest,
   PaginationInput,
   PaginatedResult,
-  // Knowledge (v3 管理面实体，/v3/knowledge/*)
+  // Knowledge (v3 management-plane entity, /v3/knowledge/*)
   KnowledgeEntity,
   KnowledgeType,
   KnowledgeListResult,
@@ -70,7 +70,7 @@ import type {
 } from "./metadata-types.js";
 
 const V3 = "/v3/meta";
-/** Knowledge 实体管理面挂在 /v3/knowledge/*（extraRouteTable，不在 /v3/meta 前缀下）。 */
+/** The Knowledge entity management plane is mounted at /v3/knowledge/* (extraRouteTable, not under the /v3/meta prefix). */
 const V3_KNOWLEDGE = "/v3/knowledge";
 
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
@@ -97,11 +97,11 @@ function requireAnyString(
 export interface MetadataClientConfig {
   /** Base URL, e.g. `https://memory.tencentyun.com` */
   endpoint: string;
-  /** 网关 Bearer 密钥（KERNEL_AUTH_TOKEN）。 */
+  /** Gateway Bearer key (KERNEL_AUTH_TOKEN). */
   apiKey: string;
-  /** 记忆实例 ID（x-tdai-service-id）。 */
+  /** Memory instance ID (x-tdai-service-id). */
   serviceId: string;
-  /** 用户 API 密钥（x-tdai-user-key）；user/create、user/delete 须 system_admin key。 */
+  /** User API key (x-tdai-user-key); user/create and user/delete require a system_admin key. */
   userKey?: string;
   /** Request timeout in ms (default 30 000). */
   timeout?: number;
@@ -278,8 +278,8 @@ export class MetadataClient {
   getUserConfig(p: GetUserConfigRequest): Promise<UserConfigView> { return this.http.post(`${V3}/config/user/get`, body(p)); }
   setUserConfig(p: SetUserConfigRequest): Promise<{ ok: true }> { return this.http.post(`${V3}/config/user/set`, body(p)); }
 
-  // ── Knowledge (v3 管理面实体 CRUD，/v3/knowledge/*) ──
-  // 与 team/agent 实体同构；handler 不读 user-key，team_id 在 body 里。
+  // ── Knowledge (v3 management-plane entity CRUD, /v3/knowledge/*) ──
+  // Same shape as the team/agent entities; the handler does not read user-key, and team_id is in the body.
   createKnowledge(p: CreateKnowledgeRequest): Promise<KnowledgeEntity> { return this.http.post(`${V3_KNOWLEDGE}/create`, body(p)); }
   getKnowledge(knowledgeId: string, teamId?: string): Promise<KnowledgeEntity> {
     return this.http.post(`${V3_KNOWLEDGE}/get`, body({ knowledge_id: knowledgeId, team_id: teamId }));

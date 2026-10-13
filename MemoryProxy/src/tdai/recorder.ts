@@ -3,26 +3,26 @@ import type { TdaiIdentity, TdaiMessage } from "./types.js";
 import { extractUserQueryText } from "../common/user-query-extractor.js";
 
 /**
- * 从最后一条 user 消息中抽取「真正的用户提问」，写入 L0。
+ * Extracts the "real user question" from the last user message and writes it to L0.
  *
- * 背景：CodeBuddy / Claude Code / DSH 等编码 agent 的 user 消息里除了真实问题，
- * 还塞了大量 harness 上下文（<additional_data>、current_time、<system_reminder>、
- * DSH 的 `Current runtime context.` 快照等）。如果把整条消息原样写进 L0，记忆
- * 会被这些噪声污染，而且每轮都不一样、检索价值极低。因此这里只保留真实提问。
+ * Background: besides the real question, user messages from coding agents such as CodeBuddy / Claude Code / DSH
+ * carry a lot of harness context (<additional_data>, current_time, <system_reminder>,
+ * DSH's `Current runtime context.` snapshot, etc.). Writing the whole message to L0 as-is would
+ * pollute memory with this noise, which differs every turn and has very low retrieval value. So only the real question is kept.
  *
- * 抽取算法在 `common/user-query-extractor.ts` 内实现（tdai / mem-command /
- * codebuddy adapter 共用同一份，避免语义漂移）；本模块只负责"取最后一条
- * user message → 抽 query 文本 → 组装 TdaiMessage"这几步。
+ * The extraction algorithm lives in `common/user-query-extractor.ts` (shared by the tdai / mem-command /
+ * codebuddy adapters to avoid semantic drift); this module only handles these steps: take the last
+ * user message -> extract the query text -> assemble a TdaiMessage.
  */
 
-// 保留 re-export，避免下游（含单测）import 路径变化引发一次性大改。
+// Keep the re-export so downstream import paths (including unit tests) don't force a sweeping change.
 export { extractUserQueryText };
 
 export function extractLatestUserMessage(messages: unknown[]): TdaiMessage | null {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as Record<string, unknown>;
     if (msg?.role !== "user") continue;
-    // 只取真实 user_query，避免把 harness 上下文写进 L0
+    // Only take the real user_query, to avoid writing harness context into L0
     const content = extractUserQueryText(extractContentText(msg.content));
     if (content.trim()) return { role: "user", content };
   }

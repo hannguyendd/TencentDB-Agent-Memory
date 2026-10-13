@@ -13,11 +13,11 @@ import type { ApiResponseEnvelope } from "./types.js";
 
 export interface HttpTransportOptions {
   endpoint: string;
-  /** 网关 Bearer 密钥（KERNEL_AUTH_TOKEN / TDAI_GATEWAY_API_KEY）。 */
+  /** Gateway Bearer key (KERNEL_AUTH_TOKEN / TDAI_GATEWAY_API_KEY). */
   apiKey: string;
-  /** 记忆实例 ID（x-tdai-service-id）。 */
+  /** Memory instance ID (x-tdai-service-id). */
   serviceId: string;
-  /** 用户 API 密钥（x-tdai-user-key）；user/create、user/delete 须 system_admin key。 */
+  /** User API key (x-tdai-user-key); user/create and user/delete require a system_admin key. */
   userKey?: string;
   timeout?: number;
   /** Whether to reject self-signed / invalid TLS certs. Default: false. */

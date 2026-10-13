@@ -13,7 +13,7 @@ export interface TdaiIdentitySource {
   /** User ID from auth/verify — replaces legacy codeBuddyUserId. */
   userId?: string | null;
   sessionKey?: string | null;
-  /** 请求发起者 user_key（来自 Authorization: Bearer；ACL 校验用）。 */
+  /** User key of the request initiator (from Authorization: Bearer; used for ACL checks). */
   userKey?: string | null;
 }
 

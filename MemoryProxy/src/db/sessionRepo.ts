@@ -16,9 +16,9 @@
  * All SQL goes through prepared statements with bound parameters.
  *
  * ── History note ────────────────────────────────────────────────────────────
- * 上一版 (2026-07-10) 只有 (userId, agentSource, sessionId) 三段主键。
- * P4 (2026-07-12) 新增 spaceId 段以支持 kernel-sts 权限隔离 —— 存 sqlite
- * 复合主键时 spaceId 段作为第一段（老 caller 缺省时用 `_default` 兜底）。
+ * The previous version (2026-07-10) had only the 3-segment primary key (userId, agentSource, sessionId).
+ * P4 (2026-07-12) adds the spaceId segment to support kernel-sts permission isolation -- in the sqlite
+ * composite primary key the spaceId segment comes first (old callers default to the `_default` fallback).
  */
 
 import type Database from "better-sqlite3";
@@ -45,9 +45,9 @@ export interface PersistedSessionRow {
 /**
  * Stable id used in the `sessions` table for a given state.
  *
- * 复合键：`${spaceId}:${userId}:${agentSource}:${sessionId}` —— spaceId 段是
- * P4 新增，用于 kernel-sts 模式下按 space 隔离。空 spaceId 用 `_default` 兜底
- * 段（老部署继续能跑）。Sqlite schema 不变，只是主键字符串多一段。
+ * Composite key: `${spaceId}:${userId}:${agentSource}:${sessionId}` -- the spaceId segment is
+ * added by P4 to isolate by space in kernel-sts mode. An empty spaceId uses the `_default` fallback
+ * segment (old deployments keep working). The Sqlite schema is unchanged; the primary key string just has one more segment.
  */
 export function sessionRowId(
   spaceId: string,
@@ -108,9 +108,9 @@ function rowToState(row: PersistedSessionRow): SessionInitState | null {
 }
 
 /**
- * 从复合主键反解出 (spaceId, userId, agentSource, sessionId)。
- * 复合主键格式：`{spaceId}:{userId}:{agentSource}:{sessionId}`。
- * spaceId 段为 `_default` 表示老 caller 缺失 spaceId 上下文。
+ * Recovers (spaceId, userId, agentSource, sessionId) from the composite primary key.
+ * Composite primary key format: `{spaceId}:{userId}:{agentSource}:{sessionId}`.
+ * A spaceId segment of `_default` means an old caller lacked the spaceId context.
  */
 function parseSessionRowId(
   id: string,
@@ -146,9 +146,9 @@ ON CONFLICT(session_id) DO UPDATE SET
 `;
 
 /**
- * `loadAllInitialized` 返回结构：包含 spaceId / userId / agentSource / sessionId
- * 四段身份，配合装配层一次性把身份塞回 SessionStore。CosStorage 后端永远返回空数组
- * （启动全量 list 太慢，走 probeL2a 懒加载即可）。
+ * `loadAllInitialized` return structure: contains the 4-segment identity spaceId / userId / agentSource / sessionId,
+ * used by the wiring layer to put identities back into the SessionStore in one go. The CosStorage backend always returns an empty array
+ * (a full startup list is too slow; lazy-load via probeL2a instead).
  */
 export interface HydratedSessionRow {
   spaceId: string;
@@ -160,14 +160,14 @@ export interface HydratedSessionRow {
 
 export interface SessionRepo {
   /**
-   * Write-through 语义：await 完成时 L2a 已落盘（或失败已被静默降级）。
+   * Write-through semantics: when the await completes, L2a is persisted (or the failure has been silently degraded).
    *
-   * 见 2026-07-13 修复：原 fire-and-forget 语义在多节点部署下会让 pod A
-   * 关流时 COS PUT 还在飞，pod B 的 turn-2 因 L2a miss 掉进
-   * `tryHistoryScan` 兜底 → bypass → 请求透传 LLM，session 状态机被跳过。
+   * See the 2026-07-13 fix: under the old fire-and-forget semantics in multi-node deployments, the COS PUT could still be in flight
+   * when pod A closed the stream, and pod B's turn-2 missed L2a and fell into the
+   * `tryHistoryScan` fallback -> bypass -> request passes through to the LLM, skipping the session state machine.
    *
-   * 实现细节：写失败不 throw（保留"L1 是权威、L2a 是持久化备份"的降级契约），
-   * 但要 await 完成，因为跨节点场景下 L2a 才是真正的共享状态。
+   * Implementation detail: write failures do not throw (preserving the degradation contract "L1 is authoritative, L2a is a persistent backup"),
+   * but the await must complete, because in cross-node scenarios L2a is the real shared state.
    */
   upsert(
     spaceId: string,
@@ -201,9 +201,9 @@ class SqliteSessionRepo implements SessionRepo {
     sessionId: string,
     state: SessionInitState,
   ): Promise<void> {
-    // better-sqlite3 是同步 API；包 async 只是为了对齐 SessionRepo 契约，
-    // 让 store 侧的 await 语义统一（跨节点部署走 KvSessionRepo/RedisSessionRepo
-    // 都是真异步）。
+    // better-sqlite3 is a sync API; wrapping in async is only to match the SessionRepo contract,
+    // keeping await semantics uniform on the store side (cross-node deployments use KvSessionRepo/RedisSessionRepo,
+    // which are truly async).
     try {
       const row = rowFromState(spaceId, userId, agentSource, sessionId, state);
       this.db.prepare(UPSERT_SQL).run(row);

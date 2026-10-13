@@ -1,11 +1,11 @@
 /**
- * 公共展示型小组件：
- *   - Mounted：Agent 卡片上的「已挂载资产」计数 chip
- *   - LightField：轻量表单字段（label + hint + children）
- *   - CollapseGroup：可折叠分组（skills / code_graph / llm_wiki / chat_memory 复选列表容器）
- *   - AssetCheckList：分组渲染的资产复选框列表
+ * Shared presentational small components:
+ *   - Mounted: "mounted assets" count chip on the Agent card
+ *   - LightField: lightweight form field (label + hint + children)
+ *   - CollapseGroup: collapsible group (container for skills / code_graph / llm_wiki / chat_memory checkbox lists)
+ *   - AssetCheckList: asset checkbox list rendered by group
  *
- * 均为纯展示组件，不含业务逻辑 / 数据请求。
+ * All are pure presentational components, with no business logic / data requests.
  */
 
 import { type ReactNode } from 'react';
@@ -14,20 +14,20 @@ import { Checkbox } from 'tea-component';
 import { ChevronRightIcon } from 'tea-icons-react';
 import type { MountableAsset } from './types';
 
-/** 资产是否可被勾选/挂载：无状态（skill）或状态为 ready 才可选中，其他状态（pending/failed/...）视为不可用。 */
+ /** Whether an asset can be checked/mounted: stateless (skill) or status ready is selectable; other states (pending/failed/...) are treated as unavailable. */
 export function isAssetSelectable(a: MountableAsset): boolean {
   return !a.status || a.status === 'ready';
 }
 
-/** 过滤出全部可勾选的资产 key（供「一键全选」使用，保证与列表勾选禁用状态一致）。 */
+ /** Filter out all checkable asset keys (for "select all", keeping it consistent with the disabled state of list checkboxes). */
 export function selectableAssetKeys(assets: MountableAsset[]): string[] {
   return assets.filter(isAssetSelectable).map((a) => a.key);
 }
 
 export function Mounted({ label, count, loading = false }: { label: string; count: number; loading?: boolean }) {
-  // counts 还在加载时，单独把数字区换成骨架占位，不动 label。
-  // 让 agent 卡片主体立刻可见（避免「4 骨架 → 1 真实卡」的突兀跳变），
-  // 只把不确定的计数数据占位起来，比整个网格保留骨架更平滑。
+  // While counts are loading, replace only the number area with a skeleton placeholder, leaving the label alone.
+  // This makes the agent card body visible immediately (avoiding the abrupt "4 skeletons → 1 real card" jump),
+  // placeholdering only the uncertain count data, which is smoother than keeping a skeleton for the whole grid.
   return (
     <div className={`_memory-mounted-chip${loading ? ' _memory-mounted-chip--loading' : ''}`}>
       <span className="_memory-mounted-chip-label">{label}</span>
@@ -75,11 +75,11 @@ export function CollapseGroup({
   totalCount: number;
   open: boolean;
   onToggle: () => void;
-  /** 只展示已绑定数量、不展示团队池总数（用于只读详情场景）。 */
+  /** Show only the bound count, not the team pool total (for read-only detail scenarios). */
   hideTotal?: boolean;
   /**
-   * 加载态：count 数字区换成骨架占位（保留 label/title 等结构，避免布局抖动）。
-   * 用于详情弹窗打开时资产绑定还没拉完的场景，避免「已选 0/共 0 → 真实数字」的突兀跳变。
+   * Loading state: replace the count number area with a skeleton placeholder (keeping label/title structure to avoid layout shift).
+   * Used when the detail dialog opens while asset bindings are not fully fetched, avoiding the abrupt "selected 0 / total 0 → real number" jump.
    */
   loading?: boolean;
   children: ReactNode;
@@ -95,7 +95,7 @@ export function CollapseGroup({
         <span className="_memory-collapse-group-icon">{icon}</span>
         <span className="_memory-collapse-group-title">{title}</span>
         {loading ? (
-          // 加载中：保留图标 + 标题，仅把 count 区换成骨架；按钮禁用防止「加载中点开」出现空面板
+          // Loading: keep icon + title, replace only the count area with a skeleton; button disabled to prevent an empty panel from "opening while loading"
           <span className="_memory-collapse-group-count _memory-collapse-group-count--loading" aria-label="loading" />
         ) : (
           <span className="_memory-collapse-group-count">

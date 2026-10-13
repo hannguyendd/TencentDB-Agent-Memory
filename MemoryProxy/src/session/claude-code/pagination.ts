@@ -1,72 +1,72 @@
 /**
- * Claude Code AskUserQuestion 分页布局器。
+ * Claude Code AskUserQuestion pagination layout helper.
  *
- * 背景：CC AskUserQuestion 单 question 最多 4 个 option。中间页需要留 1 个
- * slot 给"更多 →"，所以最多塞 3 个真实项；末页无 MORE，可塞满 4 个。
+ * Background: a CC AskUserQuestion question allows at most 4 options. Middle pages must reserve 1
+ * slot for "More →", so they hold at most 3 real items; the last page has no MORE and can hold all 4.
  *
- * 策略：
- *   - total ≤ 4：单页展示所有（无 MORE）
- *   - total > 4：前 N-1 页每页 3 个 + MORE，末页塞剩下的（∈ [2, 4]）
+ * Strategy:
+ *   - total ≤ 4: show everything on a single page (no MORE)
+ *   - total > 4: the first N-1 pages hold 3 items each + MORE; the last page holds the rest (∈ [2, 4])
  *
- * 页数：`totalPages = ceil((total - 4) / 3) + 1`
- *   - 前 N-1 页各 3 项 = 3(N-1) 项
- *   - 末页 total - 3(N-1) 项
- *   - 反过来推 N：total - 3(N-1) ∈ [2, 4] ⇔ N - 1 = ceil((total - 4) / 3)
+ * Page count: `totalPages = ceil((total - 4) / 3) + 1`
+ *   - the first N-1 pages hold 3 items each = 3(N-1) items
+ *   - the last page holds total - 3(N-1) items
+ *   - solving for N: total - 3(N-1) ∈ [2, 4] ⇔ N - 1 = ceil((total - 4) / 3)
  *
- * 效果：
- *   total=4  → [4]                   （单页）
+ * Results:
+ *   total=4  → [4]                   (single page)
  *   total=5  → [3+MORE, 2]
  *   total=6  → [3+MORE, 3]
- *   total=7  → [3+MORE, 4]           ← 末页塞满 4，比"3+2+2"少 1 页
+ *   total=7  → [3+MORE, 4]           ← last page filled to 4, one page fewer than "3+2+2"
  *   total=8  → [3+MORE, 3+MORE, 2]
  *   total=9  → [3+MORE, 3+MORE, 3]
- *   total=10 → [3+MORE, 3+MORE, 4]   ← 末页塞满 4
+ *   total=10 → [3+MORE, 3+MORE, 4]   ← last page filled to 4
  *   total=11 → [3+MORE, 3+MORE, 3+MORE, 2]
  *   total=13 → [3+MORE ×3, 4]
  *
- * 每页 count 恒定 ≥ 2 ≤ 4，永不 solo末页 —— init.ts 的 autoSelectSolo* 兜底
- * 分支从此进不到 MORE 翻页路径（total===1 的场景由 advanceFromAgentPicked 上
- * 游 auto-select，也走不到 form）。
+ * Each page's count is always ≥ 2 and ≤ 4, so a solo last page never occurs -- the autoSelectSolo* fallback
+ * branches in init.ts can no longer reach the MORE paging path (the total===1 case is auto-selected
+ * upstream by advanceFromAgentPicked and never reaches the form either).
  *
- * agents 和 tasks 共用同一分页，行为一致。
+ * agents and tasks share the same pagination, so behavior is consistent.
  */
 
-/** CC AskUserQuestion 单 question 硬上限（含 MORE 槽位）。 */
+/** Hard limit of a CC AskUserQuestion question (including the MORE slot). */
 export const CC_MAX_OPTIONS = 4;
 
-/** 非末页真实选项数（保留 1 slot 给 MORE→）。 */
+/** Number of real options on a non-last page (1 slot reserved for MORE→). */
 export const CC_PAGE_SIZE = 3;
 
-/** 单页展示阈值：total ≤ 此值时不分页、不放 MORE，一页展示全部。 */
+/** Single-page threshold: when total ≤ this value, no paging and no MORE; everything is shown on one page. */
 export const CC_SINGLE_PAGE_LIMIT = CC_MAX_OPTIONS;
 
 export interface PageSlice {
-  /** 该 page 覆盖的元素区间 [start, end)，start 含 end 不含 —— 直接 slice 用。 */
+  /** Element range [start, end) covered by this page; start inclusive, end exclusive -- use directly with slice. */
   start: number;
   end: number;
-  /** 该 page 是否是最后一页（末页不追加 MORE 选项）。 */
+  /** Whether this page is the last one (the last page does not append a MORE option). */
   isLastPage: boolean;
-  /** 该 page 展示的真实选项数（= end - start）。 */
+  /** Number of real options shown on this page (= end - start). */
   count: number;
-  /** 分页后的总页数（total ≤ 4 时为 1）。 */
+  /** Total number of pages after pagination (1 when total ≤ 4). */
   totalPages: number;
-  /** 全体元素数量，方便调用方拼提示文案。 */
+  /** Total number of elements, handy for callers building hint text. */
   total: number;
 }
 
 /**
- * 计算给定 `total` 项、目标 `pageIndex`（0-based）的切片区间。
+ * Compute the slice range for `total` items and the target `pageIndex` (0-based).
  *
- * 保证：任何合法的 pageIndex 返回的 `count >= 2`（除非 total < 2，此时是
- * form builder 上游的边界问题，非本函数职责）。
+ * Guarantee: any valid pageIndex returns `count >= 2` (unless total < 2, which is an upstream
+ * boundary issue in the form builder, not this function's responsibility).
  *
- * pageIndex 超出 totalPages-1 时，钳制到最后一页（防御性；正常调用方会先
- * 用 totalPages-1 计算 safeNextPage，见 init.ts MORE 分支）。
+ * When pageIndex exceeds totalPages-1 it is clamped to the last page (defensive; normal callers first
+ * compute safeNextPage using totalPages-1, see the MORE branch in init.ts).
  */
 export function computePagination(total: number, pageIndex: number): PageSlice {
   const safeTotal = Math.max(0, total);
 
-  // 单页阈值：≤ CC_SINGLE_PAGE_LIMIT 时不分页。
+  // Single-page threshold: no paging when ≤ CC_SINGLE_PAGE_LIMIT.
   if (safeTotal <= CC_SINGLE_PAGE_LIMIT) {
     return {
       start: 0,
@@ -78,11 +78,11 @@ export function computePagination(total: number, pageIndex: number): PageSlice {
     };
   }
 
-  // total > 4 时：前 N-1 页各 3 real + MORE，末页塞 total - 3(N-1) 项（∈ [2, 4]）。
-  // N - 1 页承载 3 每页需 ≥ (total - 4) 项（末页最多 4），即 N-1 = ceil((total-4) / 3)。
+  // When total > 4: the first N-1 pages hold 3 real items each + MORE; the last page holds total - 3(N-1) items (∈ [2, 4]).
+  // N - 1 pages at 3 per page need ≥ (total - 4) items (the last page holds at most 4), i.e. N-1 = ceil((total-4) / 3).
   const totalPages = Math.ceil((safeTotal - CC_MAX_OPTIONS) / CC_PAGE_SIZE) + 1;
 
-  // 钳制 pageIndex 到合法范围（防御性）。
+  // Clamp pageIndex to the valid range (defensive).
   const idx = Math.max(0, Math.min(pageIndex, totalPages - 1));
 
   const isLastPage = idx === totalPages - 1;

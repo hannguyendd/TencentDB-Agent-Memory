@@ -50,11 +50,11 @@ scenarios = client.list_scenarios(path_prefix="")
 print(scenarios["entries"])
 
 # L2: read a scenario file
-file = client.read_scenario("工作.md")
+file = client.read_scenario("work.md")
 print(file["content"])
 
 # L2: update a scenario file (must already exist)
-client.write_scenario("工作.md", "# Updated content", summary="new summary")
+client.write_scenario("work.md", "# Updated content", summary="new summary")
 
 # L3: read core memory (persona)
 core = client.read_core()
@@ -81,7 +81,7 @@ compacted = client.offload_compact(
 print(compacted["messages"], compacted["report"])
 
 # Read memory pipeline artifacts (e.g. persona.md, scene_blocks/*.md)
-raw = client.read_file("scene_blocks/工作.md")
+raw = client.read_file("scene_blocks/work.md")
 ```
 
 ## Async Usage

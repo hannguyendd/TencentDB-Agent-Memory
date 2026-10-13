@@ -2,10 +2,10 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
-// team-memory-control 后端地址（链路 A `/api/v1/meta/*` 等接口所在的后端）。
+// team-memory-control backend address (the backend hosting chain A `/api/v1/meta/*` and similar endpoints).
 const TMC_BACKEND_TARGET = process.env.VITE_TMC_BACKEND_URL || 'http://127.0.0.1:8123';
 
-// Skill Gateway 地址（`/v3/skill/*` 等接口所在的记忆网关）。
+// Skill Gateway address (the memory gateway hosting `/v3/skill/*` and similar endpoints).
 const SKILL_GATEWAY_TARGET = process.env.VITE_SKILL_GATEWAY_URL || 'http://127.0.0.1:8420';
 
 export default defineConfig({

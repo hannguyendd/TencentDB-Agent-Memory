@@ -1,15 +1,15 @@
 /**
- * stages/forward.ts — 转发 + retry stage (Phase 4)。
+ * stages/forward.ts — forward + retry stage (Phase 4).
  *
- * 提取自 handler.ts + anthropic 的 forwardWithRetry (含 retryTarget 分支) /
- * codex + wb 的单次 fetch (无 retry)。
+ * Extracted from handler.ts + anthropic's forwardWithRetry (including the retryTarget branch) /
+ * the single fetch of codex + wb (no retry).
  *
- * blueprint §3.1 中风险: anthropic retry 时需 sanitizeForRetry(body); openai retry
- * 直接 `{...originalBody, model: retryTarget.model}`。本 stage 通过
- * protocol.sanitizeForRetry?.() 可选钩子支持两种姿势。
+ * blueprint §3.1 medium risk: anthropic retry needs sanitizeForRetry(body); openai retry
+ * directly uses `{...originalBody, model: retryTarget.model}`. This stage supports both styles through the
+ * optional hook protocol.sanitizeForRetry?.().
  *
- * codex/wb 的 stageGates.forwardRetry=false + forwardTimeout=false → 走单次
- * fetch 无超时 (与老 codex/wb 100% 等价; Phase 5 opt-in 修 bug B9)。
+ * codex/wb's stageGates.forwardRetry=false + forwardTimeout=false -> single
+ * fetch with no timeout (100% equivalent to the old codex/wb; Phase 5 opt-in fixes bug B9).
  */
 
 import type { ForwardTarget } from "../../guard-adapter.js";
@@ -22,9 +22,9 @@ export interface ForwardStageInput {
   upstreamHeaders: Record<string, string>;
   upstreamBody: unknown;
   originalBody: Record<string, unknown>;
-  /** 0 = 无超时; 走 forwardTimeout gate 时由 caller 传 config.server.forwardTimeoutMs, 关时传 0 */
+  /** 0 = no timeout; when the forwardTimeout gate is on, the caller passes config.server.forwardTimeoutMs, when off passes 0 */
   forwardTimeoutMs: number;
-  /** stageGates.forwardRetry=false 时传 false, 老 codex/wb 行为 */
+  /** pass false when stageGates.forwardRetry=false, the old codex/wb behavior */
   retryEnabled: boolean;
 }
 
@@ -41,7 +41,7 @@ export async function stageForward(input: ForwardStageInput): Promise<ForwardSta
     input.forwardTimeoutMs,
   );
 
-  // retry gate — 只在 retryTarget 存在 + 4xx + retryEnabled 时触发
+  // retry gate — only triggers when retryTarget exists + 4xx + retryEnabled
   if (
     input.retryEnabled
     && input.target.retryTarget
@@ -49,7 +49,7 @@ export async function stageForward(input: ForwardStageInput): Promise<ForwardSta
     && primaryResp.status < 500
   ) {
     const retryTarget = input.target.retryTarget;
-    // retry body: openai = {...orig, model:retryTarget.model}; anthropic 额外走 sanitizeForRetry
+    // retry body: openai = {...orig, model:retryTarget.model}; anthropic additionally goes through sanitizeForRetry
     let retryBody: Record<string, unknown> = { ...input.originalBody, model: retryTarget.model };
     if (input.protocol.sanitizeForRetry) {
       retryBody = input.protocol.sanitizeForRetry(retryBody);
@@ -57,7 +57,7 @@ export async function stageForward(input: ForwardStageInput): Promise<ForwardSta
     try {
       const retryResp = await fetchWithOptionalTimeout(
         retryTarget.url,
-        // retry headers 走 target.authHeaders (含协议特化), 复用主 headers 里的 content-type 等
+        // retry headers use target.authHeaders (protocol-specific), reusing content-type etc. from the main headers
         { ...input.upstreamHeaders, ...(retryTarget.authHeaders ?? {}) },
         retryBody,
         input.forwardTimeoutMs,

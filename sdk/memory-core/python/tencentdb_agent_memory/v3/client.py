@@ -1,31 +1,31 @@
-"""TencentDB Agent Memory v3 Python SDK — 严格 isolation 数据面客户端。
+"""TencentDB Agent Memory v3 Python SDK — strict-isolation data-plane client.
 
-与 v2 的差异
+Differences from v2
 -----------
 
-- 构造时 ``team_id`` / ``agent_id`` / ``user_id`` **必填**，缺一即 ``ParamError``。
-- ``session_id`` 规则：
-    - ``add_conversation`` **写入必填**（构造或调用二选一），缺则 ``ValueError`` —
-      避免服务端把无 session 的写入静默合并到默认 bucket，与其他调用方串数据。
-    - 读接口（query / search / count / delete）可选：传入则按 session 收敛；
-      缺则按 (team, agent, user) 跨 session 聚合（agent 维度全量视图语义，
-      用于治理面板的 layer-counts、跨会话 L0/L1 列表等）。
-    - L2/L3 本来就是 team+agent 级 profile 聚合，不消费 session_id。
-- HTTP 路径走 ``/v3/...``；服务端按相同规则校验（缺 team/agent/user 任一即 422）。
-- ``offload`` / ``read_file`` 等非 L0–L3 接口未在 v3 暴露 — 继续使用 v2 客户端。
+- At construction ``team_id`` / ``agent_id`` / ``user_id`` **required**; a missing one raises ``ParamError``.
+- ``session_id`` rules:
+    - ``add_conversation`` **required for writes** (either at construction or per call); missing raises ``ValueError`` --
+      this prevents the server from silently merging session-less writes into the default bucket and mixing data with other callers.
+    - Read endpoints (query / search / count / delete) are optional: when given, results are scoped to the session;
+      when missing, they aggregate across sessions by (team, agent, user) (full agent-level view semantics,
+      used for the governance panel's layer-counts, cross-session L0/L1 lists, etc.).
+    - L2/L3 are inherently team+agent-level profile aggregates and do not consume session_id.
+- HTTP paths use ``/v3/...``; the server validates by the same rules (any missing team/agent/user yields 422).
+- ``offload`` / ``read_file`` and other non-L0-L3 endpoints are not exposed in v3 -- keep using the v2 client.
 
 >>> from tencentdb_agent_memory.v3 import MemoryClient
->>> # 典型用法：team+agent+user 在构造时定下来，session 跟着具体会话变
+>>> # Typical usage: team+agent+user are fixed at construction; session follows the actual conversation
 >>> client = MemoryClient(
 ...     endpoint="https://memory.tencentyun.com",
 ...     api_key="sk-...",
 ...     service_id="mem-...",
 ...     team_id="t1", agent_id="a1", user_id="u1",
-...     session_id="s1",   # 可选；不传时 L0/L1 查询走跨 session 聚合
+...     session_id="s1",   # optional; when omitted, L0/L1 queries aggregate across sessions
 ... )
 >>> client.add_conversation(messages=[{"role": "user", "content": "hi"}])
->>> client.read_scenario("notes/2026Q2.md")   # L2 不读 session_id
->>> # 跨 session 拉某 agent 的全部 L0 对话总数
+>>> client.read_scenario("notes/2026Q2.md")   # L2 does not read session_id
+>>> # Fetch the total L0 conversation count of an agent across sessions
 >>> client.with_isolation(session_id=None).query_conversation(limit=1)
 """
 
@@ -54,12 +54,12 @@ def _normalize_delete_ids(
     raw: Optional[List[str]],
     max_items: int,
 ) -> Optional[List[str]]:
-    """归一化批量删除的 id 列表：校验非空字符串、去重（保序）、检查上限。
+    """Normalizes the id list for batch deletes: validates non-empty strings, deduplicates (order-preserving), and checks the limit.
 
-    破坏性操作的入参在客户端就拦一道，比等服务端回 400 更早暴露问题，
-    也避免把明显不合法的批量请求发出去。
+    Input of destructive operations is checked on the client, which surfaces problems earlier than waiting for a server 400
+    and avoids sending obviously invalid batch requests.
 
-    :returns: 归一化后的列表；``raw`` 为 None 时返回 None（表示"未提供"）。
+    :returns: the normalized list; returns None when ``raw`` is None (meaning "not provided").
     """
     if raw is None:
         return None
@@ -79,9 +79,9 @@ def _normalize_delete_ids(
 
 
 def _validate_construction(team_id: str, agent_id: str, user_id: str) -> None:
-    """v3 构造时 team+agent+user 必填，任一缺失立刻 ParamError，避免 422 才暴露。
+    """In v3, team+agent+user are required at construction; any missing one raises ParamError immediately instead of surfacing as a 422 later.
 
-    session_id 不在构造时强校验（L2/L3 接口不需要）；L0/L1 方法调用时再单独校验。
+    session_id is not strictly validated at construction (L2/L3 endpoints do not need it); it is validated separately when L0/L1 methods are called.
     """
     missing = [
         name for name, val in (
@@ -116,7 +116,7 @@ class _IsolationCtx:
         self.task_id = task_id
 
     def base_body(self) -> Dict[str, Any]:
-        """team + agent + user (+ 可选 task)；不含 session_id。L2/L3 调用时用。"""
+        """team + agent + user (+ optional task); does not include session_id. Used by L2/L3 calls."""
         body: Dict[str, Any] = {
             "team_id": self.team_id,
             "agent_id": self.agent_id,
@@ -127,21 +127,21 @@ class _IsolationCtx:
         return body
 
     def resolve_session(self, override: Optional[str]) -> Optional[str]:
-        """L0/L1 调用：override > 构造时 session_id。
+        """L0/L1 calls: override > session_id from construction.
 
-        v3 服务端 session_id 可选：传入则按 session 收敛，缺则按 (team,agent,user)
-        跨 session 聚合查询/计数（"agent 维度全量视图"语义，用于治理面板等场景）。
-        本方法返回最终生效的 session_id，缺即 None — 调用方应在 None 时
-        不把 session_id 字段塞入请求 body。
+        On the v3 server session_id is optional: when given, results are scoped to the session; when missing, queries/counts
+        aggregate across sessions by (team,agent,user) ("full agent-level view" semantics, used for the governance panel, etc.).
+        This method returns the effective session_id, or None if missing -- callers should not put
+        the session_id field into the request body when it is None.
         """
         return override or self.session_id
 
     def resolve_session_for_write(self, override: Optional[str]) -> str:
-        """写入路径专用：``add_conversation`` 必须拿到非空 session_id。
+        """Write path only: ``add_conversation`` must get a non-empty session_id.
 
-        缺则抛 ``ValueError`` —— 避免服务端把无 session 的写入静默合并到默认
-        bucket，与其他调用方的数据混在一起。读取路径（query/search/count/
-        delete）仍走 ``resolve_session``，允许缺省以做跨 session 聚合。
+        Raises ``ValueError`` if missing -- this prevents the server from silently merging session-less writes into the default
+        bucket, mixing them with other callers' data. Read paths (query/search/count/
+        delete) still go through ``resolve_session`` and may omit it to aggregate across sessions.
         """
         sid = override or self.session_id
         if not sid:
@@ -158,11 +158,11 @@ class _IsolationCtx:
 # ---------------------------------------------------------------------------
 
 class MemoryClient:
-    """v3 同步客户端 — 严格 isolation L0–L3 数据面（含 count endpoint）。
+    """v3 sync client -- strict-isolation L0-L3 data plane (including count endpoints).
 
-    构造必填：``team_id`` / ``agent_id`` / ``user_id``。
-    构造可选：``session_id``（不传时所有 L0–L3 接口都跨 session 聚合），``task_id``，
-    ``user_key``（资产级接口如 ``clear_chat_memory`` 需要）。
+    Required at construction: ``team_id`` / ``agent_id`` / ``user_id``.
+    Optional at construction: ``session_id`` (when omitted, all L0-L3 endpoints aggregate across sessions), ``task_id``,
+    ``user_key`` (needed by asset-level endpoints such as ``clear_chat_memory``).
     """
 
     def __init__(
@@ -187,8 +187,8 @@ class MemoryClient:
         else:
             if not service_id:
                 raise ParamError("service_id must be provided")
-            # user_key 可选：内核不做用户级鉴权，但前置网关/面板可能需要
-            # 调用方身份，这里保持与 MetadataClient 一致的透传能力。
+            # user_key is optional: the kernel does no user-level auth, but an upstream gateway/panel may need
+            # the caller identity; keep the same passthrough capability as MetadataClient.
             self._stub = HttpStub(
                 endpoint, api_key, service_id,
                 timeout=timeout, verify=verify, user_key=user_key,
@@ -223,8 +223,8 @@ class MemoryClient:
         return clone
 
     # -- L0 Conversation ---------------------------------------------------
-    # 写入必须带 session_id（否则服务端会静默塞进默认 bucket，串数据）；
-    # 读接口 session_id 可选，缺则跨 session 聚合。
+    # Writes must carry a session_id (otherwise the server silently puts them into the default bucket and mixes data);
+    # for read endpoints session_id is optional; when missing they aggregate across sessions.
 
     def add_conversation(
         self,
@@ -232,7 +232,7 @@ class MemoryClient:
         *,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/conversation/add`` — 写入必填 session_id（构造或调用二选一）。"""
+        """``POST /v3/conversation/add`` — session_id is required for writes (either at construction or per call)."""
         return self._stub.post(
             f"{_V3}/conversation/add",
             _strip_none({
@@ -293,16 +293,16 @@ class MemoryClient:
         session_ids: Optional[List[str]] = None,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/conversation/delete`` — 批量删除 L0。
+        """``POST /v3/conversation/delete`` — batch-delete L0.
 
-        ``message_ids``（≤5000）与 ``session_ids``（≤100）至少给一个，可同时给。
+        At least one of ``message_ids`` (<=5000) and ``session_ids`` (<=100) is required; both may be given.
 
-        注意作用域：这里**不会**回退到构造时的 ``session_id``。删除是破坏性
-        操作，若像读接口那样自动带上默认 session，只想按 message_ids 删几条
-        的调用方会意外把整个会话删掉。要删会话必须显式传 ``session_ids``。
+        Note the scope: this does **not** fall back to the ``session_id`` from construction. Deletion is destructive;
+        if the default session were attached automatically as in read endpoints, a caller who only wants to delete a few message_ids
+        would accidentally delete the whole session. To delete sessions, pass ``session_ids`` explicitly.
 
-        ``session_id``（单数）已废弃，保留仅为兼容旧调用方，会合并进
-        ``session_ids``。
+        ``session_id`` (singular) is deprecated and kept only for compatibility with old callers; it is merged into
+        ``session_ids``.
         """
         normalized_messages = _normalize_delete_ids("message_ids", message_ids, 5000)
         normalized_sessions = _normalize_delete_ids("session_ids", session_ids, 100)
@@ -337,7 +337,7 @@ class MemoryClient:
         time_start: Optional[str] = None,
         time_end: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/conversation/count`` — 与 query 同过滤器，仅返回 ``{total}``。"""
+        """``POST /v3/conversation/count`` — same filters as query; returns only ``{total}``."""
         return self._stub.post(
             f"{_V3}/conversation/count",
             _strip_none({
@@ -348,7 +348,7 @@ class MemoryClient:
             }),
         )
 
-    # -- L1 Atomic (session_id 可选，缺则跨 session 聚合) -----------------
+    # -- L1 Atomic (session_id optional; when missing, aggregates across sessions) -----------------
 
     def update_atomic(
         self,
@@ -424,7 +424,7 @@ class MemoryClient:
         *,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/atomic/delete`` — ids必填，单次至多 5000 条。"""
+        """``POST /v3/atomic/delete`` — ids are required, at most 5000 per call."""
         normalized = _normalize_delete_ids("ids", ids, 5000)
         if not normalized:
             raise ParamError("delete_atomic requires a non-empty ids list")
@@ -445,7 +445,7 @@ class MemoryClient:
         time_end: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/atomic/count`` — 与 query 同过滤器，仅返回 ``{total}``."""
+        """``POST /v3/atomic/count`` — same filters as query; returns only ``{total}``."""
         return self._stub.post(
             f"{_V3}/atomic/count",
             _strip_none({
@@ -457,7 +457,7 @@ class MemoryClient:
             }),
         )
 
-    # -- L2 Scenario (team+agent 级，不需要 session_id) -------------------
+    # -- L2 Scenario (team+agent level, no session_id needed) -------------------
 
     def list_scenarios(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
         """``POST /v3/scenario/ls``"""
@@ -499,13 +499,13 @@ class MemoryClient:
         )
 
     def count_scenario(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
-        """``POST /v3/scenario/count`` — 与 ls 同过滤器，仅返回 ``{total}``."""
+        """``POST /v3/scenario/count`` — same filters as ls; returns only ``{total}``."""
         return self._stub.post(
             f"{_V3}/scenario/count",
             _strip_none({**self._iso.base_body(), "path_prefix": path_prefix}),
         )
 
-    # -- L3 Core (team+agent 级，不需要 session_id) -----------------------
+    # -- L3 Core (team+agent level, no session_id needed) -----------------------
 
     def read_core(self) -> Dict[str, Any]:
         """``POST /v3/core/read``"""
@@ -519,36 +519,36 @@ class MemoryClient:
         )
 
     def count_core(self) -> Dict[str, Any]:
-        """``POST /v3/core/count`` — 统计核心记忆文件数量。"""
+        """``POST /v3/core/count`` — count core memory files."""
         return self._stub.post(f"{_V3}/core/count", self._iso.base_body())
 
     # -- Chat Memory (asset-level) -----------------------------------------
 
     def clear_chat_memory(self, memory_ids: List[str]) -> Dict[str, Any]:
-        """``POST /v3/chat-memory/clear`` — 清空 chat memory 全部内容、保留资产。
+        """``POST /v3/chat-memory/clear`` — clear all content of a chat memory while keeping the asset.
 
-        清空范围：L0 / L1 / L2 / L3 + 向量 + 文件。
-        保留内容：``memory_id``、Team/Agent 归属、Agent 绑定、ACL、Owner、
-        名称、可见性 —— 清空后 Agent 继续用原 ``memory_id`` 写入，无需重建。
+        Cleared: L0 / L1 / L2 / L3 + vectors + files.
+        Kept: ``memory_id``, Team/Agent ownership, Agent bindings, ACL, Owner,
+        name, visibility -- after clearing, the Agent keeps writing with the original ``memory_id``; no rebuild needed.
 
-        与 L0/L1 删除接口不同，本接口是**资产级**操作：
+        Unlike the L0/L1 delete endpoints, this is an **asset-level** operation:
 
-        * 作用域由 ``memory_ids`` 自身决定，不使用隔离三元组
-        * 任一 ``memory_id`` 不存在或不是 chat_memory 时**整批拒绝**，一条都不清
-        * 幂等：已清空过的再次调用仍返回成功，计数为 0
+        * scope is determined by ``memory_ids`` itself; the isolation triple is not used
+        * if any ``memory_id`` does not exist or is not a chat_memory, the **whole batch is rejected** and nothing is cleared
+        * idempotent: calling again on an already-cleared memory still succeeds, with counts of 0
 
-        权限：与其它删除接口一致，内核不做用户级鉴权。若需要"仅 Owner 可清空"
-        的约束，请走面板后端 ``/api/v1/chat-memory/clear``（那里会校验 Owner）。
+        Permissions: as with other delete endpoints, the kernel does no user-level auth. If you need an "Owner only" restriction,
+        go through the panel backend ``/api/v1/chat-memory/clear`` (which validates the Owner).
 
-        失败项会带 ``retryable`` 标志；为 True 表示服务端已自动重试仍未成功，
-        稍后重试即可补齐残留内容。
+        Failed items carry a ``retryable`` flag; True means the server already retried automatically without success,
+        and retrying later will clean up the remaining content.
 
-        :param memory_ids: 待清空的资产 id，1–100 个（自动去重）
+        :param memory_ids: asset ids to clear, 1-100 items (auto-deduplicated)
         """
         normalized = _normalize_delete_ids("memory_ids", memory_ids, 100)
         if not normalized:
             raise ParamError("clear_chat_memory requires a non-empty memory_ids list")
-        # 注意：不带隔离三元组 —— 作用域由 memory_ids 决定。
+        # Note: no isolation triple is sent -- scope is determined by memory_ids.
         return self._stub.post(f"{_V3}/chat-memory/clear", {"memory_ids": normalized})
 
     # -- Lifecycle ---------------------------------------------------------
@@ -568,10 +568,10 @@ class MemoryClient:
 # ---------------------------------------------------------------------------
 
 class AsyncMemoryClient:
-    """v3 异步客户端 — 严格 isolation L0–L3 数据面（含 count endpoint，async 版本）。
+    """v3 async client -- strict-isolation L0-L3 data plane (including count endpoints, async version).
 
-    与同步版本一致：构造必填 team+agent+user；session_id 全 L0–L3 都可选
-    （缺时按 (team,agent,user) 跨 session 聚合）。
+    Same as the sync version: team+agent+user are required at construction; session_id is optional for all L0-L3
+    (when missing, aggregates across sessions by (team,agent,user)).
     """
 
     def __init__(
@@ -596,7 +596,7 @@ class AsyncMemoryClient:
         else:
             if not service_id:
                 raise ParamError("service_id must be provided")
-            # user_key 可选：内核不校验，前置网关/面板可能需要调用方身份。
+            # user_key is optional: the kernel does not validate it, but an upstream gateway/panel may need the caller identity.
             self._stub = AsyncHttpStub(
                 endpoint, api_key, service_id,
                 timeout=timeout, verify=verify, user_key=user_key,
@@ -625,8 +625,8 @@ class AsyncMemoryClient:
         return clone
 
     # -- L0 Conversation ---------------------------------------------------
-    # 写入必须带 session_id（否则服务端会静默塞进默认 bucket，串数据）；
-    # 读接口 session_id 可选，缺则跨 session 聚合。
+    # Writes must carry a session_id (otherwise the server silently puts them into the default bucket and mixes data);
+    # for read endpoints session_id is optional; when missing they aggregate across sessions.
 
     async def add_conversation(
         self,
@@ -634,7 +634,7 @@ class AsyncMemoryClient:
         *,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/conversation/add`` — 写入必填 session_id（构造或调用二选一）。"""
+        """``POST /v3/conversation/add`` — session_id is required for writes (either at construction or per call)."""
         return await self._stub.post(
             f"{_V3}/conversation/add",
             _strip_none({
@@ -689,7 +689,7 @@ class AsyncMemoryClient:
         session_ids: Optional[List[str]] = None,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/conversation/delete``（异步）。语义同同步版本。"""
+        """``POST /v3/conversation/delete``(async). Same semantics as the sync version."""
         normalized_messages = _normalize_delete_ids("message_ids", message_ids, 5000)
         normalized_sessions = _normalize_delete_ids("session_ids", session_ids, 100)
 
@@ -733,7 +733,7 @@ class AsyncMemoryClient:
             }),
         )
 
-    # -- L1 Atomic (session_id 可选，缺则跨 session 聚合) -----------------
+    # -- L1 Atomic (session_id optional; when missing, aggregates across sessions) -----------------
 
     async def update_atomic(
         self,
@@ -798,7 +798,7 @@ class AsyncMemoryClient:
         *,
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """``POST /v3/atomic/delete``（异步）。ids 必填，单次至多 5000 条。"""
+        """``POST /v3/atomic/delete``(async). ids are required, at most 5000 per call."""
         normalized = _normalize_delete_ids("ids", ids, 5000)
         if not normalized:
             raise ParamError("delete_atomic requires a non-empty ids list")
@@ -830,7 +830,7 @@ class AsyncMemoryClient:
             }),
         )
 
-    # -- L2 Scenario (team+agent 级，不需要 session_id) -------------------
+    # -- L2 Scenario (team+agent level, no session_id needed) -------------------
 
     async def list_scenarios(self, *, path_prefix: Optional[str] = None) -> Dict[str, Any]:
         return await self._stub.post(
@@ -871,7 +871,7 @@ class AsyncMemoryClient:
             _strip_none({**self._iso.base_body(), "path_prefix": path_prefix}),
         )
 
-    # -- L3 Core (team+agent 级，不需要 session_id) -----------------------
+    # -- L3 Core (team+agent level, no session_id needed) -----------------------
 
     async def read_core(self) -> Dict[str, Any]:
         return await self._stub.post(f"{_V3}/core/read", self._iso.base_body())
@@ -888,11 +888,11 @@ class AsyncMemoryClient:
     # -- Chat Memory (asset-level) -----------------------------------------
 
     async def clear_chat_memory(self, memory_ids: List[str]) -> Dict[str, Any]:
-        """``POST /v3/chat-memory/clear``（异步）。语义同同步版本。"""
+        """``POST /v3/chat-memory/clear``(async). Same semantics as the sync version."""
         normalized = _normalize_delete_ids("memory_ids", memory_ids, 100)
         if not normalized:
             raise ParamError("clear_chat_memory requires a non-empty memory_ids list")
-        # 注意：不带隔离三元组 —— 作用域由 memory_ids 决定。
+        # Note: no isolation triple is sent -- scope is determined by memory_ids.
         return await self._stub.post(f"{_V3}/chat-memory/clear", {"memory_ids": normalized})
 
     async def close(self) -> None:

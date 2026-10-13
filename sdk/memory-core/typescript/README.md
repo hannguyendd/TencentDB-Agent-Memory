@@ -3,10 +3,10 @@
 TypeScript SDK for **TencentDB Agent Memory** — v3 strict-isolation data-plane
 API + `/v3/skill/*` + `/v3/meta/*` metadata management.
 
-- 默认 `MemoryClient` 就是 v3 严格 isolation 版本（构造时必须传 `teamId` /
-  `agentId` / `userId`）。
-- 老代码若之前从 `.../v2/v3` 子路径导入，可继续用 —— 子路径保留为向后兼容
-  别名，与顶级 export 是同一个类。
+- The default `MemoryClient` is the v3 strict-isolation version (`teamId` /
+  `agentId` / `userId` must be passed at construction).
+- Existing code that previously imported from the `.../v2/v3` subpath can keep doing so -- the subpath is kept as a
+  backward-compatible alias and is the same class as the top-level export.
 
 ## Install
 
@@ -21,15 +21,15 @@ import { MemoryClient } from "@tencentdb-agent-memory/memory-sdk-ts-v2";
 
 const client = new MemoryClient({
   endpoint: "http://127.0.0.1:8420",
-  apiKey: "your-user-key",           // 从面板拿的 sk-mem-…
+  apiKey: "your-user-key",           // sk-mem-… obtained from the panel
   serviceId: "your-memory-instance-id",
   teamId: "team-xxx",
   agentId: "agt-xxx",
   userId: "usr-xxx",
-  sessionId: "sess-1",                // 可选：省略/清空后 L0/L1 跨 session 聚合
+  sessionId: "sess-1",                // optional: when omitted/cleared, L0/L1 aggregate across sessions
 });
 
-// L0：写对话
+// L0: write conversation
 await client.addConversation({
   messages: [
     { role: "user", content: "Hello" },
@@ -37,7 +37,7 @@ await client.addConversation({
   ],
 });
 
-// L0：查
+// L0: query
 const l0 = await client.queryConversation({ limit: 20, offset: 0 });
 const allSessions = await client.withIsolation({ sessionId: null }).queryConversation({ limit: 20 });
 
@@ -47,14 +47,14 @@ const scene = await client.readScenario({ path: "work.md" });
 const core = await client.readCore();
 ```
 
-v3 数据面差异要点：
+Key differences in the v3 data plane:
 
-- 路径统一走 `/v3/*`
-- 构造时 `teamId` / `agentId` / `userId` 都是必填（严格 isolation）
-- `sessionId` 可选：
-  - 传：L0/L1 限定在单个 session
-  - 不传或 `withIsolation({ sessionId: null })`：L0/L1 跨 session 聚合到 team+agent+user
-  - L2/L3 是 team+agent profile，不消费 `sessionId`
+- All paths use `/v3/*`
+- `teamId` / `agentId` / `userId` are all required at construction (strict isolation)
+- `sessionId` is optional:
+  - Provided: L0/L1 are scoped to a single session
+  - Omitted or `withIsolation({ sessionId: null })`: L0/L1 aggregate across sessions at the team+agent+user level
+  - L2/L3 are team+agent profiles and do not consume `sessionId`
 
 ## API Methods
 

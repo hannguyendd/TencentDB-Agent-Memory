@@ -4,11 +4,11 @@
  * Implements the SessionRepo interface. Key design:
  *   inj:sess:{spaceId}:{userId}:{agentSource}:{sessionId}  = SessionInitState JSON
  *
- * spaceId 是 P4 kernel-sts 新增的隔离段。老 caller 传空字符串时用 `_default` 兜底。
+ * spaceId is the isolation segment added by P4 kernel-sts. Old callers passing an empty string fall back to `_default`.
  *
- * 由于 sessionKey === sessionId 恒成立、by-sid 反查已在 SessionRepo 接口中
- * 删除（详见 `2026-07-10-cos-ttl-nottl-split-plan.md`），本实现也一并
- * 删除反向索引写入。
+ * Since sessionKey === sessionId always holds and the by-sid reverse lookup has been
+ * removed from the SessionRepo interface (see `2026-07-10-cos-ttl-nottl-split-plan.md`), this implementation also
+ * drops the reverse-index writes.
  *
  * All errors degrade silently — the in-memory Map is always authoritative.
  */
@@ -47,13 +47,13 @@ export class RedisSessionRepo implements SessionRepo {
     state: SessionInitState,
   ): Promise<void> {
     const key = KEY_PREFIX + compositeKey(spaceId, userId, agentSource, sessionId);
-    // await write-through：多节点部署下 pod A 关流前 L2a 必须落盘，
-    // 否则 pod B turn-2 会 L2a miss → tryHistoryScan bypass 直接透传 LLM。
-    // 见 2026-07-13 修复；写失败仍静默降级（L1 依旧是权威 fast path）。
+    // await the write-through: in multi-node deployments L2a must be persisted before pod A closes the stream,
+    // otherwise pod B turn-2 will miss L2a -> tryHistoryScan bypass -> pass straight through to the LLM.
+    // See the 2026-07-13 fix; write failures still degrade silently (L1 remains the authoritative fast path).
     try {
       await this.redis.setex(key, this.ttl, JSON.stringify(state));
     } catch {
-      /* silent — L1 authoritative fast path 仍然生效 */
+      /* silent — the L1 authoritative fast path still applies */
     }
   }
 

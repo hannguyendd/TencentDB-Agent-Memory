@@ -1,21 +1,21 @@
 /**
- * Session registration — 本地构建 SessionInfo，不再调用 TMC。
+ * Session registration — builds SessionInfo locally, no longer calls TMC.
  *
- * proxy 通过 SessionStore（L1 内存 + L2 Redis/SQLite）独立持久化 session
- * 状态，不再需要 POST /api/v1/proxy/sessions 写入 TMC。用户身份直接从
- * apiKey → auth/verify 拿到。
+ * The proxy persists session state independently via SessionStore (L1 memory + L2 Redis/SQLite),
+ * so it no longer needs to POST /api/v1/proxy/sessions to write to TMC. User identity comes
+ * directly from apiKey → auth/verify.
  */
 
 import type { SessionInfo, SessionRegistrationData } from "./types.js";
 
 /**
- * 本地构建 SessionInfo（不调用 TMC）。
+ * Build SessionInfo locally (does not call TMC).
  *
- * @param spaceId 来自请求 URL path `/proxy/<spaceId>/...` 的内核实例 ID
- *   （如 `mem-example001`）。注入器构造 MetadataClient 时会用它做
- *   `x-tdai-service-id` header —— 若为空字符串，内核会返回
- *   `invalid_user_key`，属于预期行为（caller 已在 session init bypass
- *   中处理）。
+ * @param spaceId Kernel instance ID from the request URL path `/proxy/<spaceId>/...`
+ *   (e.g. `mem-example001`). The injector uses it for the
+ *   `x-tdai-service-id` header when constructing MetadataClient — if it is an empty string,
+ *   the kernel returns `invalid_user_key`, which is expected behavior (the caller already
+ *   handles it in the session init bypass).
  */
 export function buildSessionInfo(
   data: SessionRegistrationData,

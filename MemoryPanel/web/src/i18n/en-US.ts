@@ -287,7 +287,7 @@ export const enUS = {
     'Admin accounts are currently for organization management only (creating teams, adding members). Please use a regular member account for resource management.',
 
   // ===== Wiki =====
-  // 设计 2026-09-21：合并后的单一导入入口（替代原「添加」+「Ingest」）
+  // Design 2026-09-21: merged single import entry (replaces the former "Add" + "Ingest")
   'wiki.detail.import': 'Import Docs',
   'wiki.import.caption': 'Import Docs',
   'wiki.import.uploadAndIngest': 'Upload and ingest',

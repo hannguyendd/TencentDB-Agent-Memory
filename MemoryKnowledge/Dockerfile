@@ -13,7 +13,7 @@
 # ── Stage 1: build ──
 FROM node:22-slim AS builder
 
-# apt 源默认走 Debian 官方，公网可直接构建。内网构建加速：
+# apt sources default to the official Debian mirrors, so public-network builds work out of the box. To speed up intranet builds:
 #   docker build --build-arg APT_MIRROR=mirrors.tencent.com .
 ARG APT_MIRROR=deb.debian.org
 RUN if [ "$APT_MIRROR" != "deb.debian.org" ]; then \
@@ -29,9 +29,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /app
 
-# node:22-slim 自带 npm@10.9.8 有 arborist "edgesOut" bug（Cannot read
-# properties of null (reading 'edgesOut')）—— 干净 `npm install` 稳定挂。
-# 升到 npm@11 规避；不影响其它构建行为。
+# The npm@10.9.8 bundled with node:22-slim has an arborist "edgesOut" bug (Cannot read
+# properties of null (reading 'edgesOut')); a clean `npm install` fails consistently.
+# Upgrading to npm@11 avoids it; other build behavior is unaffected.
 RUN npm install -g npm@11 --no-audit --no-fund
 
 COPY package.json .npmrc* ./
@@ -40,8 +40,8 @@ RUN --mount=type=cache,id=npm-cache-knowledge,target=/root/.npm \
 
 COPY tsconfig.json tsdown.config.ts ./
 COPY src/ ./src/
-# Swagger UI 运行时要读的 spec（见 src/server.ts）。放在包根而非 docs/，
-# 镜像因此完全不依赖文档目录。
+# The spec read by Swagger UI at runtime (see src/server.ts). Placed at the package root rather than docs/,
+# so the image does not depend on the docs directory at all.
 COPY openapi.yaml ./openapi.yaml
 
 RUN npm run build

@@ -1,15 +1,15 @@
 /**
- * stages/session-reset-confirmation.ts — mem:session-reset 完成后的确认响应。
+ * stages/session-reset-confirmation.ts — confirmation response after mem:session-reset completes.
  *
- * 提取自 4 处 30 行完全相同的代码块 (blueprint §2.4):
- *   - openai-chat runner: reset 后跑完 session-init 弹 form → 提示 ok
- *   - anthropic runner:   同上
- *   - codex runner:       同上
- *   - workbuddy runner:   同上
+ * Extracted from 4 identical 30-line code blocks (blueprint §2.4):
+ *   - openai-chat runner: after reset, session-init runs and pops the form -> prompt ok
+ *   - anthropic runner:   same as above
+ *   - codex runner:       same as above
+ *   - workbuddy runner:   same as above
  *
- * 语义: session-init state machine 完成 reset 流程后, 拿 agent/team/task detail
- * 组装成 "✅ 已重新绑定团队资产" 文案, 通过 buildMemResponse 返回。
- * caller 拿返回值直接下发。
+ * Semantics: after the session-init state machine completes the reset flow, take the agent/team/task detail
+ * and assemble the "✅ Team assets re-bound" text, returned via buildMemResponse.
+ * The caller sends the returned value directly downstream.
  */
 
 import type { SessionResetProtocol } from "./session-reset-pre-hook.js";
@@ -27,12 +27,12 @@ export interface SessionResetConfirmationInput {
   resetFlowResult: ResetFlowResult;
   protocol: SessionResetProtocol;
   isStream: boolean;
-  /** anthropic 传 body.thinking */
+  /** anthropic passes body.thinking */
   thinking?: unknown;
 }
 
 /**
- * 构造 mem:session-reset 完成的确认响应。
+ * Build the confirmation response for mem:session-reset completion.
  */
 export async function stageSessionResetConfirmation(
   input: SessionResetConfirmationInput,
@@ -44,15 +44,15 @@ export async function stageSessionResetConfirmation(
       ? `- **Team**: ${teamId}`
       : null;
   const lines = bypassed
-    ? ["✅ 已跳过团队资产关联", "", "后续对话不注入任何团队资产（Skill / 记忆 / Knowledge）。"]
+    ? ["✅ Team asset association skipped", "", "Subsequent conversations will not inject any team assets (Skill / memory / Knowledge)."]
     : [
-        "✅ 已重新绑定团队资产",
+        "✅ Team assets re-bound",
         "",
         `- **Agent**: ${agentName}${agentIdShort ? ` (${agentIdShort})` : ""}`,
         teamLine,
-        taskName ? `- **Task**: ${taskName}` : "- **Task**: 未关联",
+        taskName ? `- **Task**: ${taskName}` : "- **Task**: Not associated",
         "",
-        "后续对话将使用新 Agent 的 Skill、记忆和知识资产。",
+        "Subsequent conversations will use the new Agent's Skills, memory and knowledge assets.",
       ].filter(Boolean);
   const text = (lines as string[]).join("\n");
 

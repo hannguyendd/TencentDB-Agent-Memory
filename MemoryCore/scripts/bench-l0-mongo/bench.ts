@@ -416,16 +416,16 @@ async function main() {
         const L = insert.batchLatency, S = insert.stalls;
         console.log(`    docs/s=${insert.docsPerSec} errors=${insert.errors}`);
         console.log(
-          `    批延迟 p50=${L.p50Ms}ms p90=${L.p90Ms}ms p95=${L.p95Ms}ms` +
+          `    batch latency p50=${L.p50Ms}ms p90=${L.p90Ms}ms p95=${L.p95Ms}ms` +
             ` p99=${L.p99Ms}ms p999=${L.p999Ms}ms max=${L.maxMs}ms`,
         );
         console.log(
-          `    [stall] w:${args.writeConcern} — 零吞吐窗口=${S.zeroWindows} 降级窗口=${S.degradedWindows}` +
-            ` 慢批次=${S.slowBatches}/${L.count} (${S.slowBatchPct}%, 阈值 ${S.slowBatchThresholdMs}ms)` +
-            ` 最长单批=${(S.longestBatchMs / 1000).toFixed(1)}s`,
+          `    [stall] w:${args.writeConcern} — zero-throughput windows=${S.zeroWindows} degraded windows=${S.degradedWindows}` +
+            ` slow batches=${S.slowBatches}/${L.count} (${S.slowBatchPct}%, threshold ${S.slowBatchThresholdMs}ms)` +
+            ` longest batch=${(S.longestBatchMs / 1000).toFixed(1)}s`,
         );
         if (S.zeroWindows > 0) {
-          console.log(`    [stall] 零吞吐窗口出现在 t = ${S.zeroWindowAtMs.map((m) => (m / 60000).toFixed(0) + "m").join(", ")}`);
+          console.log(`    [stall] zero-throughput windows at t = ${S.zeroWindowAtMs.map((m) => (m / 60000).toFixed(0) + "m").join(", ")}`);
         }
       }
 

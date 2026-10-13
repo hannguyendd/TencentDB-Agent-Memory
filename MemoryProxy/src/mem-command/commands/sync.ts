@@ -1,13 +1,13 @@
 /**
- * mem:sync — 刷新当前 session 的全部注入缓存
+ * mem:sync - refresh all injection caches of the current session
  *
- * 底层动作覆盖：
- *   - 重新拉 Agent / Task detail 覆写到 SessionStore（描述、prompt、goal 都跟着更新）
- *   - 重跑所有声明了 session_init / hybrid 缓存策略的 hook（Skill / 记忆 /
- *     Knowledge / 固定资产 等），把新块 putMany 到 HookCacheRepo (COS)
+ * Underlying actions:
+ *   - re-fetch Agent / Task detail and overwrite SessionStore (description, prompt, goal are all updated)
+ *   - re-run all hooks that declare a session_init / hybrid cache strategy (Skill / memory /
+ *     Knowledge / pinned assets, etc.) and putMany the new blocks into HookCacheRepo (COS)
  *
- * 文案侧只讲"资产 / 描述"这些用户能理解的概念，不暴露 injector id、hook 名字、
- * archive_key 等内部术语。
+ * The user-facing text only uses concepts users understand ("assets / descriptions"); it does not expose
+ * internal terms such as injector id, hook name, or archive_key.
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
@@ -16,20 +16,20 @@ import { refreshSessionCache, type RefreshResult } from "../../routes/session-re
 
 function buildSuccessMessage(result: RefreshResult): string {
   const parts: string[] = [];
-  parts.push("Skill / 记忆 / Knowledge 资产");
+  parts.push("Skill / memory / Knowledge assets");
   if (result.agentRefreshed || result.taskRefreshed) {
-    parts.push("Task & Agent 描述");
+    parts.push("Task & Agent descriptions");
   }
-  const scope = parts.join("、");
-  return `✅ 所有资产注入已刷新（${scope}），耗时 ${result.tookMs}ms`;
+  const scope = parts.join(", ");
+  return `✅ All asset injections refreshed (${scope}), took ${result.tookMs}ms`;
 }
 
 export async function executeSync(ctx: MemCommandContext): Promise<MemCommandResult> {
   const requestId = `mem-cmd-${Date.now()}`;
 
-  // 未绑定时不走 refreshSessionCache(它会暴露 session key 给用户)
+  // When unbound, skip refreshSessionCache (it would expose the session key to the user)
   if (!ctx.sessionInfo || Object.keys(ctx.sessionInfo).length === 0) {
-    const messageText = "⚠️ 当前会话未绑定团队资产，无法同步。请先用 `mem:session-reset` 选择 Team/Agent 后再试。";
+    const messageText = "⚠️ The current session is not bound to team assets, so sync is unavailable. Please use `mem:session-reset` to select a Team/Agent first, then try again.";
     return {
       success: false,
       messageText,
@@ -47,7 +47,7 @@ export async function executeSync(ctx: MemCommandContext): Promise<MemCommandRes
 
   const messageText = result.success
     ? buildSuccessMessage(result)
-    : `❌ 资产刷新失败：${result.error ?? "未知错误"}`;
+    : `❌ Asset refresh failed: ${result.error ?? "unknown error"}`;
 
   const response = buildMemResponse(messageText, {
     protocol: ctx.protocol,
@@ -59,7 +59,7 @@ export async function executeSync(ctx: MemCommandContext): Promise<MemCommandRes
   return {
     success: result.success,
     messageText,
-    // 详细的 hookId 列表 / 时长 保留在结构化数据里给面板 / 日志用。
+    // The detailed hookId list / duration is kept in the structured data for the panel / logs.
     data: result.success
       ? {
           refreshed: result.refreshed,

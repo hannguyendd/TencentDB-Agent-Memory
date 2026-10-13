@@ -1,15 +1,15 @@
 /**
- * stages/system-user.ts — systemUser 短路 stage (Phase 4 stage 化)。
+ * stages/system-user.ts — systemUser short-circuit stage (Phase 4 stage-ification).
  *
- * 提取自 4 处近乎相同的 systemUser 短路块:
- *   - openai-chat runner (line 665-670): body 传入
- *   - anthropic runner (line 691-696): body 传入
- *   - utility runner (line 117-120): 不传 body (auxHandler 自己再读)
+ * Extracted from 4 nearly identical systemUser short-circuit blocks:
+ *   - openai-chat runner (line 665-670): body passed in
+ *   - anthropic runner (line 691-696): body passed in
+ *   - utility runner (line 117-120): no body passed (auxHandler reads it again itself)
  *
- * 语义 (blueprint §5.2):
- *   - hasSystemUsers()=false → 直接放过 null
- *   - matchSystemUserByUserId 匹配 → 立即 handleSystemUserPassthrough
- *   - 未匹配 → 返回 null 让 caller 继续 pipeline
+ * Semantics (blueprint §5.2):
+ *   - hasSystemUsers()=false -> return null directly
+ *   - matchSystemUserByUserId matches -> immediately handleSystemUserPassthrough
+ *   - no match -> return null so the caller continues the pipeline
  */
 
 import type { Context } from "hono";
@@ -18,11 +18,11 @@ import { matchSystemUserByUserId, hasSystemUsers } from "../../systemUser.js";
 import { handleSystemUserPassthrough } from "../../systemUserPassthrough.js";
 
 /**
- * 检查是否命中 systemUser 并立即 passthrough; 未命中返回 null。
+ * Check whether a systemUser is hit and passthrough immediately; return null if not hit.
  *
- * @param userId - 已 verify 过的 userId (从 stageAuth 拿), 空字符串 = 未鉴权跳过
- * @param body   - 可选: openai-chat/anthropic 已 parse 的 body 传入,
- *                 handleSystemUserPassthrough 会 serialize 送上游; utility 传 undefined。
+ * @param userId - the already-verified userId (from stageAuth), empty string = unauthenticated, skip
+ * @param body   - optional: the already-parsed body from openai-chat/anthropic is passed in,
+ *                 handleSystemUserPassthrough serializes and sends it upstream; utility passes undefined.
  */
 export async function stageSystemUser(
   c: Context,

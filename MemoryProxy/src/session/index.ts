@@ -1,15 +1,15 @@
 /**
  * Session Initialization Module — Public API.
  *
- * 拆分后的架构：
- *   - codebuddy/    → CodeBuddy 专属 session-init（ask_followup_question form, XML extractor）
- *   - claude-code/  → Claude Code 专属 session-init（AskUserQuestion form, JSON extractor, 分页）
- *   - 共享模块：store.ts, types.ts, context-injector.ts, registrar.ts
+ * Architecture after the split:
+ *   - codebuddy/    → CodeBuddy-specific session-init (ask_followup_question form, XML extractor)
+ *   - claude-code/  → Claude Code-specific session-init (AskUserQuestion form, JSON extractor, pagination)
+ *   - shared modules: store.ts, types.ts, context-injector.ts, registrar.ts
  *
- * 内核 API 调用统一走 src/meta/client.ts (MetadataClient)。
+ * Kernel API calls all go through src/meta/client.ts (MetadataClient).
  */
 
-// ── 共享模块 ──────────────────────────────────────────────────────────────────
+// ── Shared modules ────────────────────────────────────────────────────────────
 
 export { SessionStore, getSessionStore } from "./store.js";
 export type {
@@ -32,7 +32,7 @@ export { injectSessionContext, SESSION_CONTEXT_OPEN, SESSION_CONTEXT_CLOSE } fro
 export { parsePresetIdentity, resolvePresetIdentity } from "./preset.js";
 export type { PresetIdentity, PresetResolution } from "./preset.js";
 
-// ── CodeBuddy 专属模块 ─────────────────────────────────────────────────────────
+// ── CodeBuddy-specific modules ────────────────────────────────────────────────
 
 export {
   handleSessionInit as handleCodeBuddySessionInit,
@@ -46,7 +46,7 @@ export {
   getLastUserMessageText as getCodeBuddyLastUserMessage,
 } from "./codebuddy/index.js";
 
-// ── Claude Code 专属模块 ───────────────────────────────────────────────────────
+// ── Claude Code-specific modules ──────────────────────────────────────────────
 
 export {
   handleSessionInit as handleClaudeCodeSessionInit,
@@ -61,7 +61,7 @@ export {
   getLastUserMessageText as getClaudeCodeLastUserMessage,
 } from "./claude-code/index.js";
 
-// ── 旧兼容 API（向后兼容 handler.ts 旧调用方式）─────────────────────────────────
+// ── Legacy compat API (backward compatible with old handler.ts call style) ────
 
 import type { SessionInitConfig } from "../types.js";
 import { SessionStore } from "./store.js";
@@ -97,8 +97,8 @@ export type SessionRequestContext = CBSessionRequestContext & Partial<CCSessionR
 export type SessionInitResult = CBSessionInitResult;
 
 /**
- * @deprecated 请使用 handleCodeBuddySessionInit() 或 handleClaudeCodeSessionInit()。
- * 此函数根据 agentSource 参数路由到对应的实现。
+ * @deprecated Use handleCodeBuddySessionInit() or handleClaudeCodeSessionInit() instead.
+ * This function routes to the matching implementation based on the agentSource parameter.
  */
 import type { MetadataClient } from "../meta/client.js";
 import type { PresetIdentity } from "./preset.js";
@@ -119,8 +119,8 @@ export async function handleSessionInit(
   if (agentSource === "claude-code") {
     return ccHandle(
       sessionKey, userId, messages, config, store,
-      // 直接透传整个 reqCtx，避免手抠字段时把新加字段（如 codex 的
-      // codexAnswerInput）漏掉。protocol MUST be forwarded — without it,
+      // Forward the whole reqCtx so that newly added fields (such as codex's
+      // codexAnswerInput) are not dropped by hand-picking fields. protocol MUST be forwarded — without it,
       // applyArtifactsAndContext takes the openai path (injects
       // <session_context> into messages as a role=system message) instead of
       // the anthropic path (returns systemAppend that anthropicHandler merges
@@ -135,10 +135,10 @@ export async function handleSessionInit(
       presetIdentity,
     );
   }
-  // 同上：整个 reqCtx 透传给 CB 状态机。codexHandler 会把 body.input[] 塞在
-  // reqCtx.codexAnswerInput 里，供 CB 状态机内部的 codex-only pre-checks 段
-  // （session/codebuddy/init.ts 里 detectCodexDefaultGate + detectCodexMore）
-  // 识别 Default gate 与 MORE 翻页。手抠字段会把它丢掉 → codex 分页失效。
+  // Same as above: forward the whole reqCtx to the CB state machine. codexHandler puts body.input[] in
+  // reqCtx.codexAnswerInput, for the codex-only pre-checks segment inside the CB state machine
+  // (detectCodexDefaultGate + detectCodexMore in session/codebuddy/init.ts)
+  // to recognize the Default gate and MORE pagination. Hand-picking fields would drop it → codex pagination breaks.
   const result = await cbHandle(
     sessionKey, userId, messages, config, store,
     reqCtx,
@@ -149,26 +149,26 @@ export async function handleSessionInit(
     agentSource,
   );
 
-  // WorkBuddy 客户端复用 CB 状态机（uninitialized → pending_team → pending_agent_task
-  // → initialized 全套流程），但 form 渲染需要用 CC 的 `AskUserQuestion` shape +
-  // OpenAI chat/completions SSE tool_calls 传输（WB 客户端是 CC tool 语义 +
-  // OpenAI 协议的混合体，抓包 [wb-ask-user-schema] 已实证）。
+  // The WorkBuddy client reuses the CB state machine (the full uninitialized → pending_team → pending_agent_task
+  // → initialized flow), but form rendering needs the CC `AskUserQuestion` shape +
+  // OpenAI chat/completions SSE tool_calls transport (the WB client is a hybrid of CC tool semantics +
+  // the OpenAI protocol, confirmed by packet capture [wb-ask-user-schema]).
   //
-  // 参照 codex 的模式（`session/codex/form.ts::buildFormResponse`），这里在 CB
-  // 状态机产出 formData 后**外层重渲染**：丢掉 result.response（CB 的
-  // ask_followup_question SSE），改用 workbuddy/form.ts 生成 AskUserQuestion SSE。
-  // 好处：CB 状态机代码零改动，10 处 intercepted 站点无需逐个分派。
+  // Following the codex pattern (`session/codex/form.ts::buildFormResponse`), here after the CB
+  // state machine produces formData we **re-render in the outer layer**: drop result.response (the CB
+  // ask_followup_question SSE) and use workbuddy/form.ts to generate the AskUserQuestion SSE.
+  // Benefit: zero changes to CB state machine code, and the 10 intercepted sites need no individual dispatch.
   if (agentSource === "workbuddy" && result.intercepted && result.formData) {
     const cbFd = result.formData;
     const wbFd: WBFormData = {
       teams: cbFd.teams,
-      // CB 状态机的 stage 值 (asset_confirm | team | agent_select | task_select |
-      // agent_task) 与 WB form 的 FormStage 完全一致；直接透传。
+      // The stage values of the CB state machine (asset_confirm | team | agent_select | task_select |
+      // agent_task) match the WB form's FormStage exactly; forward them directly.
       stage: cbFd.stage as WBFormStage,
       selectedTeamId: cbFd.selectedTeamId,
       selectedAgentId: cbFd.selectedAgentId,
-      // CB 携带的翻页字段有 teamPage / agentPage / taskPage（codex 透传用），
-      // WB form 用单个 pageIndex —— 根据当前 stage 挑对应页码。
+      // The paging fields CB carries are teamPage / agentPage / taskPage (for codex passthrough),
+      // while the WB form uses a single pageIndex — pick the matching page number based on the current stage.
       pageIndex:
         cbFd.stage === "team" ? cbFd.teamPage
         : cbFd.stage === "agent_select" ? cbFd.agentPage
@@ -178,15 +178,15 @@ export async function handleSessionInit(
       stream: reqCtx.stream,
       modelId: reqCtx.modelId,
     };
-    // 能力探测：新版 WorkBuddy 官方 tools 集合里拿掉了 AskUserQuestion，
-    // 继续发 tool_calls SSE 客户端会收下但不渲染 → 卡死在 pending。
-    // 此时降级为**文字模式**（content chunk + markdown 编号列表），
-    // 通过 next / prev / skip 关键字 + 数字/名字/id 完成同一套 4-stage 交互。
+    // Capability detection: the new WorkBuddy official tools set dropped AskUserQuestion,
+    // and continuing to send tool_calls SSE means the client accepts but does not render → hangs in pending.
+    // In that case degrade to **text mode** (content chunk + markdown numbered list),
+    // completing the same 4-stage interaction via next / prev / skip keywords + number/name/id.
     //
-    // 判定逻辑集中在 detectClientCapabilities（handler.ts 层已计算好透传）：
-    //   - capabilities === undefined  → 视为 true，走原卡片路径（向前兼容）
-    //   - capabilities.askUserQuestion === true  → 走原卡片路径
-    //   - capabilities.askUserQuestion === false → 走文字模式
+    // The decision logic is centralized in detectClientCapabilities (already computed and forwarded at the handler.ts layer):
+    //   - capabilities === undefined  → treat as true, take the original card path (forward compatible)
+    //   - capabilities.askUserQuestion === true  → take the original card path
+    //   - capabilities.askUserQuestion === false → use text mode
     const askCapability = reqCtx.capabilities?.askUserQuestion;
     if (askCapability === false) {
       result.response = buildWorkBuddyTextFormResponse(wbFd);
@@ -195,11 +195,11 @@ export async function handleSessionInit(
     }
   }
 
-  // dsh (deepseek-harness) 客户端复用 CB 状态机 + 自己的 ask_user_question 载体。
-  // 与 workbuddy 完全对称：CB 状态机产出 formData 后外层重渲染 response,不共用
-  // CB 的 ask_followup_question(dsh preset 挂的是 dsh 原生 ask_user_question,
-  // 抓包实证 fixtures/dsh-tool-catalog-schema.json)。stage 值完全一致直接透传;
-  // dsh form 用 CC-shape 的单一 pageIndex,同 workbuddy 挑分页字段。
+  // The dsh (deepseek-harness) client reuses the CB state machine + its own ask_user_question carrier.
+  // Fully symmetric with workbuddy: after the CB state machine produces formData, re-render the response in the outer layer, without sharing
+  // CB's ask_followup_question (the dsh preset mounts dsh's native ask_user_question,
+  // confirmed by packet capture fixtures/dsh-tool-catalog-schema.json). Stage values are identical and forwarded directly;
+  // the dsh form uses a CC-shape single pageIndex, picking the paging field the same way as workbuddy.
   if (agentSource === "dsh" && result.intercepted && result.formData) {
     const cbFd = result.formData;
     const dshFd: DshFormData = {
@@ -215,26 +215,26 @@ export async function handleSessionInit(
       retry: cbFd.retry,
       stream: reqCtx.stream,
       modelId: reqCtx.modelId,
-      // dsh v0.2+ 走 anthropic /v1/messages(handler 层 reqCtx.protocol="anthropic")
-      // dsh v0.1.x 走 openai /v1/chat/completions(handler 层 reqCtx.protocol="openai"
-      // 或 undefined)。form builder 按此分支挑 SSE 骨架,见 dsh/form.ts buildFormResponse。
+      // dsh v0.2+ uses anthropic /v1/messages (at the handler layer reqCtx.protocol="anthropic")
+      // dsh v0.1.x uses openai /v1/chat/completions (at the handler layer reqCtx.protocol="openai"
+      // or undefined). The form builder picks the SSE skeleton by this branch, see dsh/form.ts buildFormResponse.
       protocol: reqCtx.protocol,
     };
     result.response = buildDshFormResponse(dshFd);
   }
 
-  // opencode 客户端（sst/opencode CLI，Bun 打包二进制）在 agent-loop 里维护一个
-  // 硬白名单 tools 集合：`bash, edit, glob, grep, invalid, question, read,
-  // skill, task, todowrite, webfetch, write`。任何名字不在白名单里的 tool_call
-  // 都会被客户端拒收并渲染成 `invalid [tool=xxx, error=Model tried to call
-  // unavailable tool]`（抓包 2026-08-19 实证：CB 的 `ask_followup_question`
-  // 被拒 3 次后 CB 状态机 abandon → 走 bypass）。
+  // The opencode client (sst/opencode CLI, a Bun-packaged binary) maintains in its agent loop a
+  // hard whitelist of tools: `bash, edit, glob, grep, invalid, question, read,
+  // skill, task, todowrite, webfetch, write`. Any tool_call whose name is not in the whitelist
+  // is rejected by the client and rendered as `invalid [tool=xxx, error=Model tried to call
+  // unavailable tool]` (confirmed by packet capture 2026-08-19: CB's `ask_followup_question`
+  // was rejected 3 times, after which the CB state machine abandoned → took the bypass).
   //
-  // 解决：与 workbuddy / dsh 完全对称——CB 状态机产出 formData 后**外层重渲染**，
-  // 换成 opencode 原生 `question` 工具的 tool_call SSE。stage 值直接透传，
-  // 分页字段按当前 stage 挑对应页码。
+  // Fix: fully symmetric with workbuddy / dsh — after the CB state machine produces formData, **re-render in the outer layer**,
+  // swapping in the tool_call SSE of opencode's native `question` tool. Stage values are forwarded directly,
+  // and paging fields pick the matching page number by current stage.
   //
-  // 详见：session/opencode/form.ts 头部注释（schema 依据 / 三处 shape 差异）。
+  // See: header comment of session/opencode/form.ts (schema basis / three shape differences).
   if (agentSource === "opencode" && result.intercepted && result.formData) {
     const cbFd = result.formData;
     const ocFd: OCFormData = {

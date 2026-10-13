@@ -1,10 +1,10 @@
 /**
- * 工蜂（内部 Git 平台）provider。
+ * Gongfeng (internal Git platform) provider.
  *
- * 站点地址一律由部署配置 `CODE_SOURCE_GONGFENG_SITE_BASE_URL` 提供，
- * **不在代码/注释中写入具体域名**。
+ * The site address is always supplied by the deployment config `CODE_SOURCE_GONGFENG_SITE_BASE_URL`,
+ * **no concrete domain is written in code/comments**.
  *
- * 认证：bearer（PAT）+ URL basic-auth，占位用户名见下方 cloneUsername。
+ * Auth: bearer (PAT) + URL basic-auth; see cloneUsername below for the placeholder username.
  */
 
 import type { ICodeSourceProvider } from "../types.js";
@@ -15,6 +15,6 @@ export const gongfengProvider: ICodeSourceProvider = {
   authMethod: bearerAuthMethod,
   cloneUsername: "private",
   sitePaths: {
-    tokenDoc: "profile/account", // 拼到站点根 → https://<host>/profile/account
+    tokenDoc: "profile/account", // appended to the site root -> https://<host>/profile/account
   },
 };

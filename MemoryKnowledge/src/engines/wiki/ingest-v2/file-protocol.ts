@@ -1,81 +1,81 @@
 /**
- * file-protocol.ts — 解析 LLM 输出的 FILE 块协议并校验落盘路径。
+ * file-protocol.ts — parse the FILE block protocol output by the LLM and validate the destination path.
  *
- * LLM 不能自由写文件；它输出带边界标记的文本协议，由我们解析后落盘：
+ * The LLM cannot write files freely; it outputs a text protocol with boundary markers, which we parse and then write to disk:
  *
  *   <<<FILE path="wiki/sources/redis.md">>>
  *   ---
  *   type: source
  *   ...
  *   ---
- *   正文...
+ *   body...
  *   <<<END>>>
  *
- * 一次响应可含多个 FILE 块。解析要容错（INTERFACE §5.1 / §7）：
- *   - 丢弃未闭合块（截断/超 token 时常见）。
- *   - 非法 path（非 wiki/ 内、含 ..、绝对路径）跳过并记录，不抛错。
+ * One response may contain multiple FILE blocks. Parsing must be fault-tolerant (INTERFACE §5.1 / §7):
+ *   - Discard unclosed blocks (common on truncation / token overrun).
+ *   - Illegal path (outside wiki/, contains .., absolute path) is skipped and recorded, without throwing.
  */
 
 export interface ParsedFile {
-  /** 规范化后的相对路径，保证位于 wiki/ 内（如 "wiki/entities/redis.md"）。 */
+  /** Normalized relative path, guaranteed to be inside wiki/ (e.g. "wiki/entities/redis.md"). */
   path: string;
-  /** 文件完整内容（含 frontmatter）。 */
+  /** Full file content (including frontmatter). */
   content: string;
 }
 
 export interface ParseResult {
   files: ParsedFile[];
-  /** 被跳过/丢弃的块的原因，用于日志与调试。 */
+  /** Reason a block was skipped/discarded, for logging and debugging. */
   warnings: string[];
 }
 
 /**
- * 开标签：标准为 >>>；模型偶发漏写一个 > 变成 >>。
- * 接受 ≥2 个收尾 >，避免「长输出但 files=0」。
+ * Opening tag: the standard is >>>; the model occasionally drops one > and writes >>.
+ * Accept >= 2 trailing >, avoiding "long output but files=0".
  */
 const OPEN_RE = /<<<FILE\s+path\s*=\s*"([^"]*)"\s*>>+/g;
 /**
- * 闭标签：标准为 <<<END>>>；模型偶发拆成 <<<\nEND>>>。
- * 仅放宽 END 两侧空白（含换行），仍要求字面 END。
+ * Closing tag: the standard is <<<END>>>; the model occasionally splits it into <<<\nEND>>>.
+ * Only relax the whitespace (including newlines) on both sides of END; the literal END is still required.
  */
 const CLOSE_RE = /<<<\s*END\s*>>>/g;
 
 /**
- * 校验并规范化 FILE 块声明的 path。
- * 返回规范化路径（POSIX 风格、wiki/ 前缀）或 null（非法，应跳过）。
+ * Validate and normalize the path declared by a FILE block.
+ * Returns the normalized path (POSIX style, wiki/ prefix) or null (illegal, should be skipped).
  *
- * 规则：
- *   - 必须是相对路径（拒绝绝对路径 / 盘符）。
- *   - 拆分后任一段不得为 ".." 或 "."（防穿越）。
- *   - 规范化后必须以 "wiki/" 开头（只允许写 wiki/**）。
+ * Rules:
+ *   - Must be a relative path (reject absolute paths / drive letters).
+ *   - After splitting, no segment may be ".." or "." (anti-traversal).
+ *   - After normalization it must start with "wiki/" (only wiki/** may be written).
  */
 export function normalizeWikiPath(raw: string): string | null {
   if (!raw) return null;
-  // 统一分隔符为 /
+  // Unify the separator to /
   let p = raw.trim().replace(/\\/g, "/");
   if (!p) return null;
-  // 拒绝绝对路径与 Windows 盘符
+  // Reject absolute paths and Windows drive letters
   if (p.startsWith("/") || /^[a-zA-Z]:\//.test(p)) return null;
-  // 去掉冗余的 ./ 前缀
+  // Strip redundant ./ prefix
   p = p.replace(/^(\.\/)+/, "");
   const segments = p.split("/").filter((s) => s.length > 0);
   if (segments.length === 0) return null;
-  // 防穿越：任何一段是 .. 或 . 都拒绝
+  // Anti-traversal: reject if any segment is .. or .
   for (const seg of segments) {
     if (seg === ".." || seg === ".") return null;
   }
   const normalized = segments.join("/");
-  // 白名单：只允许写 wiki/**（且不能就是 "wiki" 目录本身）
+  // Whitelist: only wiki/** may be written (and it cannot be the "wiki" directory itself)
   if (normalized !== "wiki" && !normalized.startsWith("wiki/")) return null;
   if (normalized === "wiki") return null;
   return normalized;
 }
 
 /**
- * 解析一段 LLM 输出文本，提取所有合法的 FILE 块。
+ * Parse a piece of LLM output text and extract all legal FILE blocks.
  *
- * @param text LLM 原始响应文本
- * @returns 合法文件列表 + 警告（被跳过的块）
+ * @param text raw LLM response text
+ * @returns list of legal files + warnings (skipped blocks)
  */
 export function parseFileBlocks(text: string): ParseResult {
   const files: ParsedFile[] = [];
@@ -92,26 +92,26 @@ export function parseFileBlocks(text: string): ParseResult {
     const closeMatch = CLOSE_RE.exec(text);
 
     if (!closeMatch) {
-      // 未闭合块 → 丢弃（通常是输出被截断）
-      warnings.push(`未闭合的 FILE 块，已丢弃: path="${rawPath}"`);
+      // Unclosed block -> discard (usually the output was truncated)
+      warnings.push(`Unclosed FILE block discarded: path="${rawPath}"`);
       break;
     }
 
-    // 防止下一次匹配跨过本块的 END
+    // Prevent the next match from crossing this block's END
     const closeIdx = closeMatch.index;
     const rawContent = text.slice(bodyStart, closeIdx);
     OPEN_RE.lastIndex = closeIdx + closeMatch[0].length;
 
     const normPath = normalizeWikiPath(rawPath);
     if (!normPath) {
-      warnings.push(`非法 path 已跳过: "${rawPath}"`);
+      warnings.push(`Illegal path skipped: "${rawPath}"`);
       continue;
     }
 
-    // 去掉块内容首尾多余空行，但保留 frontmatter 结构。
+    // Strip extra blank lines at the start and end of the block content, but keep the frontmatter structure.
     const content = stripBlockEdges(rawContent);
     if (!content.trim()) {
-      warnings.push(`空 FILE 块已跳过: "${normPath}"`);
+      warnings.push(`Empty FILE block skipped: "${normPath}"`);
       continue;
     }
 
@@ -121,11 +121,11 @@ export function parseFileBlocks(text: string): ParseResult {
   return { files, warnings };
 }
 
-/** 去掉块开头的换行与结尾多余空白，并保证以单个换行结尾。 */
+/** Strip the leading newline and trailing extra whitespace of the block, and ensure it ends with a single newline. */
 function stripBlockEdges(raw: string): string {
-  // 去掉紧跟在 >>> 之后的首个换行
+  // Strip the first newline right after >>>
   let s = raw.replace(/^\r?\n/, "");
-  // 去掉结尾空白
+  // Strip trailing whitespace
   s = s.replace(/\s+$/, "");
   if (!s) return "";
   return s + "\n";

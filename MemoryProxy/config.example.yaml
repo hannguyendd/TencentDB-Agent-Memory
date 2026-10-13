@@ -1,145 +1,145 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# Context Proxy — 完整配置参考
+# Context Proxy - Full Configuration Reference
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# 所有字段均有默认值，未配置的字段自动回落。下面列出每个配置项的含义和用法。
+# Every field has a default; fields left unset fall back automatically. Below, the meaning and usage of each option are listed.
 #
-# 请求处理流程：
-#   客户端请求 → auth(鉴权) → sessionInit(会话初始化: 弹窗选 team/agent/task)
-#   → injection(上下文注入: skill/memory/wiki/knowledge 到 system prompt)
-#   → 转发上游 LLM → 用量/上报 → 返回客户端
+# Request handling flow:
+#   client request -> auth -> sessionInit (session init: popup to pick team/agent/task)
+#   -> injection (context injection: skill/memory/wiki/knowledge into the system prompt)
+#   -> forward to upstream LLM -> usage/reporting -> return to client
 #
-# 模块间依赖：
-#   sessionInit 依赖 coreSkill（内核 8420 拉取 team/agent/task 列表） + 状态存储
-#   injection  依赖 coreSkill（skill RAG 注入） + tdai（memory L1/L2/L3）
-#   auth       独立，调用内核 POST /v3/meta/auth/verify 校验 apiKey → user_id
+# Inter-module dependencies:
+#   sessionInit depends on coreSkill (pulls the team/agent/task lists from kernel 8420) + state storage
+#   injection   depends on coreSkill (skill RAG injection) + tdai (memory L1/L2/L3)
+#   auth        is standalone; calls kernel POST /v3/meta/auth/verify to verify apiKey -> user_id
 #
-# 状态存储后端：
-#   注入/Skill 相关数据（inj:*/sk:*/vpin:*）默认走 Redis；启用 storage.enabled=true
-#   后可切到 ProxyStorage（COS/SQLite/FS/Memory）。详见 storage: 段。
+# State storage backend:
+#   Injection/Skill data (inj:*/sk:*/vpin:*) goes to Redis by default; with storage.enabled=true
+#   it can be switched to ProxyStorage (COS/SQLite/FS/Memory). See the storage: section.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ── 服务监听 ─────────────────────────────────────────────────────────────────
+# ── Server listener ─────────────────────────────────────────────────────────────────
 server:
-  host: 0.0.0.0           # 监听地址；0.0.0.0 表示所有网卡
-  port: 8096               # 监听端口
-  forwardTimeoutMs: 600000 # 上游转发超时（毫秒），默认 600000（10 分钟）；0 = 不超时
+  host: 0.0.0.0           # Listen address; 0.0.0.0 means all interfaces
+  port: 8096               # Listen port
+  forwardTimeoutMs: 600000 # Upstream forward timeout (ms), default 600000 (10 minutes); 0 = no timeout
 
 
-# ── 上游 LLM 服务（默认兜底） ──────────────────────────────────────────────────
+# ── Upstream LLM service (default fallback) ──────────────────────────────────────────────────
 upstream:
-  # 上游 OpenAI-compatible API 地址（/v1/chat/completions 会由 proxy 自动拼接）
-  # 也支持完整路径如 https://llm-upstream.example.com/v2/
+  # Upstream OpenAI-compatible API address (/v1/chat/completions is appended automatically by the proxy)
+  # Full paths such as https://llm-upstream.example.com/v2/ are also supported
   url: https://tokenhub.example.com/v1
-  # 若非空，则替换所有转发请求中的 Authorization: Bearer <apiKey>。
-  # 留空则透传客户端原始 API Key。
+  # If non-empty, replaces Authorization: Bearer <apiKey> in all forwarded requests.
+  # If left empty, the client's original API Key is passed through.
   apiKey: "<YOUR_TOKENHUB_API_KEY>"
 
-  # ── Per-Agent 覆盖 ─────────────────────────────────────────────────────────
-  # 按 agent 名（URL 路径前缀 /{agent}/...）覆盖 url + apiKey。
-  # Anthropic 和 OpenAI 协议共用同一张表。
+  # ── Per-Agent overrides ─────────────────────────────────────────────────────────
+  # Override url + apiKey by agent name (URL path prefix /{agent}/...).
+  # The Anthropic and OpenAI protocols share the same table.
   #
-  # 兜底规则（重要）——只有"没配这个 agent"才会走外层 upstream 兜底：
+  # Fallback rule (important) -- only an agent that is "not configured" falls back to the outer upstream:
   #
   #   ┌────────────────────────────────┬────────────┬───────────────────────┐
-  #   │ 该 agent 的配置                │ 用的 url   │ 用的 apiKey           │
+  #   │ Agent's configuration          │ url used   │ apiKey used           │
   #   ├────────────────────────────────┼────────────┼───────────────────────┤
-  #   │ 不在 agents 里                 │ upstream.url│ upstream.apiKey (兜底)│
-  #   │ 在 agents 里，只有 url         │ agent.url  │ 透传客户端请求的 key  │
-  #   │ 在 agents 里，url + apiKey     │ agent.url  │ agent.apiKey          │
+  #   │ Not in agents                  │ upstream.url│ upstream.apiKey (fallback)│
+  #   │ In agents, url only            │ agent.url  │ client request's key passed through │
+  #   │ In agents, url + apiKey        │ agent.url  │ agent.apiKey          │
   #   └────────────────────────────────┴────────────┴───────────────────────┘
   #
-  # 中间一行是设计上刻意留的口子：一旦 agent 出现在这张表里，外层
-  # upstream.apiKey 的兜底就被切断，允许运营方在同一个 proxy 里让
-  # 一部分 agent 走服务端 key、另一部分透传客户端自己的 key。
+  # The middle row is a deliberate loophole in the design: once an agent appears in this table, the outer
+  # upstream.apiKey fallback is cut off, allowing operators in a single proxy to have
+  # some agents use the server-side key while others pass through the client's own key.
   #
-  # 完整优先级（高→低）：
-  #   1. costGuard 内部路由自带的凭据（cheap-model 兜底）
+  # Full priority (high -> low):
+  #   1. Credentials carried by costGuard's internal routing (cheap-model fallback)
   #   2. upstream.agents[agent].url + upstream.agents[agent].apiKey
-  #   3. costGuard.anthropicUpstream.url（仅 Anthropic 协议）
-  #   4. upstream.url + upstream.apiKey（未命中 agent 时的默认）
+  #   3. costGuard.anthropicUpstream.url (Anthropic protocol only)
+  #   4. upstream.url + upstream.apiKey (default when no agent matches)
   agents: {}
-    # claude-code:                                        # 服务端 key 模式
+    # claude-code:                                        # server-side key mode
     #   url: "https://claude-upstream.example.com/v1"
     #   apiKey: "sk-ant-agent-key"
-    # codex:                                              # 客户端 key 透传模式
+    # codex:                                              # client key passthrough mode
     #   url: "https://codex-upstream.example.com/v1"
-    #   # 不写 apiKey → 透传客户端自己带上来的 key，不走外层兜底
-    # 注意：workbuddy / codebuddy / claude-code 等客户端不需要单独配 per-agent override，
-    # 它们的请求会自然落到外层 upstream.url + 鉴权走的 user_key，proxy 自动按 user_id
-    # 在内核拉取对应的 team/agent/task 上下文（不需要手动创建资源）。
-    # 用户资产（Team / Agent / Task / 用户授权）请在 MemoryPanel Web 面板里创建。
+    #   # no apiKey -> pass through the key the client sends, skipping the outer fallback
+    # Note: clients such as workbuddy / codebuddy / claude-code do not need a separate per-agent override;
+    # their requests naturally fall to the outer upstream.url, authenticate via user_key, and the proxy automatically pulls
+    # the matching team/agent/task context from the kernel by user_id (no need to create resources manually).
+    # Create user assets (Team / Agent / Task / user authorization) in the MemoryPanel web panel.
 
 
-# ──── 多客户端接入（workbuddy / codebuddy / claude-code 等） ───────────────────
-# MemoryProxy 不管理用户资产。Team / Agent / Task / 用户授权均在 MemoryPanel Web
-# 面板（端口 8123）创建。客户端接入流程：
+# ──── Multi-client onboarding (workbuddy / codebuddy / claude-code, etc.) ───────────────────
+# MemoryProxy does not manage user assets. Team / Agent / Task / user authorization are all created in the MemoryPanel Web
+# panel (port 8123). Client onboarding flow:
 #
-#   1. 管理员在 MemoryPanel 里：
-#      - 创建 User，拿到 sk-mem-xxx 格式的 user_key
-#      - 创建 Team，把用户加为成员
-#      - 在 Team 下创建 Agent、Task
-#   2. 客户端配置（baseUrl 只需写到 {agent}/{spaceId}，客户端 SDK 自动拼接 API path）：
+#   1. The admin, in MemoryPanel:
+#      - Creates a User and obtains a user_key in the sk-mem-xxx format
+#      - Creates a Team and adds the user as a member
+#      - Creates Agents and Tasks under the Team
+#   2. Client configuration (baseUrl only needs to go up to {agent}/{spaceId}; the client SDK appends the API path automatically):
 #      - Base URL: http://<proxy-host>:8096/{agent}/{spaceId}
-#        例如: http://proxy.example.com:8096/workbuddy/mem-demo
+#        e.g.: http://proxy.example.com:8096/workbuddy/mem-demo
 #              http://proxy.example.com:8080/codebuddy/default
-#      - API Key:  第 1 步拿到的 user_key（sk-mem-* 格式）
-#      - Model:    上游支持的模型名
-#   3. 客户端发第一条消息 → proxy 拦截 → verifyUserKey → listTeams → listAgents
-#      → listTasks → 交互式表单选择 team/agent/task → 注册 session → 每轮自动注入
-#      L2(agent) + L3(team) 记忆到 system prompt → 转发上游 LLM。
+#      - API Key:  the user_key obtained in step 1 (sk-mem-* format)
+#      - Model:    a model name supported by the upstream
+#   3. The client sends its first message -> proxy intercepts -> verifyUserKey -> listTeams -> listAgents
+#      -> listTasks -> interactive form to pick team/agent/task -> register session -> automatically inject, every turn,
+#      L2(agent) + L3(team) memory into the system prompt -> forward to the upstream LLM.
 #
-# 多用户天然隔离：listTeams(userId) 只返回该 user 所属的 team，listAgents
-# 按 user 维度二次过滤；不同 session_id 拥有独立的 session 状态机。
+# Multi-user isolation is built in: listTeams(userId) returns only the teams the user belongs to, and listAgents
+# filters again by user; different session_ids have independent session state machines.
 #
-# 想跳过表单做联调：开启下方 debugForceIdentity / debugForceUserId（仅本地/E2E）。
-# 关闭后默认走完整表单交互，多用户场景下的标准生产路径。
+# To skip the form for integration testing: enable debugForceIdentity / debugForceUserId below (local/E2E only).
+# When disabled, the full form interaction is used by default, which is the standard production path for multi-user scenarios.
 
-# ── 日志 ─────────────────────────────────────────────────────────────────────
+# ── Logging ─────────────────────────────────────────────────────────────────────
 log:
-  file: logs               # 日志目录；按日期自动生成 usage JSONL + proxy.log 结构化日志
-                           #   留空 "" 则不写文件，仅 console
-  verbose: false           # true = 额外输出 debug 信息到 stderr
-  level: info              # info | debug — debug 会额外输出路由/分析细节
-  backend: console         # noop | console — 结构化日志输出到 stderr（console）或关闭（noop）
+  file: logs               # Log directory; usage JSONL + proxy.log structured logs are generated per date
+                           #   Leave empty "" to skip file output (console only)
+  verbose: false           # true = additionally print debug info to stderr
+  level: info              # info | debug -- debug additionally prints routing/analysis details
+  backend: console         # noop | console -- structured logs go to stderr (console) or are disabled (noop)
   rotate:
-    maxSizeBytes: 104857600  # proxy.log 单文件最大字节数，超过后轮转（默认 100MB）
-    backupLimit: 10          # 最多保留多少份轮转备份
+    maxSizeBytes: 104857600  # Max bytes per proxy.log file; rotates once exceeded (default 100MB)
+    backupLimit: 10          # Max number of rotated backups to keep
 
 
-# ── Redis（注入 / Skill 层的历史后端） ────────────────────────────────────────
-# 注入层 / Skill 层数据（inj:*, sk:*, skill:vpin:*）默认走 Redis（历史行为）。
-# 启用下方 storage.enabled=true 后，这些数据改走 ProxyStorage
-# （COS/SQLite/FS/Memory）。详见 storage: 段。
+# ── Redis (legacy backend for the injection / Skill layers) ────────────────────────────────────────
+# Injection / Skill layer data (inj:*, sk:*, skill:vpin:*) goes to Redis by default (legacy behavior).
+# Once storage.enabled=true below is set, this data goes to ProxyStorage
+# (COS/SQLite/FS/Memory) instead. See the storage: section.
 redis:
-  enabled: true            # 是否启用 Redis；注入/Skill 数据是否走 Redis 由 storage.enabled 决定。
-  # url: "redis://:password@host:port/db"   # 完整 Redis URL，设置后覆盖下方 host/port/password/db
-  host: "127.0.0.1"        # Redis 主机
-  port: 6379               # Redis 端口
-  password: ""             # Redis 密码
-  db: 0                    # Redis 数据库编号
-  ttlSeconds: 1800         # 注入与 Skill 缓存 TTL（秒），默认 1800（30 分钟）
-  # injectionTtlSeconds: 3600  # 注入层 hook 缓存 TTL（秒），默认复用 ttlSeconds
-  # turnSeqTtlDays: 30       # 会话 turn 序号计数 TTL（天），默认 30。必须远长于
-  #                          # ttlSeconds：会话态过期只是丢缓存，序号过期会让同一
-  #                          # 会话从 1 重新计数，与该会话早先的用量行撞号。
-  # CostGuard 会话态（cg:sess:* / arch: / judge-*）也走这份 Redis。
-  # 多实例部署必须开启，否则 task archive / judge latch 无法跨进程共享。
+  enabled: true            # Whether to enable Redis; whether injection/Skill data uses Redis is decided by storage.enabled.
+  # url: "redis://:password@host:port/db"   # Full Redis URL; when set, overrides host/port/password/db below
+  host: "127.0.0.1"        # Redis host
+  port: 6379               # Redis port
+  password: ""             # Redis password
+  db: 0                    # Redis database number
+  ttlSeconds: 1800         # Injection and Skill cache TTL (seconds), default 1800 (30 minutes)
+  # injectionTtlSeconds: 3600  # Injection-layer hook cache TTL (seconds); defaults to reusing ttlSeconds
+  # turnSeqTtlDays: 30       # TTL (days) of the session turn sequence counter, default 30. Must be much longer than
+  #                          # ttlSeconds: session state expiring only loses cache, whereas the sequence expiring makes the same
+  #                          # session restart counting from 1, colliding with that session's earlier usage rows.
+  # CostGuard session state (cg:sess:* / arch: / judge-*) also uses this Redis.
+  # Must be enabled for multi-instance deployments, otherwise task archive / judge latch cannot be shared across processes.
 
 
-# ── Cost Guard（可选私有路由扩展；未初始化 submodule 时整段无感透传） ────────
-# 宿主只解析 enabled / markerOptIn / agentProfile / anthropicUpstream。
-# 其余字段原样放进 options，交给 @context-proxy/cost-guard。
+# ── Cost Guard (optional private routing extension; passes through transparently when the submodule is not initialized) ────────
+# The host only parses enabled / markerOptIn / agentProfile / anthropicUpstream.
+# The remaining fields are put into options as-is and handed to @context-proxy/cost-guard.
 #
-# 当前扩展会用到的 options（缺省时的行为）：
-#   taskArchiveEnabled  省略 = true。每个新 user turn 多一次同步 gate LLM。
-#   judge.enabled       省略 = false。开启后需配 baseUrl；宿主负责 HTTP 调用。
-#   compress* / gate*   省略则回退到 analyze 模型。
-#   requestPrepare      CCR 压缩门面，与路由开关相互独立。
+# Options used by the current extension (behavior when omitted):
+#   taskArchiveEnabled  omitted = true. Adds one synchronous gate LLM call per new user turn.
+#   judge.enabled       omitted = false. Once enabled, baseUrl must be set; the host makes the HTTP calls.
+#   compress* / gate*   when omitted, fall back to the analyze model.
+#   requestPrepare      CCR compression facade, independent of the routing switch.
 costGuard:
   enabled: false
-  markerOptIn: false       # true = 仅 /{agent}/{spaceId}/cost-guard/... 走路由
+  markerOptIn: false       # true = only /{agent}/{spaceId}/cost-guard/... goes through routing
   agentProfile: auto
   # anthropicUpstream:
   #   url: "https://anthropic-upstream.example.com"
@@ -153,17 +153,17 @@ costGuard:
   # cheapApiKey: ""
   # cheapProtocol: openai
   # toolLoopDegradeStrategy: none
-  # agents:                  # 按 URL 第一段 agentName 覆盖 cheap 配置
+  # agents:                  # Override the cheap config by the first URL segment, agentName
   #   claude-code:
   #     cheapModel: "claude-haiku"
   #     cheapUrl: "https://cheap.example.com"
   # taskArchiveEnabled: true
-  # compressModel: "deepseek-v4-flash"  # selector + merge；省略回退 analyze*
+  # compressModel: "deepseek-v4-flash"  # selector + merge; when omitted, falls back to analyze*
   # compressUrl: "https://analyzer.example.com/v1/chat/completions"
   # compressApiKey: ""
   # compressProtocol: openai
   # compressTimeout: 30000
-  # gateModel: "deepseek-v4-flash"      # 同步关键路径；省略回退 compress*
+  # gateModel: "deepseek-v4-flash"      # Synchronous critical path; when omitted, falls back to compress*
   # gateUrl: "https://analyzer.example.com/v1/chat/completions"
   # gateTimeout: 8000
   # judge:
@@ -174,62 +174,62 @@ costGuard:
   #   everyNToolTurns: 5
   #   latchTtlSeconds: 0
   #   latchMaxTurns: 0
-  # controlPlane:            # 此 block 存在即启用；关闭时请整段省略
+  # controlPlane:            # Enabled when this block is present; omit the whole block to disable
   #   port: 18097
   # requestPrepare:
   #   enabled: false
-  #   # CFQ（context_focus_question）子系统。字段全部可选，整段省略即用内置默认。
+  #   # CFQ (context_focus_question) subsystem. All fields are optional; omit the whole block to use the built-in defaults.
   #   cfq:
   #     enabled: true
-  #     # 是否给工具 schema 注入 context_focus_question 字段，让主模型自己填（T1）。
-  #     # 设 false 且下面 analyzeModelFallback.enabled 为 true 时进入「纯兜底模式」：
-  #     # 主模型完全不知道 CFQ 的存在，全部由分析模型在响应侧反推。
+  #     # Whether to inject a context_focus_question field into tool schemas so the main model fills it in itself (T1).
+  #     # With false and analyzeModelFallback.enabled true below, it enters "pure fallback mode":
+  #     # the main model has no idea CFQ exists, and the analysis model infers everything on the response side.
   #     injectSchema: true
-  #     # 空数组 = 关闭白名单，内置黑名单之外的工具全部注入。
-  #     # 内置黑名单只认 Claude Code 的 PascalCase 名（Edit/Write/…），
-  #     # 其它客户端的 snake_case 工具要自己列进 schemaBlacklist。
+  #     # Empty array = whitelist disabled; all tools outside the built-in blacklist are injected.
+  #     # The built-in blacklist only recognizes Claude Code's PascalCase names (Edit/Write/...);
+  #     # snake_case tools of other clients must be listed in schemaBlacklist yourself.
   #     schemaWhitelist: []
   #     schemaBlacklist: ["edit_file", "write_file", "create_file",
   #                       "str_replace_editor", "apply_diff", "replace_in_file"]
   #     enforceRequired: true
   #     maxLength: 200
-  #     # 主模型漏填 CFQ 时，用一个便宜模型在响应侧补生成并写进同一份缓存，
-  #     # 下一轮 backfill 照常命中。默认开启；显式 enabled: false 才关。
+  #     # When the main model forgets to fill in CFQ, a cheap model generates it on the response side and writes it into the same cache,
+  #     # so the next turn's backfill hits as usual. Enabled by default; only an explicit enabled: false turns it off.
   #     #
-  #     # model / url / apiKey 省略或留空时回退 costGuard 顶层的 analyzeModel /
-  #     # analyzeUrl / analyzeApiKey。三者补完仍缺一，兜底整体关闭；启动后
-  #     # grep cfq.analyze_fallback.misconfigured 可确认。写了非空值则用自己的。
+  #     # When model / url / apiKey are omitted or empty, they fall back to the top-level costGuard analyzeModel /
+  #     # analyzeUrl / analyzeApiKey. If any of the three is still missing after filling, the fallback is disabled as a whole; after startup,
+  #     # grep cfq.analyze_fallback.misconfigured to confirm. A non-empty value written here is used as-is.
   #     #
-  #     # 其余字段省略即用代码默认值：batchSize 8、timeoutMs 30000、
+  #     # Other fields use the code defaults when omitted: batchSize 8, timeoutMs 30000,
   #     # maxOutputTokens 128000、awaitPendingMs 8000、circuitBreaker 300/50/1800。
   #     analyzeModelFallback:
   #       enabled: true
   #       batchSize: 8
-  #       # model / url / apiKey 可省略，默认用上面的 analyze*
+  #       # model / url / apiKey may be omitted; defaults to the analyze* above
   #       timeoutMs: 30000
-  #       # 请求侧发现 backfill 缺口时，等待在途兜底的上限（毫秒）。
+  #       # Upper bound (ms) on waiting for an in-flight fallback when the request side finds a backfill gap.
   #       #
-  #       # 这个窗口就是兜底的全部机会：等到了当轮压，超时就落 no_cfq 缓存、
-  #       # 后续不再补。这样做是为了字节稳定——放行超时的条目去下一轮压，会让
-  #       # 同一段 tool_result 从原文变成压缩态，翻转点之后的整个前缀在上游
-  #       # prompt-cache 里失效。
+  #       # This window is the fallback's only chance: if it finishes in time it is compressed this turn; on timeout a no_cfq cache entry is written
+  #       # and no further backfill happens. This is for byte stability -- letting a timed-out entry be compressed on the next turn would turn
+  #       # the same tool_result from raw to compressed, invalidating the whole prefix after the flip point in the upstream
+  #       # prompt cache.
   #       #
-  #       # 8000 的依据：实测 77 次兜底中位 6.6s，82% 在 8.5s 内完成；等待从下
-  #       # 一轮请求到达时起算（兜底已先跑约 0.5s）。代价是有缺口的轮次平均阻塞
-  #       # 约 6.5 秒，请按自己分析模型的实际速度调整。
+  #       # Basis for 8000: measured over 77 fallbacks, median 6.6s, 82% finish within 8.5s; the wait is counted from the
+  #       # arrival of the next turn's request (the fallback has already run about 0.5s). The cost is that turns with a gap block for
+  #       # about 6.5 seconds on average; tune it to your analysis model's actual speed.
   #       #
-  #       # 上限受 pending.ts 的 PENDING_TTL_S（30s）约束。0 = 不等，兜底退化成
-  #       # 只对后续轮次有效，当轮一律 no_cfq。
+  #       # Upper bound is constrained by PENDING_TTL_S (30s) in pending.ts. 0 = do not wait; the fallback degrades to
+  #       # helping subsequent turns only, and the current turn is always no_cfq.
   #       awaitPendingMs: 8000
-  #       # 兜底熔断 —— 按 spaceId 隔离的成本闸门，多节点通过 Redis 共享计数。
+  #       # Fallback circuit breaker -- a cost gate isolated per spaceId, with counts shared across nodes via Redis.
   #       #
-  #       # 某个 space 在 windowSeconds 内兜底次数超过 threshold，接下来
-  #       # breakSeconds 内不再兜底，这些 tool_result 按 no_cfq 处理。
-  #       # 熔断期不打在途标记，所以请求侧也不会陪等 awaitPendingMs。
+  #       # If a space exceeds threshold fallbacks within windowSeconds, no fallback is done for the next
+  #       # breakSeconds, and those tool_results are treated as no_cfq.
+  #       # No in-flight marker is set during the breaker period, so the request side does not wait awaitPendingMs either.
   #       #
-  #       # 整段省略即用默认值（300 / 50 / 1800）；要关必须显式 enabled: false。
-  #       # 阈值按自己的流量调：5 分钟窗口 50 次，熔断后歇 30 分钟。
-  #       # 熔断是用来拦失控放大的，不是给正常使用设配额。
+  #       # Omit the whole block to use the defaults (300 / 50 / 1800); to turn it off you must explicitly set enabled: false.
+  #       # Tune the threshold to your own traffic: 50 per 5-minute window, then rest 30 minutes after tripping.
+  #       # The breaker is meant to stop runaway amplification, not to set a quota for normal usage.
   #       circuitBreaker:
   #         enabled: true
   #         windowSeconds: 300
@@ -237,282 +237,282 @@ costGuard:
   #         breakSeconds: 1800
 
 
-# ── Memory 实例 × 实际模型 Input TPM / QPM 限流 ──────────────────────────────
-# 对所有 URL 中带 spaceId 的主模型调用生效。
-# 多 Pod 通过上面的共享 Redis 原子计数。Redis 不可用时 fail-open 并记录告警。
-# 实例/模型 override 通过 /v3/admin/rate-limits 管理，修改后下一次请求立即生效。
+# ── Memory instance x actual model Input TPM / QPM rate limiting ──────────────────────────────
+# Applies to all main-model calls whose URL carries a spaceId.
+# Multiple pods count atomically via the shared Redis above. When Redis is unavailable it fails open and logs a warning.
+# Instance/model overrides are managed via /v3/admin/rate-limits and take effect on the very next request after changes.
 rateLimit:
-  tpm: 1000000             # 实际 Input Token / 最近 60 秒
-  qpm: 100                 # 发起请求数 / 最近 60 秒；与 TPM 使用相同维度
+  tpm: 1000000             # Actual Input Tokens / last 60 seconds
+  qpm: 100                 # Requests initiated / last 60 seconds; uses the same dimension as TPM
 
 
-# ── Storage（注入 + Skill 层的统一存储抽象，替代 Redis 承载 inj:*/sk:*/vpin:*）─
-# 见 docs/design/2026-07-09-redis-to-cos-migration-plan.md
+# ── Storage (unified storage abstraction for the injection + Skill layers, replacing Redis for inj:*/sk:*/vpin:*) ─
+# See docs/design/2026-07-09-redis-to-cos-migration-plan.md
 #
-# 【总开关】storage.enabled=false（默认）→ 完全走原 Redis 路径；不加载迁移代码，
-#           行为与本次迁移前**完全一致**。
-# 【切换语义】storage.enabled=true → 用 ProxyStorage 替换 inj:*/sk:*/vpin:*
-#           相关 Redis repo。
+# [Master switch] storage.enabled=false (default) -> fully uses the original Redis path; migration code is not loaded,
+#           behavior is **exactly the same** as before this migration.
+# [Switch semantics] storage.enabled=true -> ProxyStorage replaces the inj:*/sk:*/vpin:*
+#           Redis repos.
 #
-# 【生产推荐】
-#   - 单实例本地/内部：backend=sqlite（默认；用 ~/.tdai-memory-proxy/proxy.db）
-#   - 生产多实例：    backend=cos（多节点共享 + 廉价对象存储）
-#   - 离线/私有部署： backend=fs
-#   - 兜底 / 测试：   backend=memory
+# [Production recommendations]
+#   - Single instance, local/internal: backend=sqlite (default; uses ~/.tdai-memory-proxy/proxy.db)
+#   - Production multi-instance:       backend=cos (shared across nodes + cheap object storage)
+#   - Offline/private deployment:      backend=fs
+#   - Fallback / testing:              backend=memory
 #
-# 【降级链】cos → sqlite → fs → memory；任一后端 init 失败自动降级，
-#          /health 会暴露 storage.effective（生产观测告警锚点）
+# [Degradation chain] cos -> sqlite -> fs -> memory; if any backend fails init it degrades automatically,
+#          and /health exposes storage.effective (anchor for production monitoring alerts)
 #
-# 【回滚】任意阶段改成 enabled=false 无需重启即可回到 Redis 路径。
+# [Rollback] At any stage, set enabled=false to return to the Redis path without a restart.
 #
 # ═══════════════════════════════════════════════════════════════════════════
-# 字段速查（[必] = 必配 / [可] = 可选有默认 / [死] = 当前 backend 下不读，删了无影响）
+# Field cheat sheet ([req] = required / [opt] = optional with default / [dead] = not read under the current backend; removing it has no effect)
 #
 #   ┌─────────────────────────────┬────────┬───────────────────────────────────┐
-#   │ 字段                        │ cos    │ sqlite / fs / memory              │
+#   │ Field                       │ cos    │ sqlite / fs / memory              │
 #   ├─────────────────────────────┼────────┼───────────────────────────────────┤
-#   │ enabled                     │ [必]   │ [必]                              │
-#   │ backend                     │ [必]   │ [必]                              │
-#   │ ttlDays                     │ [死]*  │ sqlite=[可默认7] fs/memory=[死]   │
-#   │ cos.rootPrefix              │ [死]** │ [死]                              │
-#   │ cos.endpointDomain          │ [可]   │ [死]                              │
-#   │ cos.shark.baseUrl           │ [必]   │ [死]                              │
-#   │ cos.shark.*  (其它)         │ [可]   │ [死]                              │
-#   │ sqlite.dbPath               │ [死]   │ sqlite=[可默认空] 其他=[死]       │
-#   │ fs.fsRoot                   │ [死]   │ fs=[必] 其他=[死]                 │
+#   │ enabled                     │ [req]  │ [req]                             │
+#   │ backend                     │ [req]  │ [req]                             │
+#   │ ttlDays                     │ [dead]*│ sqlite=[opt, default 7] fs/memory=[dead] │
+#   │ cos.rootPrefix              │ [dead]**│ [dead]                           │
+#   │ cos.endpointDomain          │ [opt]  │ [dead]                            │
+#   │ cos.shark.baseUrl           │ [req]  │ [dead]                            │
+#   │ cos.shark.*  (others)       │ [opt]  │ [dead]                            │
+#   │ sqlite.dbPath               │ [dead] │ sqlite=[opt, default empty] others=[dead] │
+#   │ fs.fsRoot                   │ [dead] │ fs=[req] others=[dead]            │
 #   └─────────────────────────────┴────────┴───────────────────────────────────┘
 #
-#   * cos 桶过期靠 COS lifecycle rule，不看 ttlDays
-#   ** shark 侧硬编码 "proxy_cache"，proxy 侧任何值都无效
+#   * cos bucket expiry relies on the COS lifecycle rule; ttlDays is ignored
+#   ** shark hardcodes "proxy_cache" on its side; any value on the proxy side has no effect
 # ═══════════════════════════════════════════════════════════════════════════
 storage:
-  # [必] 总开关：false = 完全走 Redis 老路径（默认）
+  # [req] Master switch: false = fully use the legacy Redis path (default)
   enabled: false
 
-  # [必] 优选后端：cos | sqlite | fs | memory
-  #   - cos:    生产多实例部署（跨节点共享）
-  #   - sqlite: 单实例本地开发 / CI；有 sweeper 自动清 ttl 桶
-  #   - fs:     离线 / docker 兜底；无 sweeper
-  #   - memory: 兜底 / 测试；进程重启即清
-  # 生产多节点必须用 cos；sqlite/fs/memory 都是 process-local，跨节点必读 miss。
+  # [req] Preferred backend: cos | sqlite | fs | memory
+  #   - cos:    production multi-instance deployments (shared across nodes)
+  #   - sqlite: single-instance local development / CI; has a sweeper that cleans the ttl bucket automatically
+  #   - fs:     offline / docker fallback; no sweeper
+  #   - memory: fallback / testing; cleared on process restart
+  # Production multi-node must use cos; sqlite/fs/memory are all process-local, so cross-node reads always miss.
   backend: sqlite
 
 
-  # ── TTL / NoTTL 前缀分档（业务代码按 key 前缀落桶，见 2026-07-10 方案）─────
-  # `ttl/`   —— 热缓存：inj-sess (会话初始化状态) / inj-hook (预热注入)。
-  #             丢了能重建（binding 兜底 / 重跑 hook），业务无感。
-  # `nottl/` —— 业务态：binding / sk-extract / skill-vpin。**永久保留**，
-  #             不配任何 lifecycle rule；丢了会让用户重走 session_init 表单。
+  # ── TTL / NoTTL prefix tiers (business code places keys into buckets by key prefix; see the 2026-07-10 plan) ─────
+  # `ttl/`   -- hot cache: inj-sess (session init state) / inj-hook (pre-warmed injection).
+  #             Can be rebuilt if lost (binding fallback / rerun hook), with no business impact.
+  # `nottl/` -- business state: binding / sk-extract / skill-vpin. **Kept permanently**;
+  #             do not configure any lifecycle rule; losing it forces users to redo the session_init form.
   #
-  # 只清 `ttl/` 前缀（各后端实现方式不同）：
-  #   - CosStorage:    ⚠️ ttlDays **不读**！在 COS 控制台配 lifecycle rule：
-  #                    `proxy_cache/ttl/` 前缀 N 天未修改删除。**nottl/ 不配**。
-  #   - SqliteStorage: 内置 sweeper 5 分钟一次按 ttlDays 清 proxy_kv 表 ttl 桶
-  #   - FsStorage:     不做 sweeper（容器 FS mtime 不可靠），交给外部 tmpwatch
-  #   - MemoryStorage: 进程重启即清，此 TTL 不生效
+  # Only the `ttl/` prefix is cleaned (each backend implements this differently):
+  #   - CosStorage:    ⚠️ ttlDays is **not read**! Configure a lifecycle rule in the COS console:
+  #                    delete `proxy_cache/ttl/` prefix objects unmodified for N days. **Do not configure nottl/**.
+  #   - SqliteStorage: built-in sweeper runs every 5 minutes and cleans the ttl bucket of the proxy_kv table by ttlDays
+  #   - FsStorage:     no sweeper (container FS mtime is unreliable); leave it to an external tmpwatch
+  #   - MemoryStorage: cleared on process restart; this TTL has no effect
   #
-  # [cos=死 / sqlite=可默认7 / fs+memory=死] `ttl/` 前缀清理窗口（天）。
+  # [cos=dead / sqlite=optional, default 7 / fs+memory=dead] Cleanup window (days) for the `ttl/` prefix.
   ttlDays: 7
 
-  # ── COS 后端（生产多实例首选） ─────────────────────────────────────────────
-  # 上线前必须在 COS 控制台配 lifecycle rule：
-  #   `proxy_cache/ttl/`   前缀 N 天未修改 → 删除
-  #   `proxy_cache/nottl/` 前缀 → 不配任何 rule → 永久保留
+  # ── COS backend (preferred for production multi-instance) ─────────────────────────────────────────────
+  # Before going live you must configure a lifecycle rule in the COS console:
+  #   `proxy_cache/ttl/`   prefix unmodified for N days -> delete
+  #   `proxy_cache/nottl/` prefix -> no rule configured -> kept permanently
   #
-  # 只支持 kernel-sts 模式（正式环境禁止静态 AK/SK）：
-  # - 每个 spaceId 从 Shark 拉一份独立 STS，权限严格绑到
-  #   `proxy_cache/ttl/{spaceId}/*` + `proxy_cache/nottl/{spaceId}/*` 两个前缀
-  # - bucket / region 由 Shark 返回的 CosUrl 解析，不用配
-  # - endpointDomain 未配时按 4 层优先级自动决策（见字段注释），无脑留空也能跑
-  # - Shark 不可用时 COS 后端装配失败，进程不会降级启动
-  # 详见 docs/design/2026-07-12-cos-shark-sts-credential-plan.md
+  # Only kernel-sts mode is supported (static AK/SK is forbidden in production):
+  # - Each spaceId pulls its own STS from Shark, with permissions strictly bound to
+  #   the two prefixes `proxy_cache/ttl/{spaceId}/*` + `proxy_cache/nottl/{spaceId}/*`
+  # - bucket / region are parsed from the CosUrl returned by Shark; no configuration needed
+  # - When endpointDomain is unset it is decided automatically by a 4-level priority (see the field comment); leaving it empty works fine
+  # - When Shark is unavailable the COS backend fails to assemble, and the process does not start in degraded mode
+  # See docs/design/2026-07-12-cos-shark-sts-credential-plan.md
   #
   # Key layout：
   #   proxy_cache/{ttl|nottl}/{spaceId}/{userId}/{agentSource}/{sessionId}/...
-  # ttl/nottl 必须在 spaceId 之前 —— lifecycle rule 不支持路径中间通配。
+  # ttl/nottl must come before spaceId -- lifecycle rules do not support wildcards in the middle of a path.
   #
-  # backend != cos 时整段可删。
+  # The whole block can be removed when backend != cos.
   cos:
-    # [死] shark 侧硬编码 "proxy_cache"，proxy 层根本不读此字段。
-    # 留着仅为向后兼容 yaml 结构，未来会移除。删了不影响运行。
+    # [dead] shark hardcodes "proxy_cache" on its side; the proxy layer never reads this field.
+    # Kept only for backward compatibility of the yaml structure and will be removed in the future. Removing it has no effect.
     rootPrefix: "proxy_cache/"
 
-    # [可] 覆盖 COS SDK 的 endpoint 域名。**优先级最高**。
-    # 不配（空 / undefined）时按 4 层优先级自动决定，对齐 core
+    # [opt] Overrides the endpoint domain of the COS SDK. **Highest priority**.
+    # When unset (empty / undefined), it is decided automatically by a 4-level priority, aligned with core
     # `tdai-memory-openclaw-plugin/src/gateway/server.ts::initSharedCosClient`：
-    #   1. 本字段非空                                   → 用它
-    #   2. Shark CosUrl 已是 VPC 内网（云厂商内网域名）→ 用它
-    #   3. Shark CosUrl 是公网 → 自动改写为 VPC 内网域名（按 cred.region 拼）
-    #   4. 前三项都不适用（cred 无 region）             → SDK 默认公网
-    # 生产 kernel-sts 部署（云厂商 VPC 内）通常留空即可 —— 自动走内网省钱又稳。
-    # 部署在云厂商 VPC 外必须显式配公网 / 自定义域名，且确保桶允许对应网络。
-    # 支持 `{Bucket}` 占位符（自定义 CDN 场景）。
-    endpointDomain: ""   # 例：`cos.example.com`（自定义 CDN 或公网映射）
+    #   1. This field is non-empty                                  -> use it
+    #   2. Shark CosUrl is already a VPC internal address (cloud vendor intranet domain) -> use it
+    #   3. Shark CosUrl is public -> automatically rewritten to the VPC intranet domain (built from cred.region)
+    #   4. None of the first three apply (cred has no region)       -> SDK default public endpoint
+    # Production kernel-sts deployments (inside the cloud vendor's VPC) can usually leave it empty -- the intranet is used automatically, saving cost and more stable.
+    # Deployments outside the cloud vendor's VPC must explicitly configure a public / custom domain, and make sure the bucket allows the corresponding network.
+    # Supports the `{Bucket}` placeholder (custom CDN scenario).
+    endpointDomain: ""   # e.g. `cos.example.com` (custom CDN or public mapping)
 
-    # ── Shark 拉临时凭证 ──
-    # 需要 Shark 侧接口 `POST /meta/GetProxyCacheCosConfig`（见方案文档 §3.1）。
+    # ── Fetching temporary credentials from Shark ──
+    # Requires the Shark-side endpoint `POST /meta/GetProxyCacheCosConfig` (see plan doc §3.1).
     shark:
-      # [必] Shark 管理面 base URL。测试环境地址；正式环境由部署方在 config.yaml 覆盖。
+      # [req] Shark admin plane base URL. This is the test environment address; for production the deployer overrides it in config.yaml.
       baseUrl: "http://gateway.example.com:8000"
 
-      # [可] shark HTTP 请求超时（ms）。默认 10000。
+      # [opt] Timeout (ms) for shark HTTP requests. Default 10000.
       timeoutMs: 10000
 
-      # [可] 5xx / 429 / 网络错 / 超时重试次数。默认 2。
+      # [opt] Retry count on 5xx / 429 / network error / timeout. Default 2.
       retryCount: 2
 
-      # [可] STS 到期前提前多少 ms 刷新。默认 120000 (2 min)。
-      # 值影响可用性：太短 → shark 抖动就用到过期凭证；太长 → 无谓频繁刷新。
+      # [opt] How many ms before STS expiry to refresh. Default 120000 (2 min).
+      # The value affects availability: too short -> shark jitter leads to expired credentials being used; too long -> needlessly frequent refreshes.
       refreshBufferMs: 120000
 
-      # [可] per-spaceId backend 池上限（LRU）。默认 100。
-      # 值影响容量：多租户 space 数超过后会 LRU evict（延迟关闭旧 backend）。
+      # [opt] Upper bound of the per-spaceId backend pool (LRU). Default 100.
+      # The value affects capacity: once the number of multi-tenant spaces exceeds it, LRU eviction occurs (old backends are closed with a delay).
       maxSpaces: 100
 
-      # [可] LRU evict 时延迟关闭旧 backend 的 ms（in-flight 请求保护）。默认 30000。
+      # [opt] Delay in ms before closing an old backend on LRU eviction (protects in-flight requests). Default 30000.
       graceCloseDelayMs: 30000
 
-  # ── SQLite 后端（单实例本地开发 / CI） ─────────────────────────────────────
-  # 唯一一个"改 yaml ttlDays 立即生效"的后端 —— sweeper 5 分钟一次按顶层
-  # ttlDays 清 proxy_kv 表的 ttl 桶（nottl 桶永久保留）。
-  # backend != sqlite 时整段可删。
+  # ── SQLite backend (single-instance local development / CI) ─────────────────────────────────────
+  # The only backend where "changing yaml ttlDays takes effect immediately" -- the sweeper runs every 5 minutes and cleans the ttl bucket of the proxy_kv table by the top-level
+  # ttlDays (the nottl bucket is kept permanently).
+  # The whole block can be removed when backend != sqlite.
   sqlite:
-    # [sqlite=可默认空 / 其他=死] 空 = PROXY_DB_PATH env 或 ~/.tdai-memory-proxy/proxy.db
+    # [sqlite=optional, default empty / others=dead] Empty = PROXY_DB_PATH env or ~/.tdai-memory-proxy/proxy.db
     dbPath: ""
 
-  # ── 本地文件系统（离线 / docker 只读兜底） ──────────────────────────────────
-  # 不做 sweeper（fs.stat().mtime 在容器 FS 不可靠），交给外部 tmpwatch 使用。
-  # backend != fs 时整段可删。
+  # ── Local filesystem (offline / docker read-only fallback) ──────────────────────────────────
+  # No sweeper (fs.stat().mtime is unreliable on container FS); leave it to an external tmpwatch.
+  # The whole block can be removed when backend != fs.
   fs:
-    # [fs=必 / 其他=死] 根目录（需可写）
+    # [fs=required / others=dead] Root directory (must be writable)
     fsRoot: "/var/lib/context-proxy/storage"
 
 
-# ── Opik LLM 可观测（Comet ML Opik） ─────────────────────────────────────────
-# 请求/响应的 trace 和 span 自动上报到 Opik。
+# ── Opik LLM observability (Comet ML Opik) ─────────────────────────────────────────
+# Request/response traces and spans are reported to Opik automatically.
 opik:
-  enabled: false           # 是否启用 Opik 上报
-  url: "http://127.0.0.1:5173"   # Opik 服务地址
-  apiKey: ""               # Opik API Key（若 Opik 实例需要鉴权）
-  # stripRequestLogContent: false  # true = fork 出的 request_log trace 不记录消息内容（节省存储）
+  enabled: false           # Whether to enable Opik reporting
+  url: "http://127.0.0.1:5173"   # Opik service address
+  apiKey: ""               # Opik API Key (if the Opik instance requires authentication)
+  # stripRequestLogContent: false  # true = the forked request_log trace does not record message content (saves storage)
 
 
-# ── Langfuse LLM 可观测（官方 SDK 上报） ──────────────────────────────────────
-# 一个 trace = 一个 turn（一次用户输入），同一 turn 内的工具循环请求归到同一个
-# trace 下的多个 generation。上报内容含：模型/延时/token 用量/缓存命中/成本。
+# ── Langfuse LLM observability (reported via the official SDK) ──────────────────────────────────────
+# One trace = one turn (one user input); tool-loop requests within the same turn are grouped as multiple generations under the same
+# trace. Reported content includes: model/latency/token usage/cache hits/cost.
 langfuse:
-  enabled: false           # 是否启用 Langfuse 上报
-  host: ""                 # Langfuse 实例 base URL，例如 http://localhost:3000
-                           #   OTLP 模式：填 OTLP endpoint
-  publicKey: ""            # Langfuse public key（pk-lf-...）；OTLP 模式：填 token
-  secretKey: ""            # Langfuse secret key（sk-lf-...）；OTLP 模式：留空
+  enabled: false           # Whether to enable Langfuse reporting
+  host: ""                 # Langfuse instance base URL, e.g. http://localhost:3000
+                                                    #   OTLP mode: fill in the OTLP endpoint
+  publicKey: ""            # Langfuse public key (pk-lf-...); OTLP mode: fill in the token
+  secretKey: ""            # Langfuse secret key (sk-lf-...); OTLP mode: leave empty
 
 
-# ── ClickHouse 用量上报 ──────────────────────────────────────────────────────
-# 按 turn 记录每个用户的 token 消耗，支持按 model / user / session 维度查询。
+# ── ClickHouse usage reporting ──────────────────────────────────────────────────────
+# Records each user's token consumption per turn, supporting queries by model / user / session.
 # 表结构含：timestamp / model_id / key_id(用户) / session_key + turn_seq(turn) /
 #           user_input / prompt_tokens / completion_tokens / total_tokens /
 #           cache_hit_tokens / cache_write_tokens。
 # 4xx/5xx 失败请求不写入。
 clickhouse:
-  enabled: false           # 是否启用 ClickHouse 用量上报
+  enabled: false           # Whether to enable ClickHouse usage reporting
   url: "http://clickhouse.example.com:8123"   # ClickHouse HTTP endpoint
-  database: context_proxy            # 数据库名
-  table: usage_logs                  # 用量表名（TokenHub 等已知格式）
-  rawTable: usage_raw                # 原始用量追溯表（非 TokenHub / 未知格式回退到这里）
-  user: default                      # ClickHouse 用户名
-  password: ""                       # ClickHouse 密码
-  flushIntervalMs: 5000              # 定时 flush 间隔（毫秒），默认 5 秒
-  flushThreshold: 50                 # 缓冲区积累 N 条后立即 flush（0 = 禁止批量 flush）
-  ttlDays: 30                        # 数据保留天数（0 = 不自动过期；启动时通过 CREATE TABLE TTL 生效）
+  database: context_proxy            # Database name
+  table: usage_logs                  # Usage table name (known formats such as TokenHub)
+  rawTable: usage_raw                # Raw usage trace table (non-TokenHub / unknown formats fall back here)
+  user: default                      # ClickHouse username
+  password: ""                       # ClickHouse password
+  flushIntervalMs: 5000              # Periodic flush interval (ms), default 5 seconds
+  flushThreshold: 50                 # Flush immediately once the buffer accumulates N rows (0 = disable batch flush)
+  ttlDays: 30                        # Data retention in days (0 = never expire; takes effect at startup via CREATE TABLE TTL)
 
 
-# ── Auth 鉴权（user_key 校验 → user_id 解析） ─────────────────────────────────
-# 启用后 proxy 调用内核 POST /v3/meta/auth/verify 验证客户端 API Key。
-# 任何非 valid=true 的结果都返回 401 拒绝请求（包括超时/网络错误）。
-# x-tdai-service-id 从请求路径 /proxy/<spaceId>/... 自动提取。
-# 验证通过后 user_id 写入 ClickHouse key_id 列，并作为全链路用户标识。
+# ── Auth (user_key verification -> user_id resolution) ─────────────────────────────────
+# When enabled, the proxy calls the kernel's POST /v3/meta/auth/verify to verify the client API Key.
+# Any result other than valid=true returns 401 and rejects the request (including timeouts/network errors).
+# x-tdai-service-id is extracted automatically from the request path /proxy/<spaceId>/...
+# After verification passes, user_id is written to the ClickHouse key_id column and used as the user identifier across the whole chain.
 auth:
-  enabled: true            # 是否启用鉴权
-  url: "http://kernel.example.com:8420"   # 内核鉴权服务 base URL（自动拼接 /v3/meta/auth/verify）
-  timeoutMs: 5000          # 鉴权请求超时（毫秒）
+  enabled: true            # Whether to enable authentication
+  url: "http://kernel.example.com:8420"   # Kernel auth service base URL (/v3/meta/auth/verify is appended automatically)
+  timeoutMs: 5000          # Auth request timeout (ms)
 
 
-# ── Admin / Ops 端点鉴权（服务级 shared secret） ─────────────────────────────
-# 作用范围：仅 `/v3/instance/proxy-destroy` 这类运维口（shark 销毁实例时清 proxy
-# 侧 COS 缓存）。跟上面 auth.* 的租户 verifyUserKey 完全独立 —— 那个是租户维度
-# 的 x-tdai-user-key 校验；这个是给运维/系统服务用的 shared secret。
+# ── Admin / Ops endpoint authentication (service-level shared secret) ─────────────────────────────
+# Scope: only ops endpoints such as `/v3/instance/proxy-destroy` (shark cleans the proxy-side
+# COS cache when destroying an instance). Fully independent of the tenant verifyUserKey in auth.* above -- that one is the tenant-level
+# x-tdai-user-key check; this is a shared secret for ops/system services.
 #
-# 行为（语义对齐 core gateway 的 server.apiKey，参考 openclaw-plugin
+# Behavior (semantics aligned with core gateway's server.apiKey, see openclaw-plugin
 # gateway/server.ts:1076-1089）：
-#   - apiKey 为空（默认）        = 鉴权关闭，运维口公开可访问；启动时无告警
-#                                 （生产靠网络隔离 + apigw 兜底，跟 core 当前
-#                                 生产 `TDAI_GATEWAY_API_KEY` 也没启用同款做法）
-#   - apiKey 非空                = 请求必须带 `Authorization: Bearer <apiKey>`
-#                                 常量时间比对（crypto.timingSafeEqual）
+#   - apiKey empty (default)     = auth disabled, ops endpoints publicly accessible; no warning at startup
+#                                 (production relies on network isolation + apigw as a safety net, same as core's current
+#                                 production, where `TDAI_GATEWAY_API_KEY` is also not enabled)
+#   - apiKey non-empty           = requests must carry `Authorization: Bearer <apiKey>`
+#                                 with constant-time comparison (crypto.timingSafeEqual)
 #
-# 值怎么定：
-#   - 双方（proxy 侧 + shark 侧）约定的一个固定字符串，跟具体实例无关
-#   - 一般由运维用 `openssl rand -hex 32` 生成，同时下发到 proxy 的
-#     `TDAI_PROXY_ADMIN_API_KEY` env 和 shark 的 client 配置里
-#   - 不是任何 memory 实例的 admin user_key（那个是走 `x-tdai-user-key` 的
-#     实例内 user 概念，两个东西完全不搭）
+# How to choose the value:
+#   - A fixed string agreed on by both sides (proxy side + shark side), unrelated to any specific instance
+#   - Usually generated by ops with `openssl rand -hex 32` and distributed to both the proxy's
+#     `TDAI_PROXY_ADMIN_API_KEY` env and shark's client config
+#   - It is not the admin user_key of any memory instance (that is an in-instance user concept going through `x-tdai-user-key`;
+#     the two are completely unrelated)
 #
-# 优先级：env TDAI_PROXY_ADMIN_API_KEY > yaml admin.apiKey > 默认 ""
+# Priority: env TDAI_PROXY_ADMIN_API_KEY > yaml admin.apiKey > default ""
 admin:
-  apiKey: ""               # 空 = 运维口公开（等价于不配）。生产建议通过
-                           # env TDAI_PROXY_ADMIN_API_KEY 注入，避免落 git
+  apiKey: ""               # Empty = ops endpoints public (equivalent to not configuring). In production, inject it via
+                                                    # env TDAI_PROXY_ADMIN_API_KEY to avoid committing it to git
 
 
-# ── System users（内部服务账号：命中即全链路透传） ─────────────────────────────
-# 命中流程：先用 apiKey 走 auth/verify 拿到 user_id → user_id 在下方 systemUsers
-# 列表里 → 命中，短路透传。命中后 proxy 将请求原样转发到
-# config.upstream.url，跳过会话初始化和上下文注入。
-# 仍会记 usage/credit（keyId = userId，spaceId = 路径中的 memory 实例 id）。
-# 依赖 auth.enabled=true —— auth 关掉时 verify 返回空 user_id，短路永远不会触发。
-# userKey 字段保留仅用作运维参考（曾经是匹配键，现在只在日志/注释里出现），
-# 可以不配；userId 必填。数组支持多条；空数组即禁用此特性。
+# ── System users (internal service accounts: a hit passes through the whole chain) ─────────────────────────────
+# Match flow: first verify the apiKey via auth/verify to get user_id -> if user_id is in the systemUsers
+# list below -> hit, short-circuit passthrough. After a hit the proxy forwards the request as-is to
+# config.upstream.url, skipping session initialization and context injection.
+# usage/credit is still recorded (keyId = userId, spaceId = the memory instance id in the path).
+# Depends on auth.enabled=true -- with auth off, verify returns an empty user_id and the short-circuit never triggers.
+# The userKey field is kept only for ops reference (it used to be the match key; now it only appears in logs/comments),
+# and may be omitted; userId is required. The array supports multiple entries; an empty array disables this feature.
 systemUsers:
-  - name: memory                              # 逻辑名，只用于日志
-    userId: "${TDAI_MEMORY_SYSTEM_USER_ID}"   # 匹配键 & 计费归属的 user_id（必填）
+  - name: memory                              # Logical name, used only in logs
+    userId: "${TDAI_MEMORY_SYSTEM_USER_ID}"   # Match key & billing-owner user_id (required)
     displayName: "${TDAI_MEMORY_SYSTEM_USER_NAME}"
-    userKey: "${TDAI_MEMORY_SYSTEM_USER_KEY}" # 历史 sk-mem-xxx，仅供运维查看（可选）
+    userKey: "${TDAI_MEMORY_SYSTEM_USER_KEY}" # Historical sk-mem-xxx, for ops viewing only (optional)
   # - name: wiki
   #   userId: "${TDAI_WIKI_SYSTEM_USER_ID}"
   #   displayName: "${TDAI_WIKI_SYSTEM_USER_NAME}"
   #   userKey: "${TDAI_WIKI_SYSTEM_USER_KEY}"
 
 
-# ── Credit 上报（TDAI MemoryPlus 计费） ──────────────────────────────────────
-# 每个 LLM 应答完成后，按 creditPricing 定价表计算本轮 CreditDelta，
-# POST 到外部计费服务。仅 TokenHub 上游执行定价；非 TokenHub 上游 CreditDelta=0。
-# 仅携带 /proxy/<spaceId>/ 前缀的请求触发上报，SpaceId 从 path 自动提取。
-# 流式请求为 best-effort：上报失败仅记日志不打断流。
-# 非流式请求失败时会在响应头 `x-credit-report-error` 中记录原因。
+# ── Credit reporting (TDAI MemoryPlus billing) ──────────────────────────────────────
+# After each LLM response completes, the CreditDelta for this turn is computed from the creditPricing price table and
+# POSTed to the external billing service. Pricing is applied only for TokenHub upstreams; for non-TokenHub upstreams CreditDelta=0.
+# Only requests carrying the /proxy/<spaceId>/ prefix trigger reporting; SpaceId is extracted from the path automatically.
+# Streaming requests are best-effort: a failed report is only logged and does not interrupt the stream.
+# When a non-streaming request fails, the reason is recorded in the `x-credit-report-error` response header.
 creditReport:
   url: "http://gateway.example.com:8000/UpdateMemoryPlusUsage"
-  timeoutMs: 5000          # 上报超时（毫秒），0 = 不超时
+  timeoutMs: 5000          # Report timeout (ms), 0 = no timeout
 
 
-# ── Credit 计费价目表 ────────────────────────────────────────────────────────
-# 单位：Credit / 1K Token。
-# 旧格式（模型顶层 input/output/... 与 tiers）继续有效。若配置 rules，
-# 按优先级从高到低选择首个命中的时段规则；未命中则回退模型顶层价格。
-# 时间规则默认按 TokenHub 时区 Asia/Shanghai 判定，时间范围为 [start, end)。
-# 模型匹配规则：usage.model → 大小写不敏感全词匹配 → 未匹配则 credit=0
-#   （回退到 usage_raw 表并标记 reason='unknown_model'）。
-# 字段说明：
-#   name          — 模型 ID（用于匹配 usage.model，大小写不敏感全词匹配）
-#   modelName     — 展示名（可选，供 UI/报表使用；未设置时回退到 name）
-#   input         — 标准输入 token（非缓存部分）
-#   output        — 输出 token
-#   cacheRead     — 缓存命中读取 token（prompt_cache_hit_tokens / cache_read_input_tokens）
-#   cacheWrite5m  — 缓存写入 5 分钟 TTL（cache_creation.ephemeral_5m_input_tokens）
-#   cacheWrite1h  — 缓存写入 1 小时 TTL（cache_creation_input_tokens 非 ephemeral 部分）
-# 峰谷规则的时区固定为北京时间（Asia/Shanghai），不可通过配置修改。
+# ── Credit price table ────────────────────────────────────────────────────────
+# Unit: Credit / 1K Tokens.
+# The legacy format (model top-level input/output/... and tiers) remains valid. If rules are configured,
+# the first matching time-window rule is chosen in descending priority; if none matches, falls back to the model's top-level prices.
+# Time rules are evaluated by default in the TokenHub timezone Asia/Shanghai, with time range [start, end).
+# Model matching rule: usage.model -> case-insensitive whole-word match -> if unmatched, credit=0
+#   (falls back to the usage_raw table and is marked reason='unknown_model').
+# Field descriptions:
+#   name          -- model ID (used to match usage.model; case-insensitive whole-word match)
+#   modelName     -- display name (optional, for UI/reports; falls back to name when unset)
+#   input         -- standard input tokens (non-cached portion)
+#   output        -- output tokens
+#   cacheRead     -- cache-hit read tokens (prompt_cache_hit_tokens / cache_read_input_tokens)
+#   cacheWrite5m  -- cache write with 5-minute TTL (cache_creation.ephemeral_5m_input_tokens)
+#   cacheWrite1h  -- cache write with 1-hour TTL (the non-ephemeral part of cache_creation_input_tokens)
+# The timezone of peak/off-peak rules is fixed to Beijing time (Asia/Shanghai) and cannot be changed via configuration.
 creditPricing:
   models:
-    - name: "your-endpoint-id"         # 上游下发的 endpoint id / 模型别名，示例：Claude Sonnet
+    - name: "your-endpoint-id"         # Endpoint id / model alias issued by the upstream, e.g. Claude Sonnet
       modelName: "Claude Sonnet"
       input: 5.4935
       output: 27.4673
@@ -536,10 +536,10 @@ creditPricing:
       cacheWrite5m: 0.1500
       cacheWrite1h: 0.1500
 
-    # 示例：工作日峰谷计费。每次请求只命中一条 rule；命中后才按 tiers（若有）选长度档。
+    # Example: weekday peak/off-peak pricing. Each request matches only one rule; only after a match is the length tier selected via tiers (if any).
     - name: "deepseek-v4-pro-0813"
       modelName: "DeepSeek V4 Pro 0813"
-      # 顶层价格是 rules 未命中时的兼容兜底（此处为空闲价格）。
+      # Top-level prices are the compatibility fallback when no rule matches (here, the idle price).
       input: 0.4500
       output: 1.3500
       cacheRead: 0.0150
@@ -561,43 +561,43 @@ creditPricing:
             cacheWrite1h: 0
 
 
-# ── 上下文注入（injection pipeline） ─────────────────────────────────────────
-# 在每次 LLM 请求的 system prompt 中注入相关知识/记忆/技能。
-# 注入管道在 session init 完成后执行。
-# 每个 injector 是一个独立的 Hook，按注册顺序依次执行。
+# ── Context injection (injection pipeline) ─────────────────────────────────────────
+# Injects relevant knowledge/memory/skills into the system prompt of every LLM request.
+# The injection pipeline runs after session init completes.
+# Each injector is an independent Hook, executed in registration order.
 #
-# 可选 injector：
-#   skill       — <cloud_skills> 块：从内核 RAG 检索相关 skill 注入 system prompt；
-#                 同时注入 <skill_tools> 块告诉 LLM 如何通过 curl 调用 skill。
-#                 数据源 = skill 段的 endpoint（内核 gateway）。
-#   knowledge   — <knowledge_tools> 块：从内核拉取 team 知识资源列表，
-#                 注入两步自发现流程工具（依赖 skill.serviceToken）。
-#   tdai-memory — TDAI L2/L3 记忆注入（由 tdai.memory.* 控制，详见 tdai 段）。
+# Available injectors:
+#   skill       -- <cloud_skills> block: retrieves relevant skills from the kernel RAG and injects them into the system prompt;
+#                 also injects a <skill_tools> block telling the LLM how to call skills via curl.
+#                 Data source = the endpoint of the skill section (kernel gateway).
+#   knowledge   -- <knowledge_tools> block: pulls the team's knowledge resource list from the kernel and
+#                 injects a two-step self-discovery flow tool (depends on skill.serviceToken).
+#   tdai-memory -- TDAI L2/L3 memory injection (controlled by tdai.memory.*; see the tdai section).
 injection:
-  enabled: true             # 是否启用上下文注入（关闭后下方 injectors 列表全部失效）
-  injectors: ["skill", "knowledge", "tdai-memory"]   # 要启用的注入器列表
-  # 对外统一 gateway 地址 —— LLM 生成的 <skill_tools> / <tdai_memory_tools>
-  # 段里嵌的 curl URL 都以这个为 base。只填 gateway 域名，**不带端口**
-  # （gateway 内部路由到 proxy pod 的端口由 ops 在 gateway 侧配，跟这里无关）。
+  enabled: true             # Whether to enable context injection (when off, the injectors list below is entirely ignored)
+  injectors: ["skill", "knowledge", "tdai-memory"]   # List of injectors to enable
+  # Unified external gateway address -- the curl URLs embedded in the <skill_tools> / <tdai_memory_tools>
+  # sections generated for the LLM all use this as base. Fill in only the gateway domain, **without a port**
+  # (the port the gateway routes to proxy pods is configured by ops on the gateway side and is unrelated to this).
   #
-  # ⚠️ 多节点部署必配。未配时每个 pod 用自己的 host:port 兜底 → COS 里同一份
-  # hook cache 被 pods 互相覆盖 → 上游 Anthropic KV cache 每次 miss（费钱+慢）。
+  # ⚠️ Required for multi-node deployments. When unset, each pod falls back to its own host:port -> the same
+  # hook cache in COS gets overwritten by pods against each other -> the upstream Anthropic KV cache misses every time (costly + slow).
   #
-  # gateway 侧需把下面两个前缀原样透传到 proxy pod：
+  # The gateway side must pass the following two prefixes through to the proxy pod as-is:
   #   /skill-bridge/**   → proxy /skill-bridge/**
   #   /memory-bridge/**  → proxy /memory-bridge/**
   externalGatewayUrl: "https://gateway.example.com"
 
-  # ── 资产反思模式（内部效果评估用；默认开启） ─────────────────────────────
-  # 结构与 costGuard.markerOptIn 姿势对齐,但 default 相反:
-  #   markerOptIn=true（默认）：AssetReflectionInjector 会 register。marker 仍是
-  #                             opt-in——只有请求 URL 带 `/analyse` 段（结构同
-  #                             `/cost-guard`:夹在 `/{agent}/{spaceId}` 之后,如
-  #                             `/codebuddy/default/analyse/v1/messages`）才 emit
-  #                             `<asset_reflection>` 块到 system prompt 末尾,指导
-  #                             agent 点评「本轮调用过哪些云端资产工具、各自
-  #                             起没起到作用」。不带 marker 的正常请求完全无感。
-  #   markerOptIn=false：AssetReflectionInjector 不 register,且顶部 gate 把任何
+  # ── Asset reflection mode (for internal effect evaluation; enabled by default) ─────────────────────────────
+  # Structure aligned with costGuard.markerOptIn, but with the opposite default:
+  #   markerOptIn=true (default): AssetReflectionInjector is registered. The marker is still
+  #                             opt-in -- only when the request URL carries an `/analyse` segment (structured like
+  #                             `/cost-guard`: placed after `/{agent}/{spaceId}`, e.g.
+  #                             `/codebuddy/default/analyse/v1/messages`) is the
+  #                             `<asset_reflection>` block emitted at the end of the system prompt, instructing the
+  #                             agent to review "which cloud asset tools were called this turn and whether each
+  #                             was useful". Normal requests without the marker are completely unaffected.
+  #   markerOptIn=false: AssetReflectionInjector is not registered, and the top-level gate any
   #                       带 `/analyse/` 段的请求直接 404,零性能开销。适合确认
   #                       不需要资产反思能力的部署显式关掉。
   # tag 列表由本节点上实际 register 的资产 injector 决定（skill / tdai-memory /

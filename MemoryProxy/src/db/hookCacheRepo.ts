@@ -9,9 +9,9 @@
  * for that hook, matching the existing "hook failure → no injection" rule.
  *
  * ── Signature note ─────────────────────────────────────────────────────────
- * 见 docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.6：所有接口
- * 第一个参数是 `spaceId`（P4 kernel-sts 新增），与 SessionRepo / BindingRepo
- * 保持一致；空 spaceId 上下文会被 sessionDirOf 内部当作 `_default` 兜底段处理。
+ * See docs/design/2026-07-12-cos-shark-sts-credential-plan.md §3.6: every method
+ * takes `spaceId` as its first parameter (added by P4 kernel-sts), consistent with SessionRepo / BindingRepo;
+ * an empty spaceId context is treated as the `_default` fallback segment inside sessionDirOf.
  */
 
 import type Database from "better-sqlite3";
@@ -61,7 +61,7 @@ export interface HookCacheRepo {
   ): void | Promise<void>;
 }
 
-/** Sqlite 后端下用的复合 session id —— 与 SessionRepo 一致，多加一段 spaceId. */
+/** Composite session id used with the Sqlite backend -- consistent with SessionRepo, with an extra spaceId segment. */
 function compositeSid(
   spaceId: string,
   userId: string,

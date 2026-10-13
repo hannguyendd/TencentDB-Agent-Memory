@@ -1,14 +1,14 @@
 /**
  * Claude Code Session Init Form — `AskUserQuestion` tool_use.
  *
- * Claude Code 原生交互 form：
+ * Claude Code native interactive form:
  *   - Tool name: `AskUserQuestion`
- *   - Options: `{ label, description }` 结构体，2-4 个硬限制
- *   - Protocol: 仅 Anthropic SSE
+ *   - Options: `{ label, description }` structs, hard limit of 2-4
+ *   - Protocol: Anthropic SSE only
  *   - ID prefix: `toolu_cc_session_init_`
- *   - 分页: 每页 3 个 agent + 1 个"更多→"/SKIP 槽位
+ *   - Pagination: 3 agents per page + 1 "More →"/SKIP slot
  *
- * 不含任何 CodeBuddy 逻辑。
+ * Contains no CodeBuddy logic.
  */
 
 import type { TeamOption } from "../types.js";
@@ -19,66 +19,66 @@ import { computePagination, CC_MAX_OPTIONS as CC_MAX_OPTIONS_SHARED } from "./pa
 export const TOOL_NAME = "AskUserQuestion";
 export const TOOLCALL_PREFIX = "toolu_cc_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = "Session Init — Select Team";
+export const AGENT_TASK_FORM_TITLE = "Session Init — Select Agent and Task";
+export const RETRY_FORM_TITLE = "Could not recognize your selection, please select again";
 
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
-export const MORE_LABEL = "更多 →";
+export const SKIP_LABEL = "Do not associate this time (skip injection, pass through)";
+export const MORE_LABEL = "More →";
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Init — Associate Team Assets?";
 
 /**
- * 附在每步 question 文末的通用备注。
- * Claude Code 的 AskUserQuestion 会给用户一个 "Other" 输入框，回复"跳过 / skip /
- * 不关联" 就走 SKIP_RE bypass；没识别到的自由文本会 unrecognized → 同样 bypass。
- * 文案与 workbuddy/codex/codebuddy/dsh 五端统一，避免多客户端表述漂移。
+ * Generic note appended to the end of each step's question.
+ * Claude Code's AskUserQuestion gives the user an "Other" input box; replying "skip" or
+ * "do not associate" goes through the SKIP_RE bypass; unrecognized free text -> unrecognized -> also bypass.
+ * The wording is unified across the five clients workbuddy/codex/codebuddy/dsh/cc, to avoid wording drift between clients.
  */
-const SKIP_HINT = '（请选择最匹配的选项，当前暂不支持自定义输入。若选择跳过，本次 Session 将不注入团队资产）';
+const SKIP_HINT = ' (Please choose the best-matching option; custom input is not currently supported. If you choose to skip, this Session will not inject team assets)';
 
-// 分页布局统一走 pagination.ts；此处仅用其常量。
+// Pagination layout is handled by pagination.ts; only its constants are used here.
 const CC_MAX_OPTIONS = CC_MAX_OPTIONS_SHARED;
 
 /**
- * fake `thinking` block 的固定 placeholder signature（供 buildFormResponse 用）。
+ * Fixed placeholder signature for the fake `thinking` block (used by buildFormResponse).
  *
- * ## 背景 —— DeepSeek 官方 Anthropic 兼容端点强约束
+ * ## Background -- hard constraint of DeepSeek's official Anthropic-compatible endpoint
  *
- * DeepSeek V4 的 `/anthropic/v1/messages` 端点在 thinking mode 下（deepseek-v4-pro
- * 等 thinking 模型 + 带 `tools` 参数几乎默认开）**硬性要求**历史 assistant 消息
- * 必须包含 `thinking` content block，否则返回：
+ * DeepSeek V4's `/anthropic/v1/messages` endpoint in thinking mode (thinking models such as deepseek-v4-pro
+ * with a `tools` parameter are almost on by default) **strictly requires** historical assistant messages
+ * to contain a `thinking` content block, otherwise it returns:
  *   `400 The content[].thinking in the thinking mode must be passed back to the API`
  *
- * 同款坑在 opencode #24803 / claude-code-router #1378 / hermes-agent #17992 /
- * litellm #31439 都复现过。DeepSeek 官方文档也明说：带 tools 时 reasoning_content
- * 必须在后续请求里回传，Anthropic 协议下同理指 thinking block。
+ * The same pitfall has been reproduced in opencode #24803 / claude-code-router #1378 / hermes-agent #17992 /
+ * litellm #31439. DeepSeek's official docs also state: with tools, reasoning_content
+ * must be passed back in subsequent requests; under the Anthropic protocol this likewise means the thinking block.
  *
- * 我们的 session-init 假表单响应只发 `tool_use`，没 thinking → 用户答完表单，
- * CC 把这条 fake assistant + tool_result 塞回下一次真实请求的历史 → DeepSeek 400。
+ * Our session-init fake form response only emits `tool_use`, with no thinking -> after the user answers the form,
+ * CC puts this fake assistant + tool_result into the history of the next real request -> DeepSeek returns 400.
  *
- * ## 为什么塞空 thinking + placeholder signature 就够了
+ * ## Why an empty thinking + placeholder signature is enough
  *
- * - **DeepSeek**: 只查 presence，`thinking: ""` + 任意 signature 都通过（社区案例
- *   直接 curl 验证过 `reasoning_content: ""` 就能解锁）。
- * - **proxy 自己的 `sanitizeThinkingBlocks`** (`anthropicHandler.ts:277-289`):
- *   要求 signature 是 base64ish (`^[A-Za-z0-9+/=]+$`) + 长度 ≥ 40 + 不是 UUID。
- *   我们的 placeholder 满足这三条 → 不会被误剥。
- * - **真 Anthropic 上游**: 只在 request 本身开了 thinking mode 时才做 signature
- *   crypto 校验。CC session-init 假响应场景下:
- *     - 客户端未开 thinking → Anthropic 忽略历史 thinking sig → 无影响
- *     - 客户端开了 thinking → 本来就已经因为 fake tool_use 无 thinking 而 400
- *       (net-new 回归 0)
- * - **CC 客户端 UI**: thinking 内容空，最多显示一个空的 thinking 折叠块，无碍。
+ * - **DeepSeek**: only checks presence; `thinking: ""` + any signature passes (community cases
+ *   verified directly with curl that `reasoning_content: ""` unlocks it).
+ * - **The proxy's own `sanitizeThinkingBlocks`** (`anthropicHandler.ts:277-289`):
+ *   requires the signature to be base64ish (`^[A-Za-z0-9+/=]+$`) + length >= 40 + not a UUID.
+ *   Our placeholder satisfies all three -> it will not be stripped by mistake.
+ * - **Real Anthropic upstream**: only performs signature
+ *   crypto verification when the request itself enables thinking mode. In the CC session-init fake response scenario:
+ *     - client has thinking off -> Anthropic ignores the historical thinking sig -> no effect
+ *     - client has thinking on -> it would already 400 because the fake tool_use has no thinking
+ *       (net-new regressions: 0)
+ * - **CC client UI**: the thinking content is empty; at most an empty collapsed thinking block is shown, harmless.
  *
- * ## dsh 侧的对称补丁
+ * ## Symmetric patch on the dsh side
  *
- * `src/session/dsh/form.ts` 的 `REASONING_PLACEHOLDER` 在 OpenAI 协议下解决同款
- * 问题（deepseek 的 OpenAI `/v1/chat/completions` 端点强查 `reasoning_content`）。
- * CC 这边是 Anthropic 协议 → thinking block 版本。
+ * `REASONING_PLACEHOLDER` in `src/session/dsh/form.ts` solves the same problem under the OpenAI protocol
+ * (deepseek's OpenAI `/v1/chat/completions` endpoint strictly checks `reasoning_content`).
+ * CC here uses the Anthropic protocol -> the thinking block version.
  *
- * 值本身对模型无影响 —— fake session-init 不真过模型。
+ * The value itself has no effect on the model -- the fake session-init never actually goes through the model.
  */
 const THINKING_SIGNATURE_PLACEHOLDER =
   "UHJveHlDQ1Nlc3Npb25Jbml0RmFrZVRoaW5raW5nUGxhY2Vob2xkZXJTaWc=";
@@ -106,7 +106,7 @@ export interface FormData {
   teams: TeamOption[];
   stage: FormStage;
   selectedTeamId?: string;
-  /** Claude Code 分页：当前 agent 页码 (0-based) */
+  /** Claude Code pagination: current agent page number (0-based) */
   pageIndex?: number;
   retry?: boolean;
   stream?: boolean;
@@ -129,11 +129,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？" + SKIP_HINT,
-      header: "关联资产",
+      question: titlePrefix + "Do you want to associate team assets with this conversation?" + SKIP_HINT,
+      header: "Team assets",
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: "Select Team / Agent / Task and inject team context" },
+        { label: ASSET_CONFIRM_NO, description: "Inject nothing this time; pass through" },
       ],
       multiSelect: false,
     });
@@ -141,17 +141,17 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
   }
 
   if (stage === "team") {
-    // Team options: 只列真实 team。主动"跳过"入口只在 asset_confirm 阶段，后续
-    // 阶段"异常/未识别"由 init.ts 兜底 bypass。
+    // Team options: list only real teams. The explicit "skip" entry exists only at the asset_confirm stage; later
+    // stages' "abnormal/unrecognized" cases are bypassed by init.ts as a fallback.
     //
-    // 调用方（init.ts）保证 teams.length ≥ 2 — 单 team 会被 auto-select 跳过，
-    // 根本不会走到 team form。form builder 不再兜底占位。
-    // description 留空 —— label 已含 team 名 + id 后缀，重复一遍 "Team: name"
-    // 只是噪音。
+    // The caller (init.ts) guarantees teams.length >= 2 -- a single team is skipped via auto-select and
+    // never reaches the team form. The form builder no longer provides a fallback placeholder.
+    // description is left empty -- the label already contains the team name + id suffix, repeating "Team: name"
+    // is just noise.
     //
-    // 分页对齐 agent/task：前 N-1 页 3 real + "更多 →"，末页塞剩下 (≤4)。
-    // 老实现 `slice(0, 4)` 硬截断，用户 team 数 ≥5 时后续 team 静默消失且没有
-    // 翻页入口 —— 已修 (2026-09-03)。
+    // Pagination aligned with agent/task: first N-1 pages hold 3 real + "More →", the last page holds the rest (<=4).
+    // The old implementation hard-truncated with `slice(0, 4)`; with >= 5 teams the remaining teams silently vanished with no
+    // way to page -- fixed (2026-09-03).
     const pageIndex = Math.max(0, data.pageIndex ?? 0);
     const page = computePagination(teams.length, pageIndex);
     const slice = teams.slice(page.start, page.end);
@@ -162,7 +162,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      teamOpts.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Team）` });
+      teamOpts.push({ label: MORE_LABEL, description: `See next batch (${remaining} more Team(s))` });
     }
 
     if (teamOpts.length < 2) {
@@ -173,9 +173,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? ` (page ${pageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择本次会话所属的 Team${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Select the Team for this session${pageSuffix}: ` + SKIP_HINT,
       header: page.totalPages > 1 ? `Team ${pageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Team",
       options: teamOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -192,10 +192,10 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
     const page = computePagination(team.agents.length, pageIndex);
     const slice = team.agents.slice(page.start, page.end);
 
-    // 只保留 agent 自身描述（有信息量），删掉 "(选完 agent 后可选 N 个任务)" /
-    // "(无任务)" 的尾巴 —— 用户此时正在选 agent，任务数量提示既不影响决策
-    // 也占屏。agent 若无自定义描述则 description 留空，不再回退到 "Agent: 名"
-    // （label 已经有名字）。
+    // Keep only the agent's own description (informative); drop the "(N tasks selectable after choosing the agent)" /
+    // "(no tasks)" suffix -- the user is choosing an agent now, and a task-count hint neither affects the decision
+    // nor is worth the screen space. If an agent has no custom description, description is left empty, no longer falling back to "Agent: name"
+    // (the label already has the name).
     const combinedOptions: Array<{ label: string; description: string }> = slice.map((a) => ({
       label: `${a.agent_name} (${a.agent_id.slice(-8)})`,
       description: a.description ?? "",
@@ -203,13 +203,13 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      combinedOptions.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Agent）` });
+      combinedOptions.push({ label: MORE_LABEL, description: `See next batch (${remaining} more Agent(s))` });
     }
-    // 末页不再追加 SKIP：主动跳过只在 asset_confirm 提供；后续阶段"异常/未识别"
-    // 由 init.ts 兜底 bypass。
+    // The last page no longer appends SKIP: explicit skip is offered only at asset_confirm; later stages' "abnormal/unrecognized"
+    // cases are bypassed by init.ts as a fallback.
     //
-    // pagination.ts 保证每页真实项数 ≥ 2（total > 4 时；total ≤ 4 时单页含全部
-    // 4 个 slot 铺满，无 MORE）；此处不该再收到 <2 的 combinedOptions。
+    // pagination.ts guarantees at least 2 real items per page (when total > 4; when total <= 4 a single page holds all
+    // 4 slots, no MORE); combinedOptions with <2 should not be received here.
     if (combinedOptions.length < 2) {
       throw new Error(
         `[cc form] agent page ${pageIndex} has ${combinedOptions.length} option(s); ` +
@@ -217,9 +217,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? ` (page ${pageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Select the Agent to use under "${team.team_name}"${pageSuffix}: ` + SKIP_HINT,
       header: page.totalPages > 1 ? `Agent ${pageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Agent",
       options: combinedOptions.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -235,8 +235,8 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
     const page = computePagination(team.tasks.length, taskPageIndex);
     const taskSlice = team.tasks.slice(page.start, page.end);
 
-    // description 留空 —— label 已含 task 名 + id 后缀，"Task: name" 只是噪音。
-    // 虚拟兜底条目（isDefault）不拼 id 后缀，反正只有一个不会重名歧义。
+    // description is left empty -- the label already contains the task name + id suffix; "Task: name" is just noise.
+    // The virtual fallback entry (isDefault) gets no id suffix; there is only one, so no name ambiguity.
     const taskOpts: Array<{ label: string; description: string }> = taskSlice.map((t) => ({
       label: t.isDefault
         ? t.task_name
@@ -248,11 +248,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       const remaining = page.total - page.end;
       taskOpts.push({
         label: MORE_LABEL,
-        description: `查看下一批（还剩 ${remaining} 个任务）`,
+        description: `See next batch (${remaining} more task(s))`,
       });
     }
 
-    // 同 agent 阶段：pagination.ts 保证 count ≥ 2，此处 <2 说明分页器有 bug。
+    // Same as the agent stage: pagination.ts guarantees count >= 2; <2 here means the paginator has a bug.
     if (taskOpts.length < 2) {
       throw new Error(
         `[cc form] task page ${taskPageIndex} has ${taskOpts.length} option(s); ` +
@@ -260,9 +260,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const taskPageSuffix = page.totalPages > 1 ? `（第 ${taskPageIndex + 1}/${page.totalPages} 页）` : "";
+    const taskPageSuffix = page.totalPages > 1 ? ` (page ${taskPageIndex + 1}/${page.totalPages})` : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要关联的任务${taskPageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + `Select the task to associate under "${team.team_name}"${taskPageSuffix}: ` + SKIP_HINT,
       header: page.totalPages > 1 ? `Task ${taskPageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Task",
       options: taskOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -303,11 +303,11 @@ export function buildFormResponse(data: FormData): Response {
       }));
 
       // ── Fake `thinking` block (index 0) ───────────────────────────────────
-      // 无条件 emit —— DeepSeek 官方 Anthropic 兼容端点在 thinking mode 下强查
-      // 历史 assistant 必须带 thinking block,否则 400。详见
-      // THINKING_SIGNATURE_PLACEHOLDER 常量注释。real Anthropic 场景零回归
-      // (无 thinking mode 时不 crypto 校验 sig;有 thinking mode 时本来就已经
-      // 因为 fake tool_use 无 thinking 而 400)。
+      // Emit unconditionally -- DeepSeek's official Anthropic-compatible endpoint in thinking mode strictly requires
+      // historical assistants to carry a thinking block, otherwise 400. See the
+      // THINKING_SIGNATURE_PLACEHOLDER constant comment. Zero regressions for real Anthropic
+      // (without thinking mode the sig is not crypto-verified; with thinking mode it would already
+      // 400 because the fake tool_use has no thinking).
       controller.enqueue(sse("content_block_start", {
         type: "content_block_start",
         index: 0,

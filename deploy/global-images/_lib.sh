@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# 通用工具函数：加载 .env、校验必填参数、等待容器 health、清理旧容器。
-# 由 start-*.sh 通过 `source _lib.sh` 引入，不单独执行。
+# Common helpers: load .env, validate required parameters, wait for container health, remove old containers.
+# Sourced by start-*.sh via `source _lib.sh`; not run on its own.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
 
-# 颜色
+# Colors
 if [[ -t 1 ]]; then
   C_RED=$'\033[31m'; C_GRN=$'\033[32m'; C_YLW=$'\033[33m'; C_BLU=$'\033[34m'; C_RST=$'\033[0m'
 else
@@ -19,10 +19,10 @@ ok()   { echo "${C_GRN}[ok]${C_RST} $*"; }
 warn() { echo "${C_YLW}[warn]${C_RST} $*" >&2; }
 die()  { echo "${C_RED}[error]${C_RST} $*" >&2; exit 1; }
 
-# 加载 .env（未创建时给指引）
+# Load .env (give guidance when it has not been created)
 load_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
-    die ".env 不存在。先 cp .env.example .env 并填入 LLM 参数。"
+    die ".env does not exist. First run cp .env.example .env and fill in the LLM parameters."
   fi
   set -a
   # shellcheck disable=SC1090
@@ -30,7 +30,7 @@ load_env() {
   set +a
 }
 
-# 校验一组必填变量；缺一个都不启动，一次性列出所有缺失项
+# Validate a set of required variables; do not start if any is missing, and list all missing items at once
 require_vars() {
   local missing=()
   for var in "$@"; do
@@ -40,17 +40,17 @@ require_vars() {
     fi
   done
   if (( ${#missing[@]} > 0 )); then
-    echo "${C_RED}[error]${C_RST} .env 中以下必填参数未设置或仍为 REPLACE_ME：" >&2
+    echo "${C_RED}[error]${C_RST} The following required parameters in .env are unset or still REPLACE_ME:" >&2
     for v in "${missing[@]}"; do echo "  - $v" >&2; done
     echo "" >&2
-    echo "  编辑 $ENV_FILE 后重试。" >&2
+    echo "  Edit $ENV_FILE and try again." >&2
     exit 1
   fi
 }
 
-# 找到可用 docker 命令（兼容 Homebrew 独立安装 + colima）
-# 优先级：PATH 中的 docker → Homebrew apple silicon → Homebrew intel → /usr/local
-# Homebrew Cellar 路径下按版本 glob，取最新（sort -V），避免硬编码具体小版本号。
+# Find a usable docker command (supports standalone Homebrew install + colima)
+# Priority: docker on PATH → Homebrew Apple silicon → Homebrew Intel → /usr/local
+# Under the Homebrew Cellar path, glob by version and take the latest (sort -V) to avoid hard-coding a specific minor version.
 find_docker() {
   if command -v docker >/dev/null 2>&1; then
     echo "docker"
@@ -72,73 +72,73 @@ find_docker() {
       return
     fi
   done
-  die "找不到 docker 命令。请先安装 Docker Desktop / OrbStack / colima + docker CLI。"
+  die "docker command not found. Please install Docker Desktop / OrbStack / colima + docker CLI first."
 }
 
 DOCKER="$(find_docker)"
 
-# PULL=1 时拉取镜像最新版本。
-# 默认关闭：docker run 在本地没有镜像时会自动拉，但本地已有同名 :latest 时会直接复用，
-# 不会感知远端更新——想升级到最新 latest 就带 PULL=1。
+# Pull the latest image version when PULL=1.
+# Off by default: docker run pulls automatically when the image is missing locally, but reuses a local image with the same :latest tag directly,
+# without noticing remote updates; pass PULL=1 to upgrade to the newest latest.
 pull_image() {
   local image="$1"
   [[ "${PULL:-0}" == "1" ]] || return 0
-  info "拉取镜像 $image"
-  $DOCKER pull "$image" || die "拉取 $image 失败。"
+  info "Pulling image $image"
+  $DOCKER pull "$image" || die "Failed to pull $image."
 }
 
-# 幂等移除同名容器
+# Idempotently remove a container with the same name
 rm_container_if_exists() {
   local name="$1"
   if $DOCKER ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
-    info "移除已存在的容器 $name"
+    info "Removing existing container $name"
     $DOCKER rm -f "$name" >/dev/null
   fi
 }
 
-# 等待容器进入 healthy 状态（或没有 healthcheck 时等 running）
+# Wait for the container to become healthy (or running when there is no healthcheck)
 wait_healthy() {
   local name="$1"
-  local timeout="${2:-90}"    # 秒
+  local timeout="${2:-90}"    # seconds
   local waited=0
-  info "等待 $name 就绪（最长 ${timeout}s）..."
+  info "Waiting for $name to be ready (up to ${timeout}s)..."
   while (( waited < timeout )); do
     local status health
     status="$($DOCKER inspect -f '{{.State.Status}}' "$name" 2>/dev/null || echo "missing")"
     health="$($DOCKER inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name" 2>/dev/null || echo "unknown")"
 
     if [[ "$status" != "running" ]]; then
-      warn "${name} 状态 ${status}，输出最近日志："
+      warn "${name} status ${status}, showing recent logs:"
       $DOCKER logs --tail 30 "$name" 2>&1 || true
-      die "${name} 未运行。"
+      die "${name} is not running."
     fi
 
     case "$health" in
       healthy) ok "$name healthy"; return 0 ;;
       unhealthy)
-        warn "${name} unhealthy，日志："
+        warn "${name} unhealthy, logs:"
         $DOCKER logs --tail 30 "$name" 2>&1 || true
-        die "${name} 健康检查失败。"
+        die "${name} health check failed."
         ;;
       none)
-        # 镜像没有 healthcheck：容器 running 就当就绪
-        ok "${name} running（无 healthcheck）"
+        # Image has no healthcheck: treat the container as ready once it is running
+        ok "${name} running (no healthcheck)"
         return 0
         ;;
     esac
     sleep 2
     waited=$((waited + 2))
   done
-  warn "${name} 等待超时，最后日志："
+  warn "${name} wait timed out, last logs:"
   $DOCKER logs --tail 30 "$name" 2>&1 || true
-  die "${name} 在 ${timeout}s 内未就绪。"
+  die "${name} was not ready within ${timeout}s."
 }
 
-# 打印统一的服务地址表
+# Print the unified service address table
 print_endpoints() {
   echo ""
   echo "  ┌─────────────────────────────────────────────────────────┐"
-  echo "  │ 服务地址                                                │"
+  echo "  │ Service endpoints                                       │"
   echo "  ├─────────────────────────────────────────────────────────┤"
   printf "  │ Panel UI       http://localhost:%-24s│\n" "${PANEL_PORT}/"
   printf "  │ Panel API      http://localhost:%-24s│\n" "${PANEL_PORT}/api/v1/"
@@ -150,7 +150,7 @@ print_endpoints() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# LLM 通路检查（与 verify.sh 同源逻辑；供 start-all.sh 交互式流程复用）
+# LLM connectivity check (same logic as verify.sh; reused by the start-all.sh interactive flow)
 # ═══════════════════════════════════════════════════════════════
 
 CURL="${CURL:-/usr/bin/curl}"
@@ -163,7 +163,7 @@ if [[ ! -x "$CURL" ]]; then
 fi
 
 # check_llm_openai <label> <base_url> <api_key> <model>
-#   OpenAI 兼容：GET {base}/models 只验证 auth+URL，不消耗 token。返回 0 通过 / 1 失败。
+#   OpenAI-compatible: GET {base}/models only verifies auth+URL and consumes no tokens. Returns 0 on pass / 1 on failure.
 check_llm_openai() {
   local label="$1" base="$2" key="$3" model="$4"
   base="${base%/}"
@@ -176,21 +176,21 @@ check_llm_openai() {
   local rc=0
   if [[ "$code" == "200" ]]; then
     if grep -q "\"$model\"" "$body_file" 2>/dev/null; then
-      ok "$label OpenAI 协议通路 OK（$model 在 /models 列表内）"
+      ok "$label OpenAI protocol connectivity OK ($model is in the /models list)"
     else
-      ok "$label OpenAI 协议通路 OK（未在 /models 里显式列出 $model，业务侧仍可能可用）"
+      ok "$label OpenAI protocol connectivity OK ($model not explicitly listed in /models, it may still be usable)"
     fi
   elif [[ "$code" == "401" || "$code" == "403" ]]; then
-    warn "$label API key 无效（HTTP ${code}）：$url"
+    warn "$label API key invalid (HTTP ${code}): $url"
     head -c 200 "$body_file" >&2; echo >&2
     rc=1
   elif [[ "$code" == "404" ]]; then
-    warn "$label GET /models 404 —— 该厂商可能没有该端点，改用 anthropic 协议检查"
+    warn "$label GET /models 404 -- this provider may not have the endpoint, falling back to the anthropic protocol check"
     rm -f "$body_file"
     check_llm_anthropic "$label" "$base" "$key" "$model"
     return $?
   else
-    warn "$label 无法访问 ${url}（HTTP=${code}）$(head -c 100 "$body_file" 2>/dev/null)"
+    warn "$label cannot reach ${url} (HTTP=${code})$(head -c 100 "$body_file" 2>/dev/null)"
     rc=1
   fi
   rm -f "$body_file"
@@ -198,7 +198,7 @@ check_llm_openai() {
 }
 
 # check_llm_anthropic <label> <base_url> <api_key> <model>
-#   Anthropic：POST {base}/v1/messages 发 max_tokens=1，消耗 ≤ 10 token。返回 0/1。
+#   Anthropic: POST {base}/v1/messages with max_tokens=1, consuming ≤ 10 tokens. Returns 0/1.
 check_llm_anthropic() {
   local label="$1" base="$2" key="$3" model="$4"
   base="${base%/}"
@@ -219,24 +219,24 @@ check_llm_anthropic() {
     "$url" 2>/dev/null || echo "000")
   local rc=0
   case "$code" in
-    200) ok "$label Anthropic 协议通路 OK（模型 $model 已应答）" ;;
+    200) ok "$label Anthropic protocol connectivity OK (model $model responded)" ;;
     401|403)
-      warn "$label API key 无效（HTTP ${code}）：$url"
+      warn "$label API key invalid (HTTP ${code}): $url"
       head -c 200 "$body_file" >&2; echo >&2
       rc=1 ;;
     404)
-      warn "$label URL 不存在（HTTP 404）：$url —— 检查 BASE_URL"
+      warn "$label URL not found (HTTP 404): $url -- check BASE_URL"
       rc=1 ;;
     400)
       if grep -qE "model.*not.*found|invalid.*model|model_not_found" "$body_file" 2>/dev/null; then
-        warn "$label 模型名 '$model' 无效（HTTP 400）"
+        warn "$label model name '$model' is invalid (HTTP 400)"
         rc=1
       else
-        warn "$label HTTP 400（可能是参数格式问题，非通路错）：$(head -c 150 "$body_file")"
+        warn "$label HTTP 400 (possibly a parameter format issue, not a connectivity error): $(head -c 150 "$body_file")"
         rc=0
       fi ;;
     *)
-      warn "$label 无法访问 ${url}（HTTP=${code}）$(head -c 100 "$body_file" 2>/dev/null)"
+      warn "$label cannot reach ${url} (HTTP=${code})$(head -c 100 "$body_file" 2>/dev/null)"
       rc=1 ;;
   esac
   rm -f "$body_file"
@@ -246,7 +246,7 @@ check_llm_anthropic() {
 # check_llm_group <label> <base_url> <api_key> <model> <protocol>
 check_llm_group() {
   local label="$1" base="$2" key="$3" model="$4" proto="${5:-openai}"
-  info "检查 $label 通路（协议=${proto}）..."
+  info "Checking $label connectivity (protocol=${proto})..."
   case "$proto" in
     anthropic) check_llm_anthropic "$label" "$base" "$key" "$model" ;;
     *)         check_llm_openai    "$label" "$base" "$key" "$model" ;;
@@ -254,14 +254,14 @@ check_llm_group() {
 }
 
 # ═══════════════════════════════════════════════════════════════
-# 交互式输入辅助
+# Interactive input helpers
 # ═══════════════════════════════════════════════════════════════
 
 # prompt_with_default <label> <default>
-#   打印 "label [default]: "，读一行；空输入返回 default。结果输出到 stdout。
+#   Print "label [default]: ", read a line; empty input returns default. The result goes to stdout.
 prompt_with_default() {
   local label="$1" default="${2:-}"
-  # 提示走 stderr，结果走 stdout（供 $(...) 捕获，避免把提示文本也捕获进来）
+  # The prompt goes to stderr and the result to stdout (for $(...) capture, so the prompt text is not captured too)
   if [[ -n "$default" ]]; then
     printf '%s [%s]: ' "$label" "$default" >&2
   else
@@ -277,21 +277,21 @@ prompt_with_default() {
 }
 
 # prompt_protocol <default>
-#   让用户确认 LLM 协议（openai/anthropic），非法输入回退 openai。
+#   Ask the user to confirm the LLM protocol (openai/anthropic); invalid input falls back to openai.
 prompt_protocol() {
   local default="${1:-openai}"
-  printf 'memory 组 LLM 协议（openai/anthropic）[%s]: ' "$default" >&2
+  printf 'memory group LLM protocol (openai/anthropic) [%s]: ' "$default" >&2
   local input
   IFS= read -r input || { printf '\n' >&2; printf '%s' "$default"; return 0; }
   input="${input:-$default}"
   case "$input" in
     openai|anthropic) printf '%s' "$input" ;;
-    *) warn "未知协议 '$input'，回退到 openai"; printf 'openai' ;;
+    *) warn "Unknown protocol '$input', falling back to openai"; printf 'openai' ;;
   esac
 }
 
 # prompt_confirm <question> <default_yes:0|1>
-#   返回 0=是 / 1=否
+#   Returns 0=yes / 1=no
 prompt_confirm() {
   local question="$1" default_yes="${2:-0}"
   local hint
@@ -308,7 +308,7 @@ prompt_confirm() {
 }
 
 # set_env_value <key> <value> <file>
-#   就地更新/追加 .env 里的 KEY=VALUE。用 awk 原样输出，避免 sed/perl 转义坑。
+#   Update/append KEY=VALUE in .env in place. Uses awk to print verbatim, avoiding sed/perl escaping pitfalls.
 set_env_value() {
   local key="$1" value="$2" file="$3"
   if grep -qE "^[[:space:]]*${key}=" "$file"; then
@@ -323,11 +323,11 @@ set_env_value() {
 }
 
 # ensure_knowledge_service_key
-#   Knowledge 服务间鉴权 key（Panel ↔ Knowledge 共用）。
-#   为空或占位符时自动生成随机值并回写 .env（幂等：已生成则复用，重启不漂移）。
-#   调用方随后把同一个值分两次注入 memory-hub 容器：
-#     KNOWLEDGE_SERVICE_KEY → Knowledge 进程校验侧
-#     KNOWLEDGE_AUTH_TOKEN  → Panel 进程调用侧
+#   Inter-service auth key for Knowledge (shared by Panel ↔ Knowledge).
+#   When empty or a placeholder, generate a random value and write it back to .env (idempotent: reused once generated, no drift on restart).
+#   The caller then injects the same value into the memory-hub container twice:
+#     KNOWLEDGE_SERVICE_KEY → Knowledge process verification side
+#     KNOWLEDGE_AUTH_TOKEN  → Panel process calling side
 ensure_knowledge_service_key() {
   if [[ -z "${KNOWLEDGE_SERVICE_KEY:-}" || "${KNOWLEDGE_SERVICE_KEY}" == "REPLACE_ME" ]]; then
     local rand
@@ -338,41 +338,41 @@ ensure_knowledge_service_key() {
     fi
     KNOWLEDGE_SERVICE_KEY="ks-svc-${rand}"
     set_env_value KNOWLEDGE_SERVICE_KEY "$KNOWLEDGE_SERVICE_KEY" "$ENV_FILE"
-    info "已生成 KNOWLEDGE_SERVICE_KEY 并写回 $ENV_FILE（Panel 与 Knowledge 共用）"
+    info "Generated KNOWLEDGE_SERVICE_KEY and wrote it back to $ENV_FILE (shared by Panel and Knowledge)"
   fi
 }
 
 # interactive_llm_setup
-#   交互式引导填写 LLM 两组（memory + proxy）→ 通路检查（可重试）→ 写回 .env。
-#   会更新内存中的 MEMORY_LLM_* / PROXY_UPSTREAM_* 变量（已 export），并写回 .env 持久化。
+#   Interactively guide filling in the two LLM groups (memory + proxy) → connectivity check (retryable) → write back to .env.
+#   Updates the in-memory MEMORY_LLM_* / PROXY_UPSTREAM_* variables (already exported) and persists them back to .env.
 interactive_llm_setup() {
   local base key model proto reuse_same
 
   echo ""
-  info "═══ 交互式配置 LLM（回车 = 保留当前值） ═══════════════════"
+  info "═══ Interactive LLM setup (Enter = keep current value) ═══════════════════"
 
-  # ── memory 组 ──
+  # ── memory group ──
   while true; do
-    base=$(prompt_with_default "memory 组 LLM BASE_URL" "${MEMORY_LLM_BASE_URL:-}")
-    key=$(prompt_with_default "memory 组 LLM API_KEY" "${MEMORY_LLM_API_KEY:-}")
-    model=$(prompt_with_default "memory 组 LLM MODEL" "${MEMORY_LLM_MODEL:-}")
+    base=$(prompt_with_default "memory group LLM BASE_URL" "${MEMORY_LLM_BASE_URL:-}")
+    key=$(prompt_with_default "memory group LLM API_KEY" "${MEMORY_LLM_API_KEY:-}")
+    model=$(prompt_with_default "memory group LLM MODEL" "${MEMORY_LLM_MODEL:-}")
     proto=$(prompt_protocol "${MEMORY_LLM_PROTOCOL:-openai}")
 
-    if check_llm_group "memory 组" "$base" "$key" "$model" "$proto"; then
+    if check_llm_group "memory group" "$base" "$key" "$model" "$proto"; then
       MEMORY_LLM_BASE_URL="$base"
       MEMORY_LLM_API_KEY="$key"
       MEMORY_LLM_MODEL="$model"
       MEMORY_LLM_PROTOCOL="$proto"
       break
     fi
-    warn "memory 组 LLM 通路检查未通过。"
-    prompt_confirm "是否重新输入？" 1 || die "用户放弃，退出。"
+    warn "memory group LLM connectivity check failed."
+    prompt_confirm "Re-enter?" 1 || die "User gave up, exiting."
   done
 
-  # ── proxy 组 ──
-  # 默认复用（回车即复用）的情况：
-  #   1) .env 里 proxy 组与刚填的 memory 组完全相同；
-  #   2) proxy 组仍为空 / REPLACE_ME（首次使用尚未配置，默认复用更顺手）。
+  # ── proxy group ──
+  # Cases where reuse is the default (Enter reuses):
+  #   1) the proxy group in .env is identical to the memory group just entered;
+  #   2) the proxy group is still empty / REPLACE_ME (first use, not yet configured; reuse by default is more convenient).
   reuse_same=0
   if [[ "${PROXY_UPSTREAM_URL:-}" == "$MEMORY_LLM_BASE_URL" && \
         "${PROXY_UPSTREAM_API_KEY:-}" == "$MEMORY_LLM_API_KEY" && \
@@ -384,30 +384,30 @@ interactive_llm_setup() {
     reuse_same=1
   fi
 
-  if prompt_confirm "proxy 组是否复用 memory 组的 LLM 配置？" "$reuse_same"; then
+  if prompt_confirm "Reuse the memory group LLM config for the proxy group?" "$reuse_same"; then
     PROXY_UPSTREAM_URL="$MEMORY_LLM_BASE_URL"
     PROXY_UPSTREAM_API_KEY="$MEMORY_LLM_API_KEY"
     PROXY_UPSTREAM_MODEL="$MEMORY_LLM_MODEL"
-    ok "proxy 组复用 memory 组配置，跳过重复检查"
+    ok "proxy group reuses the memory group config, skipping the duplicate check"
   else
     while true; do
-      base=$(prompt_with_default "proxy 组 UPSTREAM_URL" "${PROXY_UPSTREAM_URL:-}")
-      key=$(prompt_with_default "proxy 组 UPSTREAM_API_KEY" "${PROXY_UPSTREAM_API_KEY:-}")
-      model=$(prompt_with_default "proxy 组 UPSTREAM_MODEL" "${PROXY_UPSTREAM_MODEL:-}")
+      base=$(prompt_with_default "proxy group UPSTREAM_URL" "${PROXY_UPSTREAM_URL:-}")
+      key=$(prompt_with_default "proxy group UPSTREAM_API_KEY" "${PROXY_UPSTREAM_API_KEY:-}")
+      model=$(prompt_with_default "proxy group UPSTREAM_MODEL" "${PROXY_UPSTREAM_MODEL:-}")
 
-      if check_llm_group "proxy 组" "$base" "$key" "$model" openai; then
+      if check_llm_group "proxy group" "$base" "$key" "$model" openai; then
         PROXY_UPSTREAM_URL="$base"
         PROXY_UPSTREAM_API_KEY="$key"
         PROXY_UPSTREAM_MODEL="$model"
         break
       fi
-      warn "proxy 组 LLM 通路检查未通过。"
-      prompt_confirm "是否重新输入？" 1 || die "用户放弃，退出。"
+      warn "proxy group LLM connectivity check failed."
+      prompt_confirm "Re-enter?" 1 || die "User gave up, exiting."
     done
   fi
 
-  # ── 写回 .env ──
-  info "写回 LLM 配置 → $ENV_FILE"
+  # ── Write back to .env ──
+  info "Writing LLM config back → $ENV_FILE"
   set_env_value MEMORY_LLM_BASE_URL "$MEMORY_LLM_BASE_URL" "$ENV_FILE"
   set_env_value MEMORY_LLM_API_KEY "$MEMORY_LLM_API_KEY" "$ENV_FILE"
   set_env_value MEMORY_LLM_MODEL "$MEMORY_LLM_MODEL" "$ENV_FILE"
@@ -415,15 +415,15 @@ interactive_llm_setup() {
   set_env_value PROXY_UPSTREAM_URL "$PROXY_UPSTREAM_URL" "$ENV_FILE"
   set_env_value PROXY_UPSTREAM_API_KEY "$PROXY_UPSTREAM_API_KEY" "$ENV_FILE"
   set_env_value PROXY_UPSTREAM_MODEL "$PROXY_UPSTREAM_MODEL" "$ENV_FILE"
-  ok "LLM 配置已保存到 $ENV_FILE"
+  ok "LLM config saved to $ENV_FILE"
 }
 
 # ═══════════════════════════════════════════════════════════════
-# 端口预检
+# Port pre-check
 # ═══════════════════════════════════════════════════════════════
 
 # port_in_use <port>
-#   检测宿主机某端口是否处于 LISTEN 状态。返回 0=被占 / 1=空闲。
+#   Check whether a host port is in LISTEN state. Returns 0=in use / 1=free.
 port_in_use() {
   local port="$1"
   if command -v lsof >/dev/null 2>&1; then
@@ -431,13 +431,13 @@ port_in_use() {
   elif command -v ss >/dev/null 2>&1; then
     ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE ":${port}$"
   else
-    return 1  # 无检测工具时当作空闲，不阻塞启动
+    return 1  # With no detection tool, treat as free and do not block startup
   fi
 }
 
 # tdai_self_ports
-#   输出当前 running 的 tdai 三件套容器映射到宿主机的端口（空格分隔）。
-#   这些端口是「自己人」占用，会在启动时被 rm_container_if_exists 重建，不算冲突。
+#   Output the host ports mapped by the currently running tdai trio containers (space-separated).
+#   These ports are held by our own containers and get recreated by rm_container_if_exists at startup, so they are not conflicts.
 tdai_self_ports() {
   local c p ports=""
   for c in tdai-proxy tdai-memory-hub tdai-memory-core; do
@@ -450,25 +450,25 @@ tdai_self_ports() {
 }
 
 # check_ports
-#   一次性检查 4 个目标端口是否被占用；被「外部进程」占用则报错退出。
-#   会排除 tdai 自己容器占用的端口（那些会在启动时被重建）。
+#   Check all 4 target ports for conflicts at once; exit with an error if held by an external process.
+#   Ports held by tdai's own containers (which are recreated at startup) are excluded.
 check_ports() {
   local self_ports port_var port conflict=0
   self_ports=" $(tdai_self_ports) "
-  info "═══ 端口预检 ══════════════════════════════════════════"
+  info "═══ Port pre-check ══════════════════════════════════════════"
   for port_var in MEMORY_CORE_PORT PANEL_PORT KNOWLEDGE_PORT PROXY_PORT; do
     port="${!port_var:-}"
     if [[ -z "$port" ]]; then continue; fi
     if [[ "$self_ports" == *" $port "* ]]; then
-      info "端口 $port ($port_var) 由 tdai 旧容器占用（启动时会重建），跳过"
+      info "Port $port ($port_var) is held by an old tdai container (recreated at startup), skipping"
       continue
     fi
     if port_in_use "$port"; then
-      echo "${C_RED}[error]${C_RST} 端口 $port ($port_var) 已被占用，请释放该端口或在 .env 改端口。" >&2
+      echo "${C_RED}[error]${C_RST} Port $port ($port_var) is already in use; free the port or change it in .env." >&2
       conflict=1
     else
-      ok "端口 $port ($port_var) 空闲"
+      ok "Port $port ($port_var) is free"
     fi
   done
-  (( conflict == 0 )) || die "存在端口冲突，请先释放端口后重试。"
+  (( conflict == 0 )) || die "Port conflict detected; free the ports and try again."
 }

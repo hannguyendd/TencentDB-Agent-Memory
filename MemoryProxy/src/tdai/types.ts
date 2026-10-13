@@ -27,10 +27,10 @@ export interface TdaiIdentity {
   /** Task dimension for L0/L1 only. */
   taskId?: string;
   /**
-   * 请求发起者 user_key（原始 `sk-mem-...`）。用于 tdai `/v3/meta/*` 路由的
-   * Layer 3 用户鉴权（`x-tdai-user-key` header）—— ACL 校验路径必须。
+   * User key of the request initiator (raw `sk-mem-...`). Used for Layer 3 user auth
+   * on tdai `/v3/meta/*` routes (`x-tdai-user-key` header); required on the ACL check path.
    *
-   * 数据面（`/v3/conversation/*`）走 team/user/agent header 三元组，不用此字段。
+   * The data plane (`/v3/conversation/*`) uses the team/user/agent header triple and does not use this field.
    */
   userKey?: string;
 }

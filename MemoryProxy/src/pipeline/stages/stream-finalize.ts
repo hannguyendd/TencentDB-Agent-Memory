@@ -1,21 +1,21 @@
 /**
- * stages/stream-finalize.ts —— stream tap 尾段的可复用小 helper 集合。
+ * stages/stream-finalize.ts — collection of reusable small helpers for the stream tap tail.
  *
- * 4 个 helper (对应 openai-chat + anthropic + codex + workbuddy 4 处 finalize):
+ * 4 helpers (corresponding to the 4 finalize sites in openai-chat + anthropic + codex + workbuddy):
  *   1. stageWriteUsageLog      — writeLog(event:"usage") + gate + try/catch
  *   2. stageRecordTokenUsage   — recordInputTokenUsage + custom+rateLimit gate
  *   3. stageEmitModelIntent    — emitModelIntentTelemetry + gate + fanout
  *   4. stageOpikStreamSpan     — opikUpdateTrace(main) + opikUpdateTrace(fork) + opikCreateLlmSpan
  *
- * 不做"一次巨型 stageStreamFinalize", 因为 4 runner 的 finalize:
- *   - Langfuse input formatter 各 protocol 不同 (buildLangfuseInputChat / buildLangfuseInput / codex+wb 各自)
- *   - assistantMessage 组装形态各不同 (openai role+content+tool_calls / anthropic content[] / responses type+content)
- *   - notifyUpstreamResponse toolCalls mapper 各不同 (openai/anthropic/wb 特色)
- * 这些留在 caller inline, 只抽"给相同参数产生相同副作用"的 4 段。
+ * No "one giant stageStreamFinalize", because the finalize of the 4 runners:
+ *   - Langfuse input formatter differs per protocol (buildLangfuseInputChat / buildLangfuseInput / codex+wb each their own)
+ *   - assistantMessage assembly shapes differ (openai role+content+tool_calls / anthropic content[] / responses type+content)
+ *   - notifyUpstreamResponse toolCalls mapper differs (openai/anthropic/wb specifics)
+ * These stay inline in the caller; only the 4 segments that "produce the same side effects for the same parameters" are extracted.
  *
- * 每个 helper 内部实现严格 preserving 老 handler 行为 + gate 语义:
+ * Each helper's internal implementation strictly preserves the old handler behavior + gate semantics:
  *   - opikGate / writeLogUsageGate / modelIntentTelemetryGate / rateLimitGate
- *   - 全部走 ctx.gates?.<name> !== false, 默认 undefined = 保留老行为 (跑)
+ *   - all go through ctx.gates?.<name> !== false, default undefined = keep old behavior (run)
  */
 
 import type { ProxyConfig } from "../../types.js";
@@ -61,8 +61,8 @@ export function stageWriteUsageLog(input: WriteUsageLogInput): void {
       userInput: input.userInput,
       upstreamUrl: input.upstreamUrl,
       stream: true,
-      // usage 缺失/null → 落空对象占位 (writeLog 要求必填; 老 handler 也
-      // 一直这么兜底, UsageLogEntry.usage 下游只 spread, 空对象不会出错)。
+      // usage missing/null -> fall back to an empty-object placeholder (writeLog requires it; the old handler
+      // always did the same fallback; UsageLogEntry.usage is only spread downstream, an empty object is harmless)
       usage: input.usage ?? {},
       requestReceivedAt: input.requestReceivedAt,
       extensionStats: input.extensionStats,
@@ -89,8 +89,8 @@ export interface RecordTokenUsageInput {
 }
 
 export async function stageRecordTokenUsage(input: RecordTokenUsageInput): Promise<void> {
-  // custom upstream 不记 token 桶 (与 enforceRateLimit 对称)
-  // rateLimit gate 关闭时同步跳过 (codex/wb bootstrap 状态)
+  // custom upstream does not count toward the token bucket (symmetric with enforceRateLimit)
+  // skipped as well when the rateLimit gate is off (codex/wb bootstrap state)
   if (input.isCustomUpstream) return;
   if (input.gates?.rateLimit === false) return;
   await recordInputTokenUsage({
@@ -106,7 +106,7 @@ export async function stageRecordTokenUsage(input: RecordTokenUsageInput): Promi
 
 export interface EmitModelIntentInput {
   gates?: StageGates;
-  /** compositeKey 形态 "agentSource:sessionKey" (session_init_logs 对齐) */
+  /** compositeKey shape "agentSource:sessionKey" (aligned with session_init_logs) */
   sessionKey: string;
   turnSeq?: number;
   spaceId?: string;
@@ -128,7 +128,7 @@ export function stageEmitModelIntent(input: EmitModelIntentInput): void {
       intents: input.intents,
     });
   } catch {
-    // 埋点绝不阻塞业务
+    // tracking never blocks the business flow
   }
 }
 
@@ -150,14 +150,14 @@ export interface OpikStreamSpanInput {
   upstreamUrl: string;
   pipe: Pipeline;
   /**
-   * openai-chat 特色: 完成 stream 后同时 update trace + create llm span 两步。
-   * anthropic runner 只 create span (trace 由 caller 单独管理), 默认关闭。
+   * openai-chat specific: after the stream completes, both update trace + create llm span are done.
+   * The anthropic runner only creates the span (the trace is managed separately by the caller), off by default.
    *
-   * true = 走 updateTrace(main + fork) + createLlmSpan (openai-chat 老行为)
-   * false = 只走 createLlmSpan (anthropic 老行为)
+   * true = go through updateTrace(main + fork) + createLlmSpan (the old openai-chat behavior)
+   * false = only go through createLlmSpan (the old anthropic behavior)
    */
   updateTrace?: boolean;
-  /** custom stream tag 追加 (anthropic 没有 "stream" tag, 只在 retry 时加 "retry") */
+  /** custom stream tag append (anthropic has no "stream" tag, only adds "retry" on retry) */
   streamTag?: string;
 }
 

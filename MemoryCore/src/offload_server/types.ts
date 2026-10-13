@@ -3,7 +3,7 @@
  * This module does NOT import from src/offload/.
  */
 
-// ─── ToolPair (ingest 写入 pending.jsonl) ────────────────────────────────────
+// ─── ToolPair (ingest writes to pending.jsonl) ───────────────────────────────
 
 export interface ToolPair {
   toolName: string;
@@ -15,7 +15,7 @@ export interface ToolPair {
   durationMs?: number;
 }
 
-// ─── OffloadEntry (L1 产出, entries.jsonl 每行) ──────────────────────────────
+// ─── OffloadEntry (L1 output, one per line in entries.jsonl) ─────────────────
 
 export interface OffloadEntry {
   tool_call_id: string;
@@ -28,7 +28,7 @@ export interface OffloadEntry {
   result_ref?: string;
 }
 
-// ─── TaskJudgment (L1.5 产出) ────────────────────────────────────────────────
+// ─── TaskJudgment (L1.5 output) ──────────────────────────────────────────────
 
 export interface TaskJudgment {
   taskCompleted: boolean;
@@ -38,14 +38,14 @@ export interface TaskJudgment {
   newTaskLabel?: string;
 }
 
-// ─── TaskBoundary (L1.5 写入 state.boundaries) ──────────────────────────────
+// ─── TaskBoundary (L1.5 writes to state.boundaries) ─────────────────────────
 
 export interface TaskBoundary {
   targetMmd: string | null;
   timestamp: string;
 }
 
-// ─── MmdMeta (从 MMD 文件首行 %%{...}%% 解析) ──────────────────────────────
+// ─── MmdMeta (parsed from the first line %%{...}%% of an MMD file) ───────────
 
 export interface MmdMeta {
   filename: string;

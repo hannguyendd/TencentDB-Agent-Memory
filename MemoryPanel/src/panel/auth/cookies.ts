@@ -23,11 +23,11 @@ export function buildSessionCookie(
 }
 
 /**
- * 构建"会话级" Cookie（不写 Max-Age / Expires）。
+ * Build a "session-scoped" cookie (no Max-Age / Expires).
  *
- * 与 buildSessionCookie 的区别：后者总带 Max-Age，浏览器关闭后依然保留（持久化）；
- * 会话级 Cookie 随浏览器会话结束自动消失。适合表达"本次浏览期间的临时选择"——
- * 这类选择不该跨越浏览器重启，否则用户会困在一个自己早已忘记的旧决定里。
+ * Difference from buildSessionCookie: the latter always carries Max-Age and persists after the browser closes;
+ * a session-scoped cookie disappears automatically when the browser session ends. Suited to expressing "a temporary choice for this browsing session" --
+ * such a choice should not survive a browser restart, otherwise users get stuck with an old decision they have long forgotten.
  */
 export function buildTransientCookie(name: string, value: string, secure: boolean): string {
   const attributes = [

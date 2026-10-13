@@ -1,12 +1,12 @@
 /**
  * Claude Code Session Init — LastUser text extractor.
  *
- * 曾经这个文件里有 `stripInitArtifacts` 用来在 session_init 完成后剥离
- * 假表单对话（避免 LLM 看到 form 交互）。**该功能已删除**——现在永远保留
- * 用户的所有真实对话（含 session_init form 交互），不做任何删除。
+ * This file used to contain `stripInitArtifacts`, which stripped the fake form
+ * conversation after session_init completed (so the LLM would not see the form interaction). **That feature has been removed**: all real user
+ * conversation (including the session_init form interaction) is now always kept, with nothing deleted.
  *
- * 目前只剩一个 export: `getLastUserMessageText`，用于在 session_init
- * state machine 里读最后一条 user / tool 消息的文本以解析用户选择。
+ * Only one export remains: `getLastUserMessageText`, used by the session_init
+ * state machine to read the text of the last user / tool message and parse the user's selection.
  */
 
 import { containsFormTitle } from "./form.js";
@@ -28,9 +28,9 @@ interface AnthropicBlock {
 /**
  * Get text from last tool message containing Claude Code form answer data.
  *
- * 优先扫最近一条 role=tool 且含 form answer 关键词 (AskUserQuestion /
- * multi_question_result / 表单标题) 的消息 —— 这是 Claude Code 上报用户
- * 选择结果时的 tool_result 载体; fallback 到最近一条 user 消息。
+ * Prefer the most recent role=tool message containing form answer keywords (AskUserQuestion /
+ * multi_question_result / form title) -- this is the tool_result carrier Claude Code uses to report the user's
+ * selection; fall back to the most recent user message.
  */
 export function getLastUserMessageText(messages: RawMessage[]): string {
   // Priority: tool messages with real answer data (JSON)

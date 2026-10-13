@@ -1,13 +1,13 @@
 /**
  * Credit pricing lookup for LLM usage → cost calculation.
  *
- * TDAI 下发的计费规则以 Credit / 1K Token 为单位，按不同 token 类型
- * (input / output / cacheRead / cacheWrite5m / cacheWrite1h) 分别定价。
- * 定价表放在 config.yaml 的 `creditPricing.models`，支持热更新。
+ * Billing rules issued by TDAI are in units of Credit / 1K Tokens, priced separately per token type
+ * (input / output / cacheRead / cacheWrite5m / cacheWrite1h).
+ * The pricing table lives in `creditPricing.models` in config.yaml and supports hot reload.
  *
- * 匹配规则（`getModelPricing`）：
- *   大小写不敏感的全词匹配 —— modelId 与 config.name 忽略大小写后必须完全相等。
- *   未匹配时返回 null，调用方降级为 raw token count。
+ * Matching rule (`getModelPricing`):
+ *   Case-insensitive whole-word match -- modelId and config.name must be exactly equal ignoring case.
+ *   Returns null when unmatched; the caller degrades to the raw token count.
  */
 
 import type {
@@ -36,19 +36,19 @@ export function getModelPricing(
 }
 
 /**
- * 解析 model 的展示名（用于 UI/报表）。
+ * Resolve the model's display name (for UI/reports).
  *
- * 匹配逻辑：
- * 1. `modelId` 空/null/undefined → 返回 `""`
- * 2. 定价表命中且 entry.modelName 非空 → 返回 entry.modelName（如 "Claude Sonnet 4"）
- * 3. 定价表未命中 或 命中但 modelName 未配置/为空 → **回落 modelId 本身**
- *    （前端始终有非空展示；unknown model 至少能看到内部 ID）
+ * Matching logic:
+ * 1. `modelId` empty/null/undefined → return `""`
+ * 2. Pricing table hit and entry.modelName non-empty → return entry.modelName (e.g. "Claude Sonnet 4")
+ * 3. Pricing table miss, or hit but modelName not configured/empty → **fall back to modelId itself**
+ *    (the frontend always has a non-empty display; for an unknown model at least the internal ID is visible)
  *
- * 与 `getModelPricing` 共用一份匹配逻辑（大小写不敏感全词匹配）。
+ * Shares the same matching logic as `getModelPricing` (case-insensitive whole-word match).
  *
  * @param config - Credit pricing configuration.
  * @param modelId - Model identifier from usage.
- * @returns 展示名字符串（永远非 null，可能为 ""）。
+ * @returns Display name string (never null, may be "").
  */
 export function resolveModelName(
   config: CreditPricingConfig | null | undefined,
@@ -65,10 +65,10 @@ export function normalizePublicModelName(modelName: string | null | undefined): 
 }
 
 /**
- * 反向解析：把客户端侧的展示名（`modelName`）翻译回真实 `model_id`（`entry.name`）。
+ * Reverse resolution: translate the client-side display name (`modelName`) back to the real `model_id` (`entry.name`).
  *
- * 客户端展示名与价目表展示名均以去除首尾空白、大小写不敏感的方式匹配；这与
- * `/v1/models` 返回的 ID 保持一致，确保发现到的模型可以直接调用。
+ * Client display names and price-table display names are both matched with leading/trailing whitespace trimmed and case-insensitively; this is consistent with the IDs
+ * returned by `/v1/models`, ensuring discovered models can be called directly.
  */
 export function resolveModelId(
   config: CreditPricingConfig | null | undefined,
@@ -87,33 +87,33 @@ export function resolveModelId(
 }
 
 /**
- * 校验客户端请求的 `model` 是否已在价目表的 **`modelName`（展示名）** 中登记。
+ * Validate that the client request's `model` is registered in the price table's **`modelName` (display name)**.
  *
- * 用于请求入口的门禁：价目表配置存在时，客户端只能用展示名（`modelName`）
- * 请求，真实 `model_id`（`entry.name`）视为内部细节，不再作为公开入口。
- * 未匹配的 model 一律拒绝，避免"转发成功但无法计费"的静默漏计费问题。
+ * Used as the gate at the request entry: when a price table is configured, clients may only request using the display name (`modelName`);
+ * the real `model_id` (`entry.name`) is treated as an internal detail and is no longer a public entry point.
+ * Any unmatched model is rejected, avoiding the silent under-billing problem of "forwarded successfully but cannot be billed".
  *
- * 规则：
- * 1. `config` / `config.models` 为空 → **返回 true**（价目表未配置时跳过校验，
- *    向后兼容旧部署；由 `computeCreditDelta` 走 raw 追溯路径处理）。
- * 2. `requested` 空/null/undefined → **返回 false**（必须显式提供 model 才允许放行）。
- * 3. 命中任意 entry 的**非空** `modelName`（大小写不敏感全词匹配）→ true。
- * 4. 否则 → false。
+ * Rules:
+ * 1. `config` / `config.models` empty → **return true** (skip validation when the price table is not configured,
+ *    backward compatible with old deployments; `computeCreditDelta` handles it via the raw tracing path).
+ * 2. `requested` empty/null/undefined → **return false** (the model must be provided explicitly to be let through).
+ * 3. Hits any entry's **non-empty** `modelName` (case-insensitive whole-word match) → true.
+ * 4. Otherwise → false.
  *
- * 注：未配置 `modelName` 的 entry 不可被客户端请求命中（此时该模型属"内部专用"，
- * 仅供内部转发使用，不对客户端暴露）。
+ * Note: entries without `modelName` cannot be hit by client requests (such a model is "internal only",
+ * used only for internal forwarding and not exposed to clients).
  *
  * @param config - Credit pricing configuration.
- * @param requested - 客户端请求中的 `model` 字段值。
- * @returns 是否允许放行。
+ * @param requested - Value of the `model` field in the client request.
+ * @returns Whether to let it through.
  */
 export function isModelInPricing(
   config: CreditPricingConfig | null | undefined,
   requested: string | null | undefined,
 ): boolean {
-  // 价目表未配置：跳过校验（向后兼容）
+  // Price table not configured: skip validation (backward compatible)
   if (!config?.models?.length) return true;
-  // 显式要求非空 model
+  // Explicitly require a non-empty model
   if (!requested) return false;
 
   const normalizedRequested = normalizePublicModelName(requested);
@@ -224,16 +224,16 @@ function parseTime(value: string): number | null {
 }
 
 /**
- * 按 input token 总量选择生效的定价档位。
+ * Select the effective pricing tier by total input tokens.
  *
- * 匹配规则：升序遍历 `entry.tiers`，第一个满足
- * `totalInputTokens ≤ tier.maxInputTokens`（或 `maxInputTokens == null`）的即命中。
- * 命中后该请求**所有 token 类型**都按该档单价计费（整体定档，非分段累进）。
+ * Matching rule: iterate `entry.tiers` in ascending order; the first one satisfying
+ * `totalInputTokens ≤ tier.maxInputTokens` (or `maxInputTokens == null`) hits.
+ * Once hit, **all token types** of the request are billed at that tier's unit price (tiered as a whole, not progressive).
  *
- * 无 `tiers` 或数组为空时直接返回 entry 顶层单价（向后兼容）。
+ * With no `tiers` or an empty array, return the entry's top-level unit price directly (backward compatible).
  *
- * @param entry - 命中的模型定价条目。
- * @param totalInputTokens - 分档判据 = nonCacheInput + cacheRead。
+ * @param entry - The matched model pricing entry.
+ * @param totalInputTokens - Tier criterion = nonCacheInput + cacheRead.
  */
 export function resolveTierPricing(
   entry: TieredPricing,
@@ -246,6 +246,6 @@ export function resolveTierPricing(
       return tier;
     }
   }
-  // 所有档都没命中（理论上不会，最后一档应是 null）→ 回落顶层
+  // No tier matched (in theory impossible, the last tier should be null) → fall back to the top level
   return entry;
 }

@@ -98,7 +98,7 @@ export interface ForwardTarget {
   routedFrom: string;
 }
 
-/** resolveForwardTarget 的输入参数。 */
+/** Input parameters of resolveForwardTarget. */
 export interface ForwardTargetRequest {
   keyId: string;
   messages: unknown[];
@@ -108,7 +108,7 @@ export interface ForwardTargetRequest {
   modelId: string;
   defaultUpstreamUrl: string;
   requestPath: string;
-  /** 原始请求头（小写键），用于 agent profile 检测与 session key 解析。 */
+  /** Original request headers (lowercase keys), used for agent profile detection and session key resolution. */
   headers?: Record<string, string>;
   /** Parent trace ID for observability reporting (Opik/Langfuse). */
   traceId?: string;
@@ -327,11 +327,11 @@ function getCostGuard(config: ProxyConfig): unknown {
 /**
  * Join a base URL with the standard endpoint extracted from the request path.
  *
- * 从 `WHITELIST_ENDPOINTS` 表匹配用户请求路径对应的 upstream endpoint。
- * 匹配时会自动剥离 `/proxy/{spaceId}` 前缀与 query string。
+ * Match the upstream endpoint corresponding to the user's request path from the `WHITELIST_ENDPOINTS` table.
+ * The `/proxy/{spaceId}` prefix and query string are stripped automatically when matching.
  *
- * 兜底行为：若请求路径不在白名单内，退回历史默认（`/chat/completions`），
- * 并打 `log.warn("joinUrl.fallback")`，便于后续观察是否有需要补入白名单的端点。
+ * Fallback behavior: if the request path is not in the whitelist, fall back to the historical default (`/chat/completions`)
+ * and emit `log.warn("joinUrl.fallback")`, to help observe whether any endpoint needs to be added to the whitelist.
  *
  * @exported for unit testing; not part of the module's public API surface.
  */
@@ -339,7 +339,7 @@ export function joinUrl(base: string, requestPath: string): string {
   const normalizedBase = base.replace(/\/+$/, "");
   const baseWithoutQuery = normalizedBase.split("?")[0] ?? normalizedBase;
 
-  // agentUpstreams 或完整 endpoint base 已含路径时勿再拼接。
+  // Do not append again when agentUpstreams or the full endpoint base already contains a path.
   if (
     baseWithoutQuery.endsWith("/messages") ||
     baseWithoutQuery.endsWith("/chat/completions")
@@ -347,20 +347,20 @@ export function joinUrl(base: string, requestPath: string): string {
     return normalizedBase;
   }
 
-  // ── /v1 智能兼容(2026-09-28,fix InstanceUpstream v2 用户填 base 不带 /v1)──
-  // 仅针对 **anthropic 协议**:官方 base_url 约定不含 /v1(如
-  // `https://api.anthropic.com`、`https://open.bigmodel.cn/api/anthropic`),
-  // 完整路径 `/v1/messages`;而 TokenHub 全局 upstream 约定含 /v1
-  // (`https://tokenhub.tencentmaas.com/v1`),whitelist 的 `upstreamEndpoint`
-  // 剥掉了 /v1(如 `/messages`),假设 base 已含 /v1。按官方姿势填 base 的
-  // 用户 URL 少 /v1 打 GLM/Anthropic 官方端点 → 404。这里在 anthropic 协议
-  // 且 base 无 `/vN` 版本号后缀时自动补 `/v1`。
+  // ── Smart /v1 compatibility (2026-09-28, fix: InstanceUpstream v2 users fill in a base without /v1) ──
+  // Only for the **anthropic protocol**: the official base_url convention excludes /v1 (e.g.
+  // `https://api.anthropic.com`, `https://open.bigmodel.cn/api/anthropic`),
+  // with the full path `/v1/messages`; whereas the TokenHub global upstream convention includes /v1
+  // (`https://tokenhub.tencentmaas.com/v1`), and the whitelist's `upstreamEndpoint`
+  // strips /v1 (e.g. `/messages`), assuming the base already contains /v1. Users who fill in the base the official way
+  // hit GLM/Anthropic official endpoints without /v1 -> 404. Here, when the protocol is anthropic
+  // and the base has no `/vN` version suffix, `/v1` is appended automatically.
   //
-  // 排除范围:
-  //   - openai chat/completions/embeddings/responses 一律不动(codex/workbuddy
-  //     `/responses` 客户端约定就是不带 /v1,不能强行补;openai chat 端点由用
-  //     户自行保证 base 形态)
-  //   - base 已含 `/vN`(v1/v2/v3...)时保持原样,兼容 TokenHub 姿势
+  // Exclusions:
+  //   - openai chat/completions/embeddings/responses are never touched (the codex/workbuddy
+  //     `/responses` client convention is no /v1, so it must not be forced; for openai chat endpoints
+  //     the user is responsible for the base shape)
+  //   - when the base already contains `/vN` (v1/v2/v3...) leave it as is, compatible with the TokenHub convention
   const hasVersionSuffix = /\/v\d+$/.test(baseWithoutQuery);
 
   const entry = matchWhitelistEndpoint(requestPath);
@@ -370,9 +370,9 @@ export function joinUrl(base: string, requestPath: string): string {
     return `${normalizedBase}${versionPrefix}${entry.upstreamEndpoint}`;
   }
 
-  // Fallback: 按请求路径后缀推断 Anthropic / OpenAI endpoint。
-  // `/messages` 结尾兜底为 anthropic,同样享受 /v1 智能补齐;
-  // `/chat/completions` 兜底为 openai,保持原样不动。
+  // Fallback: infer the Anthropic / OpenAI endpoint from the request path suffix.
+  // A `/messages` suffix falls back to anthropic and likewise gets the smart /v1 completion;
+  // `/chat/completions` falls back to openai, left untouched.
   const isAnthropicFallback = requestPath.endsWith("/messages");
   const endpoint = isAnthropicFallback ? "/messages" : "/chat/completions";
   const versionPrefixFallback = isAnthropicFallback && !hasVersionSuffix ? "/v1" : "";

@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# codex-init.sh —— 用 curl 走完 Codex 5-step session-init form，
-# 得到 initialized session。用法：
-#   ./codex-init.sh                       # 走完整流程，SID 自动生成
-#   ./codex-init.sh --sid <uuid>          # 指定 SID
-#   ./codex-init.sh --bypass              # 只走 asset_confirm 选"否" → bypassed session
+# codex-init.sh —— use curl to walk through the Codex 5-step session-init form,
+# producing an initialized session. Usage:
+#   ./codex-init.sh                       # run the full flow, SID auto-generated
+#   ./codex-init.sh --sid <uuid>          # specify the SID
+#   ./codex-init.sh --bypass              # only walk asset_confirm and choose "No" -> bypassed session
 #   ./codex-init.sh --team memory --agent "开发大师" --task "接入e2e联合评测"
-# 结果 SID 打在最后一行，也写 /tmp/codex-qa-sid.env
+# The resulting SID is printed on the last line and also written to /tmp/codex-qa-sid.env
 
 set -uo pipefail
-# 注意：不用 set -e，因为 send_form_answer 里的 awk exit 会让 curl 收 SIGPIPE 返 141
+# Note: no set -e, because the awk exit inside send_form_answer makes curl receive SIGPIPE and return 141
 
 BASE="${BASE:?BASE required, e.g. BASE=http://127.0.0.1:8096}"
 USER_KEY="${USER_KEY:?USER_KEY required (sk-mem-* / ck_* from MemoryPanel)}"
 SPACE="${SPACE:-default}"
 SID=""
-TEAM="memory"          # 默认选第一个 team
-AGENT="开发大师"        # 默认选一个 agent
-TASK=""                # 空则选第一个非"更多"的 task
+TEAM="memory"          # by default pick the first team
+AGENT="开发大师"        # by default pick an agent (name is data on the server; keep as is)
+TASK=""                # if empty, pick the first task that is not "More"
 MODE="full"            # full | bypass
 
-# 参数解析
+# argument parsing
 while (( "$#" )); do
   case "$1" in
     --sid)    SID="$2"; shift 2;;
@@ -36,14 +36,14 @@ done
 
 echo "SID=$SID  MODE=$MODE  SPACE=$SPACE" >&2
 
-# 通用 helper: 发一个 turn, capture call_id, print event.name summary
+# Generic helper: send one turn, capture call_id, print an event.name summary
 call_id_of() {
   grep -oP 'call_codex_session_init_\d+' | head -1
 }
 
 send_first_turn() {
-  # ⚠️ input[i] 必须带 type:"message"，否则 codexAdapter.extractUserText
-  # (agent-adapters/codex.ts:88) 返 null，mem: 命令一律无法拦截。
+    # ⚠️ input[i] must carry type:"message", otherwise codexAdapter.extractUserText
+    # (agent-adapters/codex.ts:88) returns null and mem: commands can never be intercepted.
   curl -sS -N -X POST "$BASE/codex/$SPACE/responses" \
     -H "authorization: Bearer $USER_KEY" \
     -H "session-id: $SID" \
@@ -53,7 +53,7 @@ send_first_turn() {
 
 send_form_answer() {
   local call_id="$1" answer="$2"
-  # 早退：读到 response.completed 立即中断（curl 会 SIGPIPE 出，不影响返回内容）
+    # Early exit: stop as soon as response.completed is read (curl exits via SIGPIPE, which does not affect the returned content)
   set +e
   curl -sS -N -X POST "$BASE/codex/$SPACE/responses" \
     -H "authorization: Bearer $USER_KEY" \
@@ -65,8 +65,8 @@ send_form_answer() {
   set -e
 }
 
-# 从响应中拿 form 的第一个 question 的 label 列表
-# arguments 里 label 是 \"escaped\"，用 python 抠出来
+# Get the label list of the form's first question from the response
+# In arguments the labels are \"escaped\", so extract them with python
 extract_options() {
   python3 -c '
 import sys, json, re
@@ -96,14 +96,14 @@ CID1="$(echo "$R1" | call_id_of)"
 echo "  call_id=$CID1  stage=$(echo "$R1" | extract_stage)" >&2
 
 if [[ "$MODE" == "bypass" ]]; then
-  R2="$(send_form_answer "$CID1" "否，本次不关联")"
+    R2="$(send_form_answer "$CID1" "否，本次不关联")"  # option label: "No, do not link this time"
   echo "  BYPASSED" >&2
   echo "$SID"
   echo "SID=$SID BYPASSED=1" > /tmp/codex-qa-sid.env
   exit 0
 fi
 
-R2="$(send_form_answer "$CID1" "是，关联团队资产")"
+R2="$(send_form_answer "$CID1" "是，关联团队资产")"  # option label: "Yes, link team assets"
 CID2="$(echo "$R2" | call_id_of)"
 STAGE2="$(echo "$R2" | extract_stage)"
 echo "  step2 stage=$STAGE2 call_id=$CID2" >&2
@@ -113,7 +113,7 @@ if [[ -z "$CID2" ]]; then
 fi
 
 # ── Step 2: team ──────────────────────────────────────────────
-# team 选项形如 "memory (uyb7sion)"，需要匹配包含 $TEAM 的 label
+# team options look like "memory (uyb7sion)"; match the label containing $TEAM
 TEAM_OPTS="$(echo "$R2" | extract_options)"
 TEAM_LABEL="$(echo "$TEAM_OPTS" | grep -F "$TEAM" | head -1)"
 [[ -z "$TEAM_LABEL" ]] && { echo "ERR: team '$TEAM' not in options: $TEAM_OPTS"; exit 1; }
@@ -124,12 +124,12 @@ CID3="$(echo "$R3" | call_id_of)"
 STAGE3="$(echo "$R3" | extract_stage)"
 echo "  step3 stage=$STAGE3 call_id=$CID3" >&2
 
-# ── Step 3: agent (可能 stage=agent_task 合并页 or agent_select) ─────
+# ── Step 3: agent (stage may be the merged agent_task page or agent_select) ─────
 AGENT_OPTS="$(echo "$R3" | extract_options)"
 AGENT_LABEL="$(echo "$AGENT_OPTS" | grep -F "$AGENT" | head -1)"
 if [[ -z "$AGENT_LABEL" ]]; then
-  # fallback：取第一个非"更多"的选项
-  AGENT_LABEL="$(echo "$AGENT_OPTS" | grep -v -F "更多..." | head -1)"
+    # fallback: take the first option that is not "更多" ("More")
+    AGENT_LABEL="$(echo "$AGENT_OPTS" | grep -v -F "更多..." | head -1)"
 fi
 echo "  picking agent: $AGENT_LABEL" >&2
 
@@ -138,18 +138,18 @@ CID4="$(echo "$R4" | call_id_of)"
 STAGE4="$(echo "$R4" | extract_stage)"
 echo "  step4 stage=$STAGE4 call_id=$CID4" >&2
 
-# ── Step 4+: task select（可能翻页几次） ──────────────────────────────
-# 循环退出 = CID4 空（form 结束）或 stage 不是 task 相关
+# ── Step 4+: task select (may page a few times) ──────────────────────────────
+# Loop exit = CID4 empty (form finished) or stage is not task-related
 while [[ -n "$CID4" ]] && [[ "$STAGE4" == "task_select" || "$STAGE4" == "agent_task" ]]; do
   TASK_OPTS="$(echo "$R4" | extract_options)"
-  # 如果没指定 TASK，选第一个非"更多..."的
+    # If TASK was not specified, pick the first one that is not "更多..." ("More...")
   if [[ -n "$TASK" ]]; then
     PICK="$(echo "$TASK_OPTS" | grep -F "$TASK" | head -1)"
   else
-    PICK="$(echo "$TASK_OPTS" | grep -v -F "更多..." | head -1)"
+        PICK="$(echo "$TASK_OPTS" | grep -v -F "更多..." | head -1)"
   fi
   if [[ -z "$PICK" ]]; then
-    # 没匹配到，翻页
+        # no match, turn the page
     if echo "$TASK_OPTS" | grep -qF "更多..."; then
       PICK="$(echo "$TASK_OPTS" | grep -F "更多..." | head -1)"
       echo "  paginate: $PICK" >&2
@@ -165,7 +165,7 @@ while [[ -n "$CID4" ]] && [[ "$STAGE4" == "task_select" || "$STAGE4" == "agent_t
   echo "  next stage=$STAGE4 call_id=$CID4" >&2
 done
 
-# 到这里应该 initialized 了 —— R4 应该是正常 LLM 回复（response.output_text）
+# By here the session should be initialized -- R4 should be a normal LLM reply (response.output_text)
 if echo "$R4" | grep -q 'response.completed' && ! echo "$R4" | grep -q 'call_codex_session_init_'; then
   echo "  INITIALIZED ✓" >&2
 else

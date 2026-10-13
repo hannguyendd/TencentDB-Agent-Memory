@@ -8,24 +8,24 @@ import type { Context } from "hono";
 /**
  * Extract conversation ID from request headers. Returns null if no valid ID found.
  *
- * ── subagent 会话归一（2026-09-20，修复 WorkBuddy 压缩后无限弹表单循环）──
- * WorkBuddy 助理派生并行 subagent 时，每个 subagent 用**独立的新 x-conversation-id**，
- * 但会带 `x-parent-conversation-id` 指向父（主）会话。若按 subagent 自己的
- * conversation-id 做 session key，会在 session store 里查不到主会话已完成的
- * session-init（initialized 绑定），于是每个 subagent 都被判为"新会话"→ 重弹
- * 「选择 Agent/Task」表单；表单又被 replay 进历史 → 无限循环。
+ * ── subagent session normalization (2026-09-20, fixes the endless form-popup loop after WorkBuddy compaction) ──
+ * When the WorkBuddy assistant spawns parallel subagents, each subagent uses a **separate new x-conversation-id**,
+ * but carries `x-parent-conversation-id` pointing to the parent (main) conversation. If the session key were
+ * derived from the subagent's own conversation-id, the session store would not find the completed
+ * session-init (initialized binding) of the main conversation, so every subagent would be treated as a "new conversation" → the
+ * "Select Agent/Task" form pops up again; the form is then replayed into history → endless loop.
  *
- * 修法：**subagent 请求（带 x-parent-conversation-id）一律用 parent id 作为
- * 会话身份** —— 让 subagent 复用主会话的 session key，天然继承 agent/task/team
- * 绑定，不再触发 session-init。主会话请求无此 header，行为完全不变（零侵入）。
+ * Fix: **subagent requests (carrying x-parent-conversation-id) always use the parent id as
+ * the conversation identity** — subagents reuse the main conversation's session key and naturally inherit the agent/task/team
+ * binding, so session-init is no longer triggered. Main-conversation requests have no such header, so behavior is unchanged (zero intrusion).
  *
- * 实测证据（opik 2026-09-14 + 本地抓包 2026-09-20）：
- *   主会话   : x-conversation-id=888a1848..  x-parent-conversation-id=(无)  purpose=conversation type=main
+ * Empirical evidence (opik 2026-09-14 + local packet capture 2026-09-20):
+ *   main     : x-conversation-id=888a1848..  x-parent-conversation-id=(none)  purpose=conversation type=main
  *   subagent : x-conversation-id=01a0bcff..  x-parent-conversation-id=888a1848.. purpose=subagent:general-purpose type=team
- *   → subagent.parent === 主会话.conv，故用 parent 归一到主会话身份。
+ *   → subagent.parent === main.conv, so the parent is used to normalize to the main conversation identity.
  */
 export function resolveConversationId(c: Context): string | null {
-  // subagent 优先用 parent-conversation-id 归一到父（主）会话身份。
+  // Subagents prefer parent-conversation-id to normalize to the parent (main) conversation identity.
   const parentId = c.req.header("x-parent-conversation-id");
   if (parentId && parentId.length > 0) return parentId;
 

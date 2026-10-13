@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# 构建并发布三件套镜像到 Docker Hub 的 agentmemory namespace。
+# Build and publish the three-component images to the agentmemory namespace on Docker Hub.
 #
-# 本脚本是**自包含**的：只依赖仓库里的 Dockerfile、
-# deploy/panel-knowledge-combined/build.sh 和 MemoryPanel/scripts/secret-scan.sh，
-# 不引用任何内网专用的构建工具，可以原样放到开源分支。
+# This script is **self-contained**: it depends only on the Dockerfiles in the repo,
+# deploy/panel-knowledge-combined/build.sh and MemoryPanel/scripts/secret-scan.sh,
+# and does not reference any internal-only build tooling, so it can be placed on the open-source branch as is.
 #
-# 组件与镜像名：
+# Components and image names:
 #   memory-core   MemoryCore/                        → agentmemory/memory-core
 #   memory-proxy  MemoryProxy/                       → agentmemory/memory-proxy
 #   memory-hub    MemoryPanel/ + MemoryKnowledge/    → agentmemory/memory-hub
 #
-# 用法（VERSION 必填，避免误发浮动 tag）：
+# Usage (VERSION is required, to avoid accidentally publishing a floating tag):
 #   VERSION=1.0.0 ./publish.sh all
 #   VERSION=1.0.0 ./publish.sh memory-core
-#   DRY_RUN=1 VERSION=1.0.0 ./publish.sh all      # 只跑 secret-scan + 备 context
-#   PUSH=0 VERSION=1.0.0 ./publish.sh memory-core # 本地单架构 --load，不推送
+#   DRY_RUN=1 VERSION=1.0.0 ./publish.sh all      # only run secret-scan + prepare the context
+#   PUSH=0 VERSION=1.0.0 ./publish.sh memory-core # single-arch --load locally, no push
 #
-# 常用环境变量：
-#   NAMESPACE=agentmemory          目标 namespace
+# Common environment variables:
+#   NAMESPACE=agentmemory          target namespace
 #   PLATFORMS=linux/amd64,linux/arm64
-#   ALSO_LATEST=1                  同时推 :latest
-#   APT_MIRROR=mirrors.tencent.com 构建期 apt 加速（默认走 Debian 官方源）
+#   ALSO_LATEST=1                  also push :latest
+#   APT_MIRROR=mirrors.tencent.com build-time apt acceleration (defaults to the official Debian source)
 
 set -euo pipefail
 
@@ -52,22 +52,22 @@ die()  { echo "${C_RED}[error]${C_RST} $*" >&2; exit 1; }
 
 usage() { sed -n '2,26p' "$0"; exit 1; }
 
-# ── 参数校验 ────────────────────────────────────────────────────────
+# ── Argument validation ────────────────────────────────────────────────────────
 TARGET="${1:-}"
 case "$TARGET" in
   memory-core|memory-proxy|memory-hub|all) ;;
   -h|--help|"") usage ;;
-  *) die "未知组件: $TARGET（可选 memory-core | memory-proxy | memory-hub | all）" ;;
+  *) die "Unknown component: $TARGET (choose from memory-core | memory-proxy | memory-hub | all)" ;;
 esac
 
-[[ -n "${VERSION:-}" ]] || die "请显式指定 VERSION，例：VERSION=1.0.0 ./publish.sh $TARGET"
-[[ "$VERSION" == dev-* ]] && die "VERSION 不能以 dev- 开头（避免把开发 tag 推上公网）"
+[[ -n "${VERSION:-}" ]] || die "Please set VERSION explicitly, e.g. VERSION=1.0.0 ./publish.sh $TARGET"
+[[ "$VERSION" == dev-* ]] && die "VERSION must not start with dev- (to avoid pushing development tags to the public registry)"
 
-command -v docker >/dev/null || die "需要 docker"
-command -v rsync  >/dev/null || die "需要 rsync"
-[[ -f "$SECRET_SCAN" ]] || die "secret-scan 脚本不存在: $SECRET_SCAN"
+command -v docker >/dev/null || die "docker is required"
+command -v rsync  >/dev/null || die "rsync is required"
+[[ -f "$SECRET_SCAN" ]] || die "secret-scan script not found: $SECRET_SCAN"
 
-# ── 通用步骤 ────────────────────────────────────────────────────────
+# ── Common steps ────────────────────────────────────────────────────────
 scan() {
   local dir="$1"; shift
   info "secret-scan: $dir"
@@ -76,19 +76,19 @@ scan() {
 
 ensure_builder() {
   if ! docker buildx inspect "$BUILDER" >/dev/null 2>&1; then
-    info "创建 buildx builder: $BUILDER"
+    info "Creating buildx builder: $BUILDER"
     docker buildx create --name "$BUILDER" --driver docker-container >/dev/null
   fi
   docker buildx inspect "$BUILDER" --bootstrap >/dev/null
 }
 
 # build_image <image> <context_dir>
-# PUSH=1 → 多架构 buildx --push；PUSH=0 → 单架构 --load 供本地抽查。
+# PUSH=1 → multi-arch buildx --push; PUSH=0 → single-arch --load for local spot-checking.
 build_image() {
   local image="$1" ctx="$2"
 
   if [[ "$PUSH" != "1" ]]; then
-    info "PUSH=0 → 本地构建 ${image}:${VERSION} ($LOAD_PLATFORM)"
+    info "PUSH=0 → building locally ${image}:${VERSION} ($LOAD_PLATFORM)"
     docker buildx build \
       --builder "$BUILDER" \
       --platform "$LOAD_PLATFORM" \
@@ -97,7 +97,7 @@ build_image() {
       --load \
       "$ctx"
     spot_check "${image}:${VERSION}"
-    ok "本地镜像就绪: ${image}:${VERSION}（未推送）"
+    ok "Local image ready: ${image}:${VERSION} (not pushed)"
     return 0
   fi
 
@@ -112,15 +112,15 @@ build_image() {
     "${tags[@]}" \
     --push \
     "$ctx"
-  ok "已推送 ${image}:${VERSION}"
-  # 用 if 而非 `[[ ]] && ok`：后者作为函数最后一条语句时，条件为假会让函数返回 1，
-  # 在 set -e 下会静默中断整个 all 流程。
+  ok "Pushed ${image}:${VERSION}"
+  # Use `if` rather than `[[ ]] && ok`: as the last statement of a function, the latter returns 1
+  # when the condition is false, which silently aborts the whole `all` flow under set -e.
   if [[ "$ALSO_LATEST" == "1" ]]; then
-    ok "已推送 ${image}:latest"
+    ok "Pushed ${image}:latest"
   fi
 }
 
-# 抽查镜像文件系统里有没有混进敏感文件
+# Spot-check the image filesystem for accidentally included sensitive files
 spot_check() {
   local image="$1" cid
   cid=$(docker create "$image")
@@ -128,34 +128,34 @@ spot_check() {
   trap "docker rm -f '$cid' >/dev/null 2>&1 || true" RETURN
   if docker export "$cid" | tar -t 2>/dev/null \
       | grep -E '(/\.env$|metadata-instances\.json|/\.admin-key$)'; then
-    die "镜像内出现疑似敏感文件，中止"
+    die "Suspected sensitive files found in the image, aborting"
   fi
-  ok "镜像抽查通过: $image"
+  ok "Image spot-check passed: $image"
 }
 
 # ── memory-core ─────────────────────────────────────────────────────
-# MemoryCore/.dockerignore 已排除测试、文档、私有 submodule、真值 yaml，
-# 因此直接以源目录为 build context，无需额外清理步骤。
+# MemoryCore/.dockerignore already excludes tests, docs, private submodules and real-value yaml,
+# so the source directory is used directly as the build context, with no extra cleanup step.
 build_memory_core() {
   local image="${REGISTRY}/${NAMESPACE}/memory-core"
   [[ "$REGISTRY" == "docker.io" ]] && image="${NAMESPACE}/memory-core"
   local src="$REPO_ROOT/MemoryCore"
 
   info "═══ memory-core → ${image}:${VERSION} ═══"
-  [[ -f "$src/Dockerfile" ]] || die "缺少 $src/Dockerfile"
+  [[ -f "$src/Dockerfile" ]] || die "Missing $src/Dockerfile"
   scan "$src" src package.json openclaw.plugin.json
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    ok "DRY_RUN=1 → 跳过 build/push"
+    ok "DRY_RUN=1 → skipping build/push"
     return 0
   fi
   build_image "$image" "$src"
 }
 
 # ── memory-proxy ────────────────────────────────────────────────────
-# packages/cost-guard 是私有 submodule，不进开源镜像。但 package.json 把它声明
-# 成 file: 依赖、Dockerfile 也会 COPY 它，所以在独立 context 里放一个 stub 包，
-# 让 npm 能解析依赖图；运行时 dynamic import 失败会走 passthrough fallback。
+# packages/cost-guard is a private submodule and does not go into the open-source image. But package.json declares it
+# as a file: dependency and the Dockerfile also COPYs it, so a stub package is placed in a separate context
+# to let npm resolve the dependency graph; if the dynamic import fails at runtime it falls back to passthrough.
 build_memory_proxy() {
   local image="${REGISTRY}/${NAMESPACE}/memory-proxy"
   [[ "$REGISTRY" == "docker.io" ]] && image="${NAMESPACE}/memory-proxy"
@@ -163,9 +163,8 @@ build_memory_proxy() {
   local ctx="${CTX_DIR:-$WORKSPACE_ROOT/dockerhub-memory-proxy-ctx}"
 
   info "═══ memory-proxy → ${image}:${VERSION} ═══"
-  [[ -f "$src/Dockerfile" ]] || die "缺少 $src/Dockerfile"
+  [[ -f "$src/Dockerfile" ]] || die "Missing $src/Dockerfile"
   scan "$src" src package.json
-
   [[ "$KEEP_CTX" == "1" ]] || rm -rf "$ctx"
   mkdir -p "$ctx"
   info "rsync $src → $ctx"
@@ -186,7 +185,7 @@ build_memory_proxy() {
 
   make_cost_guard_stub "$ctx/packages/cost-guard"
 
-  # 源 lockfile 记录的是真实 submodule 结构，与 stub 冲突；换成空壳让 npm 重解析。
+  # The source lockfile records the real submodule structure, which conflicts with the stub; replace it with an empty shell so npm re-resolves.
   cat > "$ctx/package-lock.json" <<'JSON'
 {
   "name": "context-proxy",
@@ -200,19 +199,19 @@ JSON
   scan "$ctx" src package.json packages
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    ok "DRY_RUN=1 → context 就绪在 $ctx，跳过 build/push"
+    ok "DRY_RUN=1 → context ready at $ctx, skipping build/push"
     return 0
   fi
   build_image "$image" "$ctx"
-  info "context 保留在 $ctx"
+  info "context kept at $ctx"
 }
 
 make_cost_guard_stub() {
   local dir="$1"
   if [[ -d "$dir" ]] && [[ -n "$(ls -A "$dir" 2>/dev/null)" ]]; then
-    die "$dir 非空 —— 私有 submodule 不能打进公开镜像，请检查 rsync 排除规则"
+    die "$dir is not empty -- the private submodule must not be baked into the public image, check the rsync exclude rules"
   fi
-  info "生成 cost-guard stub → $dir"
+  info "Generating cost-guard stub → $dir"
   mkdir -p "$dir/src"
   cat > "$dir/package.json" <<'JSON'
 {
@@ -236,8 +235,8 @@ JS
 }
 
 # ── memory-hub ──────────────────────────────────────────────────────
-# 复用 panel-knowledge-combined/build.sh 的 context 准备逻辑（PREPARE_ONLY=1），
-# 这里只负责 buildx 推 Docker Hub。
+# Reuses the context preparation logic of panel-knowledge-combined/build.sh (PREPARE_ONLY=1);
+# this function only handles the buildx push to Docker Hub.
 build_memory_hub() {
   local image="${REGISTRY}/${NAMESPACE}/memory-hub"
   [[ "$REGISTRY" == "docker.io" ]] && image="${NAMESPACE}/memory-hub"
@@ -245,35 +244,35 @@ build_memory_hub() {
   local ctx="${CTX_DIR:-$WORKSPACE_ROOT/dockerhub-memory-hub-ctx}"
 
   info "═══ memory-hub → ${image}:${VERSION} ═══"
-  [[ -f "$combined/build.sh" ]] || die "缺少 $combined/build.sh"
+  [[ -f "$combined/build.sh" ]] || die "Missing $combined/build.sh"
   scan "$REPO_ROOT/MemoryPanel" src web/src config package.json
   scan "$REPO_ROOT/MemoryKnowledge" src .env.example package.json
 
-  info "准备 context via panel-knowledge-combined/build.sh"
+  info "Preparing context via panel-knowledge-combined/build.sh"
   KEEP_CTX="$KEEP_CTX" PREPARE_ONLY=1 CTX_DIR="$ctx" \
     IMAGE_TAG="scan-$VERSION" bash "$combined/build.sh"
 
   [[ -f "$ctx/panel/package.json" && -f "$ctx/knowledge/package.json" ]] \
-    || die "context 准备失败: $ctx"
+    || die "Context preparation failed: $ctx"
   [[ -f "$ctx/knowledge/openapi.yaml" ]] \
-    || die "context 缺少 knowledge/openapi.yaml —— Swagger UI 运行时需要它"
+    || die "Context is missing knowledge/openapi.yaml -- Swagger UI needs it at runtime"
 
   scan "$ctx" panel knowledge Dockerfile start-combined.sh
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    ok "DRY_RUN=1 → context 就绪在 $ctx，跳过 build/push"
+    ok "DRY_RUN=1 → context ready at $ctx, skipping build/push"
     return 0
   fi
   build_image "$image" "$ctx"
-  info "context 保留在 $ctx"
+  info "context kept at $ctx"
 }
 
-# ── 主流程 ──────────────────────────────────────────────────────────
+# ── Main flow ──────────────────────────────────────────────────────────
 if [[ "$DRY_RUN" != "1" ]]; then
   ensure_builder
   if [[ "$PUSH" == "1" ]]; then
     docker login "$REGISTRY" >/dev/null 2>&1 \
-      || warn "未检测到 $REGISTRY 登录态，push 阶段可能失败（先执行 docker login）"
+      || warn "No login session detected for $REGISTRY, the push stage may fail (run docker login first)"
   fi
 fi
 
@@ -289,9 +288,9 @@ case "$TARGET" in
 esac
 
 echo ""
-ok "完成: $TARGET (version=$VERSION)"
+ok "Done: $TARGET (version=$VERSION)"
 if [[ "$PUSH" == "1" && "$DRY_RUN" != "1" ]]; then
-  echo "  验证："
+  echo "  Verify:"
   echo "    docker pull ${NAMESPACE}/memory-core:${VERSION}"
   echo "    docker buildx imagetools inspect ${NAMESPACE}/memory-core:${VERSION}"
 fi

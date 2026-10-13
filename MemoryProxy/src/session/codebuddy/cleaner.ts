@@ -1,42 +1,42 @@
 /**
  * CodeBuddy Session Init — LastUser text extractor.
  *
- * 曾经这个文件里有 `stripInitArtifacts` 用来在 session_init 完成后剥离
- * 假表单对话（避免 LLM 看到 form 交互）。**该功能已删除**——现在永远保留
- * 用户的所有真实对话（含 session_init form 交互），不做任何删除。
+ * This file used to contain `stripInitArtifacts`, which stripped the fake
+ * form conversation after session_init completed (so the LLM never saw the form
+ * interaction). **That feature has been removed**: all real user conversation
+ * (including the session_init form interaction) is now always preserved and nothing is deleted.
+ * Only one export remains: `getLastUserMessageText`, used by the session_init
+ * state machine to read the text of the last user / tool message and parse the user's choice.
  *
- * 目前只剩一个 export: `getLastUserMessageText`，用于在 session_init
- * state machine 里读最后一条 user / tool 消息的文本以解析用户选择。
+ * ── CodeBuddy ask_followup_question reply format (openai branch) ──
  *
- * ── CodeBuddy ask_followup_question 回写格式(openai 分支) ──
- *
- * 用户点击表单后，CodeBuddy 下一条请求中问答所在的消息结构：
+ * Message structure carrying the Q&A in the next CodeBuddy request after the user clicks the form:
  *
  *   [N-2] role=assistant  tool_calls=[{id:"call_session_init_...", function:{name:"ask_followup_question"}}]
  *   [N-1] role=tool       tool_call_id=call_session_init_...  content=<multi_question_result JSON>
- *   [N]   role=user       content=<additional_data> 或其他普通 user 消息
+ *   [N]   role=user       content=<additional_data> or another ordinary user message
  *
- * multi_question_result JSON（实际抓包格式）：
- *   空壳中间态（表单刚展示，用户还没点）：
+ * multi_question_result JSON (format captured from real traffic):
+ *   Empty-shell intermediate state (form just displayed, user has not clicked yet):
  *     {"status":"success","success":true,"result":{"type":"multi_question_result",
  *      "questions":[{"id":"team","options":[...],"multiSelect":false}],
  *      "answers":{},
  *      "message":"Questions displayed. User response will be in <que"}}
  *
- *   真实答案（用户点击后）：
+ *   Real answer (after the user clicks):
  *     {"status":"success","success":true,"result":{"type":"multi_question_result",
- *      "questions":[{"id":"team","answer":"Team名 (id尾8位)",...}],
- *      "answers":{"team":"Team名 (id尾8位)"}}}
+ *      "questions":[{"id":"team","answer":"Team name (last 8 chars of id)",...}],
+ *      "answers":{"team":"Team name (last 8 chars of id)"}}}
  *
- * ── dsh v0.2+ 回写格式(anthropic 分支) ──
+ * ── dsh v0.2+ reply format (anthropic branch) ──
  *
- * dsh v0.2 换 anthropic /v1/messages 协议后,tool_result 载体从 openai 的
+ * After dsh v0.2 switched to the anthropic /v1/messages protocol, the tool_result carrier changed from openai's
  *   `role: "tool" + tool_call_id + content: <JSON>`
- * 变成 anthropic 的
+ * to anthropic's
  *   `role: "user" + content: [{type:"tool_result", tool_use_id, content}]`
  *
- * getMessageText 必须能扫出 tool_result 块的内容(和 CC 的
- * claude-code/cleaner.ts:66-74 完全对称)。
+ * getMessageText must be able to extract the content of tool_result blocks (fully symmetric with CC's
+ * claude-code/cleaner.ts:66-74).
  */
 
 import { containsFormTitle } from "./form.js";
@@ -60,17 +60,17 @@ interface AnthropicBlock {
 /**
  * Get text from last user or tool message containing form answer data.
  *
- * 载体两种(与协议相关):
- *   1. openai(CB / WB / opencode / dsh v0.1.x): `role: "tool"` 消息,
- *      `tool_call_id` 匹配 session-init 前缀 → content 就是 tool_result JSON。
- *   2. anthropic(CC / dsh v0.2+): `role: "user"` 消息,`content[]` 里的
- *      `type: "tool_result"` block,其 `tool_use_id` 匹配 session-init 前缀
- *      → block.content 才是 tool_result JSON。
+ * Two carriers (protocol-dependent):
+ *   1. openai (CB / WB / opencode / dsh v0.1.x): `role: "tool"` message,
+ *      `tool_call_id` matches the session-init prefix → content is the tool_result JSON.
+ *   2. anthropic (CC / dsh v0.2+): `role: "user"` message, a
+ *      `type: "tool_result"` block in `content[]` whose `tool_use_id` matches the session-init prefix
+ *      → block.content is the tool_result JSON.
  */
 export function getLastUserMessageText(messages: RawMessage[]): string {
   // Sweep from end: the last message (user or tool) that relates to
   // session init is what we want. Tool messages are preferred because
-  // CB writes "是，关联团队资产" etc. into tool_result content.
+  // CB writes "Yes, link team assets" etc. into tool_result content.
   let best = "";
   for (let i = messages.length - 1; i >= 0; i--) {
     const role = messages[i].role;
@@ -79,18 +79,18 @@ export function getLastUserMessageText(messages: RawMessage[]): string {
     const text = getMessageText(messages[i]);
     if (!text) continue;
 
-    // openai 分支:role=tool + top-level tool_call_id 匹配 session-init 前缀
-    // 兼容四种前缀：CB 的 `call_session_init_`、WB 的 `call_wb_session_init_`
-    // （workbuddy/form.ts 里 TOOLCALL_PREFIX = "call_wb_session_init_"）、
-    // dsh 的 `call_dsh_session_init_`（dsh/form.ts TOOLCALL_PREFIX）、
-    // opencode 的 `call_oc_session_init_`（opencode/form.ts TOOLCALL_PREFIX）。
+    // openai branch: role=tool + top-level tool_call_id matches the session-init prefix
+    // Four prefixes supported: CB's `call_session_init_`, WB's `call_wb_session_init_`
+    // (TOOLCALL_PREFIX = "call_wb_session_init_" in workbuddy/form.ts),
+    // dsh's `call_dsh_session_init_` (TOOLCALL_PREFIX in dsh/form.ts),
+    // opencode's `call_oc_session_init_` (TOOLCALL_PREFIX in opencode/form.ts).
     const tcid = (messages[i] as any).tool_call_id as string | undefined;
     if (role === "tool" && tcid && /call_(wb_|dsh_|oc_)?session_init_/.test(tcid)) {
       return text;
     }
 
-    // anthropic 分支(dsh v0.2+):role=user 消息里含 tool_result block,
-    // block.tool_use_id 匹配 session-init 前缀就直接命中(与 openai 分支等价)。
+    // anthropic branch (dsh v0.2+): a role=user message containing a tool_result block;
+    // a block.tool_use_id matching the session-init prefix hits directly (equivalent to the openai branch).
     if (role === "user" && Array.isArray(messages[i].content)) {
       for (const raw of messages[i].content as AnthropicBlock[]) {
         if (raw.type !== "tool_result") continue;
@@ -125,8 +125,8 @@ function getMessageText(msg: RawMessage): string {
         parts.push(raw.text);
         continue;
       }
-      // anthropic tool_result block(dsh v0.2+ / CC 同款):
-      //   { type:"tool_result", tool_use_id, content: <string 或 [{type:"text",text}]> }
+      // anthropic tool_result block (dsh v0.2+ / same as CC):
+      //   { type:"tool_result", tool_use_id, content: <string or [{type:"text",text}]> }
       if (type === "tool_result") {
         const inner = raw.content;
         if (typeof inner === "string") {

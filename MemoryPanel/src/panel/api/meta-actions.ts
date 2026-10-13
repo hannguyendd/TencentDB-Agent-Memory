@@ -1,7 +1,7 @@
 /**
- * 内核 /v3/meta/* 公开 action 列表（v3.2：55 条，不含 internal）。
- * 注：agent-fixed-asset/* 仍在 META_ACTIONS 登记但公开 proxy 501 NOT_IN_SCOPE；
- * Control 业务路由可通过 metaKernel.invoke 直调。
+ * Public action list for the kernel /v3/meta/* (v3.2: 55 actions, internal excluded).
+ * Note: agent-fixed-asset/* is still registered in META_ACTIONS but the public proxy returns 501 NOT_IN_SCOPE;
+ * Control business routes can call it directly via metaKernel.invoke.
  */
 
 export const META_LIST_ACTIONS = new Set([
@@ -16,14 +16,14 @@ export const META_LIST_ACTIONS = new Set([
   'asset/list-accessible',
   'agent-fixed-asset/list',
   'agent-fixed-asset/list-with-detail',
-  // summary-by-agents 非分页 list 信封，不进 META_LIST_ACTIONS
+  // summary-by-agents is a non-paginated list envelope, not part of META_LIST_ACTIONS
   'acl/list',
   'participation-log/list',
 ]);
 
 export const META_ACTIONS = [
   'user/create',
-  // 姊妹接口：admin 建号时显式指定 user_key，其他行为与 user/create 完全对称。
+  // Sibling endpoint: admin creates an account with an explicit user_key; otherwise fully symmetric with user/create.
   'user/create-with-key',
   'user/get',
   'user/delete',
@@ -85,11 +85,11 @@ export const META_ACTIONS = [
 export type MetaAction = (typeof META_ACTIONS)[number];
 
 /**
- * 暂未开放给面板的 action 前缀。
+ * Action prefixes not yet exposed to the panel.
  *
- * asset/* 已放开：skill「分配到 Agent」走授权接口（acl/grant）时，需先把 skill
- * 登记为 meta 资产（asset/create，owner=当前登录用户），再授予目标 agent use 权限。
- * agent-fixed-asset/*（运行时固定注入绑定）仍暂不开放。
+ * asset/* is now open: when a skill is "assigned to an Agent" via the authorization endpoint (acl/grant), the skill must first
+ * be registered as a meta asset (asset/create, owner = current logged-in user), then the target agent is granted use permission.
+ * agent-fixed-asset/* (runtime fixed-injection binding) remains closed for now.
  */
 const NOT_IN_SCOPE_PREFIXES = ['agent-fixed-asset/'] as const;
 

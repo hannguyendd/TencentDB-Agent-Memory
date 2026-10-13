@@ -1,18 +1,18 @@
-"""TencentDB Agent Memory v3 Python SDK — 管理面客户端（MetadataClient）。
+"""TencentDB Agent Memory v3 Python SDK — management-plane client (MetadataClient).
 
-与 ``v3.client.MemoryClient``（数据面，严格 isolation L0–L3）的区别
+Differences from ``v3.client.MemoryClient`` (data plane, strict-isolation L0-L3)
 ------------------------------------------------------------------
 
-- 数据面客户端构造时必须提供 ``team_id`` / ``agent_id`` / ``user_id`` 四元组。
-- 管理面客户端**不需要** isolation 四元组；鉴权用 Bearer + ``x-tdai-service-id``，
-  ``team_id`` 等业务字段放在请求 body 里。可选 ``user_key`` 走 ``x-tdai-user-key``
-  头（``user/create``、``user/delete`` 等 system_admin 接口需要）。
+- The data-plane client must be given the ``team_id`` / ``agent_id`` / ``user_id`` 4-tuple at construction.
+- The management-plane client **does not need** the isolation 4-tuple; auth uses Bearer + ``x-tdai-service-id``,
+  and business fields such as ``team_id`` go in the request body. An optional ``user_key`` is sent via the ``x-tdai-user-key``
+  header (needed by system_admin endpoints such as ``user/create`` and ``user/delete``).
 
-封装范围
+Scope
 --------
 
-- ``/v3/meta/*`` 公开接口 54 条（与 Panel Control ``META_ACTIONS`` 对齐，含 ``user-key/*``）
-- ``/v3/knowledge/*`` Knowledge 实体 CRUD 5 条（非 meta 前缀，保留兼容）
+- ``/v3/meta/*`` 54 public endpoints (aligned with Panel Control ``META_ACTIONS``, including ``user-key/*``)
+- ``/v3/knowledge/*`` 5 Knowledge entity CRUD endpoints (not under the meta prefix; kept for compatibility)
 
 >>> from tencentdb_agent_memory.v3 import MetadataClient
 >>> meta = MetadataClient(
@@ -337,7 +337,7 @@ class _MetadataMethodsMixin:
 
 
 class MetadataClient(_MetadataMethodsMixin):
-    """v3 同步管理面客户端 — ``/v3/meta/*`` + ``/v3/knowledge/*``。"""
+    """v3 sync management-plane client — ``/v3/meta/*`` + ``/v3/knowledge/*``. """
 
     def __init__(
         self,
@@ -624,7 +624,7 @@ class MetadataClient(_MetadataMethodsMixin):
 
 
 class AsyncMetadataClient(_MetadataMethodsMixin):
-    """v3 异步管理面客户端 — 与 :class:`MetadataClient` 同构，方法为 ``async``。"""
+    """v3 async management-plane client -- same shape as :class:`MetadataClient`, with ``async`` methods."""
 
     def __init__(
         self,

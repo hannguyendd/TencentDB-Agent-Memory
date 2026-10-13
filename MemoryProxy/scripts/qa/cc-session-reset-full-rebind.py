@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-cc-session-reset-full-rebind.py — pexpect PTY E2E: reset 后完整走 session-init 绑定 team/agent/task。
+cc-session-reset-full-rebind.py —— pexpect PTY E2E: after reset, go through the full session-init binding of team/agent/task.
 
-测试 Cases:
-  P0-2: reset后完成绑定→注入生效
-  P0-3: 已绑定→reset→重新选(不同 team)
-  P0-4: 多次 reset 循环
+Test cases:
+    P0-2: complete binding after reset -> injection takes effect
+    P0-3: already bound -> reset -> choose again (different team)
+    P0-4: multiple reset cycles
 
-每个 case 独立起一个 claude 进程避免 state 污染。
+Each case starts its own claude process to avoid state pollution.
 
-依赖: pexpect (`pip install pexpect`)
-环境变量:
-    CLAUDE_CONFIG_DIR   指向一个已配好 proxy base_url 的 CC 配置目录
-                        (若未设, 透传当前环境, 让 claude 自己找)
-    CLAUDE_BIN_DIR      若 `claude` 不在 PATH, 用它追加到 PATH 前缀 (可选)
+Dependency: pexpect (`pip install pexpect`)
+Environment variables:
+        CLAUDE_CONFIG_DIR   points to a CC config dir already configured with the proxy base_url
+                                                (if unset, the current environment is passed through and claude finds it itself)
+        CLAUDE_BIN_DIR      if `claude` is not on PATH, prepend this to PATH (optional)
 
-用法:
+Usage:
     CLAUDE_CONFIG_DIR=~/.my-claude-cfg python3 scripts/qa/cc-session-reset-full-rebind.py
     python3 scripts/qa/cc-session-reset-full-rebind.py --case p0-2
     python3 scripts/qa/cc-session-reset-full-rebind.py --timeout 120
@@ -35,12 +35,12 @@ import pexpect
 # Patterns (utf-8 raw bytes)
 # ════════════════════════════════════════════════════════════════════════════
 
-# asset_confirm form: 关联资产 / 是否关联 / 团队资产
+# asset_confirm form: "关联资产" / "是否关联" / "团队资产" (Chinese, utf-8 encoded below)
 FORM_RE = rb"\xe5\x85\xb3\xe8\x81\x94\xe8\xb5\x84\xe4\xba\xa7|\xe6\x98\xaf\xe5\x90\xa6\xe5\x85\xb3\xe8\x81\x94|\xe5\x9b\xa2\xe9\x98\x9f\xe8\xb5\x84\xe4\xba\xa7|asset_confirm|AskUserQuestion"
-# reset 成功文案: 已重置 / 已恢复 / 已解除
+# reset success message: "已重置" / "已恢复" / "已解除" (Chinese, utf-8 encoded below)
 RESET_OK_RE = rb"\xe5\xb7\xb2\xe9\x87\x8d\xe7\xbd\xae|\xe5\xb7\xb2\xe6\x81\xa2\xe5\xa4\x8d|\xe5\xb7\xb2\xe8\xa7\xa3\xe9\x99\xa4"
 # team/agent/task selector form uses AskUserQuestion which shows specific patterns
-# We use FORM_RE for all form steps (they all show 关联/资产/团队 patterns)
+# We use FORM_RE for all form steps (they all show the 关联/资产/团队 patterns)
 # CC prompt ready indicator: the ❯ prompt character when idle
 # After a response is done, CC shows: "Brewed for Xs ❯ " (the prompt line)
 # The key pattern is "❯" preceded by cost info like "Brewed" or "Cooked" or input cost
@@ -109,9 +109,9 @@ def spawn_cc(cwd, log_path, timeout):
     """Spawn a fresh claude process."""
     env = os.environ.copy()
     env["TERM"] = "xterm-256color"
-    # 若调用方已设 CLAUDE_CONFIG_DIR 则沿用, 否则不动, 让 claude 走默认
+    # If the caller already set CLAUDE_CONFIG_DIR, keep it; otherwise leave it alone and let claude use the default
     env["CLAUDE_DISABLE_UPDATE_CHECK"] = "1"
-    # 若 claude 不在 PATH, 允许通过 CLAUDE_BIN_DIR 环境变量追加 PATH 前缀
+    # If claude is not on PATH, allow prepending to PATH via the CLAUDE_BIN_DIR environment variable
     extra_bin = os.environ.get("CLAUDE_BIN_DIR", "")
     if extra_bin and extra_bin not in env.get("PATH", ""):
         env["PATH"] = extra_bin + ":" + env.get("PATH", "")
@@ -248,17 +248,17 @@ def do_full_bind(child, timeout, team_index=0):
     team_index: 0-based index of team to select (0=first, 1=second).
     Returns (success: bool, steps: list of str).
 
-    The session-init flow after "是":
+    The session-init flow after "Yes":
       team selector → agent selector → task selector → model reply
     Each selector is an AskUserQuestion which triggers FORM_RE.
     Max 3 selectors (team, agent, task). Some may auto-skip if only 1 option.
     """
     steps = []
 
-    # Select "是" (first item, already highlighted)
+    # Select "Yes" (first item, already highlighted)
     time.sleep(1)
     send_enter(child)
-    steps.append("selected '是' on asset_confirm")
+    steps.append("selected 'Yes' on asset_confirm")
     time.sleep(3)
 
     # Walk through form steps (max 3: team, agent, task)
@@ -314,14 +314,14 @@ def kill_cc(child):
 
 def test_p0_2(timeout, log_dir):
     """
-    P0-2: reset后完成绑定→注入生效
+    P0-2: complete binding after reset -> injection takes effect
     1. hello → form → bypass
     2. mem:session-reset → reset OK
-    3. hi → form → 选是 → 走完绑定
-    4. 模型正常回复
+    3. hi -> form -> choose Yes -> complete the binding
+    4. model replies normally
     """
     print("\n" + "=" * 70)
-    print("  P0-2: reset后完成绑定→注入生效")
+    print("  P0-2: complete binding after reset -> injection takes effect")
     print("=" * 70)
 
     log_path = os.path.join(log_dir, "p0-2.log")
@@ -348,8 +348,8 @@ def test_p0_2(timeout, log_dir):
 
         time.sleep(2)
 
-        # Step 2: Select 否 → bypass
-        print("\n  [Step 2] Select '否' → bypass")
+        # Step 2: Select No -> bypass
+        print("\n  [Step 2] Select 'No' -> bypass")
         r = do_bypass(child, timeout)
         results["S2_bypass_ok"] = True
         print(f"    → PASS (idle after bypass)")
@@ -379,8 +379,8 @@ def test_p0_2(timeout, log_dir):
 
         time.sleep(2)
 
-        # Step 5-7: Select 是 → walk through team/agent/task binding
-        print("\n  [Step 5-7] Select '是' → complete full binding")
+        # Step 5-7: Select Yes -> walk through team/agent/task binding
+        print("\n  [Step 5-7] Select 'Yes' -> complete full binding")
         success, steps = do_full_bind(child, timeout, team_index=0)
         results["S5_7_full_bind"] = success
         results["S5_7_steps"] = steps
@@ -400,15 +400,15 @@ def test_p0_2(timeout, log_dir):
 
 def test_p0_3(timeout, log_dir):
     """
-    P0-3: 已绑定→reset→重新选(不同 team)
-    1. hello → form → 选是 → 全选第1项完成绑定
-    2. 模型正常回复
-    3. mem:session-reset → "已解除"
-    4. hi → form → 这次选第2个 team
-    5. 走完 → 模型回复
+    P0-3: already bound -> reset -> choose again (different team)
+    1. hello -> form -> choose Yes -> pick item 1 everywhere to complete the binding
+    2. model replies normally
+    3. mem:session-reset -> "已解除" (unbound)
+    4. hi -> form -> this time pick the 2nd team
+    5. complete -> model replies
     """
     print("\n" + "=" * 70)
-    print("  P0-3: 已绑定→reset→重新选(不同 team)")
+    print("  P0-3: already bound -> reset -> choose again (different team)")
     print("=" * 70)
 
     log_path = os.path.join(log_dir, "p0-3.log")
@@ -419,8 +419,8 @@ def test_p0_3(timeout, log_dir):
         # Step 0: Handle trust
         handle_trust(child, timeout)
 
-        # Step 1: Send hello → form → select 是 → complete binding
-        print("\n  [Step 1] Send 'hello' → form → select '是' → full bind (team 1)")
+        # Step 1: Send hello -> form -> select Yes -> complete binding
+        print("\n  [Step 1] Send 'hello' -> form -> select 'Yes' -> full bind (team 1)")
         send_text(child, "hello")
         r = wait_for_form(child, timeout, "asset_confirm")
         if r is not True:
@@ -443,7 +443,7 @@ def test_p0_3(timeout, log_dir):
             return results
 
         # Step 3: Send mem:session-reset
-        print("\n  [Step 3] Send 'mem:session-reset' → expect '已解除/已恢复' text")
+        print("\n  [Step 3] Send 'mem:session-reset' -> expect '已解除/已恢复' (unbound/restored) text")
         send_text(child, "mem:session-reset")
         r = wait_for_reset(child, timeout)
         results["S3_reset_ok"] = r is True
@@ -456,7 +456,7 @@ def test_p0_3(timeout, log_dir):
         wait_for_prompt(child, timeout=60)
 
         # Step 4: Send hi → form → select team 2 (Down once extra)
-        print("\n  [Step 4] Send 'hi' → form → select '是' → bind team 2")
+        print("\n  [Step 4] Send 'hi' -> form -> select 'Yes' -> bind team 2")
         send_text(child, "hi")
         r = wait_for_form(child, timeout, "asset_confirm after reset")
         results["S4_form_after_reset"] = r is True
@@ -485,14 +485,14 @@ def test_p0_3(timeout, log_dir):
 
 def test_p0_4(timeout, log_dir):
     """
-    P0-4: 多次 reset 循环
+    P0-4: multiple reset cycles
     1. hello → form → bypass
     2. mem:session-reset → reset → hi → form → bypass
-    3. mem:session-reset → reset → hi → form → 选是 → 走完绑定
-    4. 模型正常回复
+    3. mem:session-reset -> reset -> hi -> form -> choose Yes -> complete the binding
+    4. model replies normally
     """
     print("\n" + "=" * 70)
-    print("  P0-4: 多次 reset 循环 (3 resets)")
+    print("  P0-4: multiple reset cycles (3 resets)")
     print("=" * 70)
 
     log_path = os.path.join(log_dir, "p0-4.log")
@@ -590,7 +590,7 @@ def test_p0_4(timeout, log_dir):
 def main():
     ap = argparse.ArgumentParser(description="CC session-reset full rebind E2E")
     ap.add_argument("--case", choices=["p0-2", "p0-3", "p0-4", "all"], default="all")
-    ap.add_argument("--timeout", type=int, default=120, help="每步超时秒数")
+    ap.add_argument("--timeout", type=int, default=120, help="timeout in seconds per step")
     ap.add_argument("--log-dir", default="/tmp/cc-session-reset-e2e")
     args = ap.parse_args()
 

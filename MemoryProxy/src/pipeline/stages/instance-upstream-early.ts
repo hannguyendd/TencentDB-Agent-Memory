@@ -1,14 +1,14 @@
 /**
- * stages/instance-upstream-early.ts — 早期 instance upstream config 解析 (Phase 4 stage 化)。
+ * stages/instance-upstream-early.ts — early instance upstream config resolution (Phase 4 stage-ification).
  *
- * 提取自 openai-chat + anthropic runner ~40 行相同的 4-态 Resolution 解析块:
- *   1. resolveForAgent / resolveExtraction 取 conv / extract 两条上游
- *   2. 外部客户命中 blocked/unmanaged → 立即 400 (systemUser 通道跳过)
- *   3. shouldOverride 计算 _isCustomUpstream (决定后续 model gate / credit report)
+ * Extracted from the identical ~40-line 4-state Resolution resolve block in the openai-chat + anthropic runners:
+ *   1. resolveForAgent / resolveExtraction fetch the conv / extract upstreams
+ *   2. External customer hits blocked/unmanaged -> immediate 400 (systemUser channel skips this)
+ *   3. shouldOverride computes _isCustomUpstream (decides later model gate / credit report)
  *
- * caller 拿到 result: 若 blockedResp !== null → 直接 return 给客户端;
- * 否则 destructure { earlyConvResolution, earlyExtractRow, earlySysMatch,
- * isCustomUpstream } 继续 pipeline。
+ * The caller gets the result: if blockedResp !== null -> return it directly to the client;
+ * otherwise destructure { earlyConvResolution, earlyExtractRow, earlySysMatch,
+ * isCustomUpstream } and continue the pipeline.
  */
 
 import type { Context } from "hono";
@@ -30,14 +30,14 @@ export interface InstanceUpstreamEarlyInput {
   config: ProxyConfig;
   spaceId: string;
   earlyUserId: string;
-  /** 错误 envelope 格式:
+  /** error envelope format:
    *  - openai: {code, error_code, message, detail}
    *  - anthropic: {type:"error", error:{type,message}, detail} */
   errorEnvelope: "openai" | "anthropic";
 }
 
 export interface InstanceUpstreamEarlyResult {
-  /** 非 null → caller 立即 return 这个响应, 不继续 pipeline */
+  /** non-null -> the caller returns this response immediately, not continuing the pipeline */
   blockedResp: Response | null;
   agent: string | undefined;
   legacyProxy: boolean;
@@ -63,12 +63,12 @@ export async function stageInstanceUpstreamEarly(
   const earlyExtractRow = resolveExtraction(instanceConfigs);
   const earlySysMatch = hasSystemUsers() ? matchSystemUserByUserId(earlyUserId) : null;
 
-  // 外部对话请求: blocked / unmanaged → 早 400 (systemUser 走 extraction 永不 block)
+  // external conversation request: blocked / unmanaged -> early 400 (systemUser goes through extraction and is never blocked)
   let blockedResp: Response | null = null;
   if (earlySysMatch === null) {
     if (earlyConvResolution.kind === "blocked") {
-      // openai 版本带完整 "Ask the administrator..." 后缀; anthropic 版本较短。
-      // 完全对齐原始文本, 后缀差异保留。
+      // The openai version carries the full "Ask the administrator..." suffix; the anthropic version is shorter.
+      // Fully aligned with the original text; the suffix difference is preserved.
       const blockedMsg = earlyConvResolution.reason === "default_disabled"
         ? (input.errorEnvelope === "anthropic"
             ? `Default upstream group is disabled; agent "${agent ?? ""}" has no upstream to route to.`
@@ -116,7 +116,7 @@ export async function stageInstanceUpstreamEarly(
     }
   }
 
-  // caller dispatch: systemUser 看 extraction, 外部客户看 conversation
+  // caller dispatch: systemUser looks at extraction, external customers look at conversation
   const isCustomUpstream = earlySysMatch !== null
     ? shouldOverride(earlyExtractRow)
     : shouldOverride(earlyConvResolution);

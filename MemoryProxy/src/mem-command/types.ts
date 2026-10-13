@@ -1,12 +1,12 @@
 /**
- * mem-command 模块类型定义
+ * Type definitions for the mem-command module
  */
 
 import type { ProxyConfig, MemCommandConfig } from "../types.js";
 
 /**
- * 最近对话消息片段。task-draft-generator 消费。
- * 目前只需 role + content，不带 tool_calls / attachment，保持极简。
+ * Recent conversation message snippet, consumed by task-draft-generator.
+ * Only role + content are needed for now (no tool_calls / attachment) to keep it minimal.
  */
 export interface MemCommandMessage {
   role: "user" | "assistant" | "system";
@@ -24,51 +24,51 @@ export interface MemCommandContext {
   protocol: "anthropic" | "openai" | "responses";
   stream: boolean;
   /**
-   * 客户端当次请求的模型名（body.model 经 resolveModelId 归一化后的真实 model_id）。
-   * 方案 D：taskDraft LLM 跟随主模型，不再依赖 config.memCommand.taskDraft。
+   * Model name of the client's current request (the real model_id after body.model is normalized by resolveModelId).
+   * Option D: the taskDraft LLM follows the main model and no longer depends on config.memCommand.taskDraft.
    */
   model?: string;
   /**
-   * per-agent 解析后的上游 base url（不含具体 endpoint）。
-   * 方案 D：taskDraft 复用主链路同一上游，规则与主链路转发一致：
+   * Per-agent resolved upstream base url (without the specific endpoint).
+   * Option D: taskDraft reuses the same upstream as the main path, with the same rule as main-path forwarding:
    *   config.upstream.agents?.[agent]?.url ?? config.upstream.url
    */
   upstreamUrl?: string;
   /**
-   * taskDraft LLM 上游 **API 协议家族**（决定请求形状，与本 ctx.protocol 语义不同）。
+   * **API protocol family** of the taskDraft LLM upstream (determines the request shape; differs in meaning from ctx.protocol).
    *
-   * ⚠️ 与 `protocol` 字段区分：
-   *   - `protocol`（下方，本 ctx 已有的老字段）: **响应渲染协议** —— 决定
-   *     `buildMemResponse` 用哪种 SSE 骨架把 mem 命令结果吐给客户端（跟客户端
-   *     侧协议一一对应，如 anthropic/openai/responses）。
-   *   - `upstreamProtocol`（本字段）: **taskDraft LLM 请求上游用哪种协议** ——
-   *     决定 attemptDraftOnce 打 /v1/messages、/chat/completions 还是 /responses。
-   *     取决于客户端主链路真正走的上游端点，**不一定等于响应协议**。
+   * ⚠️ Not to be confused with the `protocol` field:
+   *   - `protocol` (below, the existing legacy field on this ctx): **response rendering protocol** --
+   *     decides which SSE skeleton `buildMemResponse` uses to emit the mem command result to the client
+   *     (maps one-to-one to the client-side protocol, e.g. anthropic/openai/responses).
+   *   - `upstreamProtocol` (this field): **which protocol the taskDraft LLM request uses upstream** --
+   *     decides whether attemptDraftOnce hits /v1/messages, /chat/completions or /responses.
+   *     It depends on the upstream endpoint the client's main path actually uses, **and does not necessarily equal the response protocol**.
    *
-   * 典型 case: WorkBuddy 客户端拿 Responses SSE 骨架渲染响应 (protocol="responses"),
-   * 但主链路上游其实是 OpenAI chat/completions (upstreamProtocol="openai")。
+   * Typical case: the WorkBuddy client renders the response with the Responses SSE skeleton (protocol="responses"),
+   * but the main-path upstream is actually OpenAI chat/completions (upstreamProtocol="openai").
    *
-   * 缺省时 task-draft-generator 按 "openai" 处理。
+   * When omitted, task-draft-generator treats it as "openai".
    */
   upstreamProtocol?: "openai" | "anthropic" | "responses";
-  /** 命令参数（如 create-skill / create-task 的提示词） */
+  /** Command arguments (e.g. the prompt for create-skill / create-task) */
   args: string;
-  /** 请求是否开启了 extended thinking（Anthropic 专用） */
+  /** Whether extended thinking is enabled on the request (Anthropic only) */
   thinking?: boolean;
   /**
-   * 当前请求的最近对话消息（用于 task-draft-generator 生成草稿）。
+   * Recent conversation messages of the current request (used by task-draft-generator to generate drafts).
    *
-   * - CC/CB 走 chat/completions：直接是 body.messages[]
-   * - Codex/WorkBuddy 走 Responses API：目前传空数组（阶段 5 联调时再补 body.input 解析）
+   * - CC/CB use chat/completions: this is body.messages[] directly
+   * - Codex/WorkBuddy use the Responses API: an empty array is passed for now (body.input parsing to be added during stage-5 integration)
    *
-   * 未提供时视为空数组，task 命令族会返 "no recent messages" 错误。
+   * When omitted it is treated as an empty array, and the task command family returns a "no recent messages" error.
    */
   bodyMessages?: MemCommandMessage[];
 }
 
 /**
- * 已支持的 mem: 命令名 —— 强类型联合，供 index.ts 分派 / commands/* 收窄使用。
- * 未列入的字符串会被 executeMemCommand 走"未知命令"兜底。
+ * Supported mem: command names -- a strongly typed union used by index.ts for dispatch and by commands/* for narrowing.
+ * Strings not listed fall through to executeMemCommand's "unknown command" fallback.
  */
 export type MemCommandName =
   | "help"
@@ -79,11 +79,11 @@ export type MemCommandName =
 
 export interface MemCommandResult {
   success: boolean;
-  /** 用户可读的结果文本（写入 L0 / 展示给用户） */
+  /** User-readable result text (written to L0 / shown to the user) */
   messageText: string;
-  /** 结构化数据（可选） */
+  /** Structured data (optional) */
   data?: Record<string, unknown>;
-  /** 构造好的 HTTP Response（已按协议格式伪造） */
+  /** The built HTTP Response (synthesized in the protocol's format) */
   response: Response;
 }
 

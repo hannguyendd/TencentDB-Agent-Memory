@@ -1,7 +1,7 @@
-"""TencentDB Agent Memory v2 Python SDK (现有数据面 + 管理面 API，路径走 /v2)。
+"""TencentDB Agent Memory v2 Python SDK (existing data-plane + management-plane APIs, paths use /v2).
 
-显式 v2 入口；顶层 `from tencentdb_agent_memory import MemoryClient` 仍指向这里，
-所以老代码升级 SDK 后零修改即可继续工作。
+Explicit v2 entry point; the top-level `from tencentdb_agent_memory import MemoryClient` still points here,
+so existing code keeps working unchanged after upgrading the SDK.
 """
 
 from .client import AsyncMemoryClient, MemoryClient

@@ -1,15 +1,15 @@
 /**
  * @tencentdb-agent-memory/memory-sdk-ts-v2 — TypeScript SDK for TencentDB Agent Memory v3 API.
  *
- * 顶级 export 直接来自 v3 严格 isolation 版本。老代码若之前从
- * `@tencentdb-agent-memory/memory-sdk-ts-v2/v3` 子路径导入，可以继续用（子路径
- * 保留为向后兼容别名，与本模块内容完全一致）。
+ * Top-level exports come directly from the v3 strict-isolation version. Existing code that previously imported from the
+ * `@tencentdb-agent-memory/memory-sdk-ts-v2/v3` subpath can keep doing so (the subpath
+ * is kept as a backward-compatible alias with exactly the same contents as this module).
  */
 
 export * from "./v3/index.js";
 
-// HTTP 契约的原始 data-shape 类型 —— v3 client 返回这些形状（v3/types.ts 里
-// 有一份 `V3*` 别名，两个名字均可用）。
+// Raw data-shape types of the HTTP contract -- the v3 client returns these shapes (v3/types.ts
+// has `V3*` aliases; both names work).
 export type {
   // Common
   ApiResponseEnvelope, CountData,
@@ -30,8 +30,8 @@ export type {
   OffloadQueryMmdRequest, OffloadQueryMmdData,
 } from "./types.js";
 
-// 共享类型 / util（不属于 v3-only，也不是 v2 API 实现，导出给需要自定义 transport
-// 或用 STS COS 直读的调用方使用）
+// Shared types / utils (not v3-only and not part of the v2 API implementation; exported for callers who need a custom transport
+// or direct reads via STS COS)
 export { ParamError, TDAMError } from "./errors.js";
 export { HttpTransport, type HttpTransportOptions } from "./http.js";
 export type { MemoryClientConfig, Transport } from "./client.js";

@@ -1,51 +1,51 @@
 /**
- * AuthMethod —— 一种认证方式的完整封装。
+ * AuthMethod -- the full encapsulation of one authentication method.
  *
- * 一个 AuthMethod = 一个 kind + 表单元数据 + URL 注入方式 + 落库转换。
+ * One AuthMethod = one kind + form metadata + URL injection + persistence conversion.
  *
- * 新增一种认证方式（如 token-header、oauth-pkce）：
- *   1. 在 `auth-methods/<kind>.ts` 建文件，导出一个实现该接口的常量
- *   2. 在 `auth-methods/index.ts` 的 AUTH_METHODS 数组加一行
- *   3. Provider 里选用 `authMethod: <kindConst>`
+ * To add a new auth method (e.g. token-header, oauth-pkce):
+ *   1. Create a file `auth-methods/<kind>.ts` exporting a constant that implements this interface
+ *   2. Add one line to the AUTH_METHODS array in `auth-methods/index.ts`
+ *   3. Use `authMethod: <kindConst>` in the Provider
  *
- * 没了。存储层、凭据 API、注入入口、前端表单驱动全部由此接口的字段驱动，
- * 不需要动 provider 文件、不需要动 registry、不需要写任何 switch。
+ * That's it. The storage layer, credential API, injection entry point and frontend form are all driven by this interface's fields;
+ * no need to touch provider files, the registry, or write any switch.
  */
 
 import type { CredentialPayload } from "../types.js";
 
-/** 认证方式类别（判别联合，加成员时全仓 kind 引用点会强制编译报错）。 */
+/** Auth method kind (discriminated union; adding a member forces compile errors at every kind reference in the repo). */
 export type AuthMethodKind = "bearer" | "basic";
 
-/** 前端凭据表单里一个字段的描述（i18n key 由前端根据 name 拼）。 */
+/** Description of one field in the frontend credential form (the i18n key is composed by the frontend from name). */
 export interface CredentialFormField {
-  /** 字段名，作为 payload key（见 `AuthMethod.buildCredential` 消费）。 */
+  /** Field name, used as the payload key (consumed by `AuthMethod.buildCredential`). */
   name: "secret" | "username";
-  /** 是否密码框（type=password）。 */
+  /** Whether it is a password input (type=password). */
   secret: boolean;
-  /** 是否必填。 */
+  /** Whether it is required. */
   required: boolean;
 }
 
 /**
- * 认证方式契约。
+ * Auth method contract.
  *
- * 一个方式的所有决策——表单长什么样、凭据落成什么形状、clone URL 怎么拼——
- * 都在这里。业务代码只调这些方法，不判 kind。
+ * All decisions of a method -- what the form looks like, what shape the credential is stored in, how the clone URL is built --
+ * live here. Business code only calls these methods and never branches on kind.
  */
 export interface AuthMethod {
   readonly kind: AuthMethodKind;
 
-  /** 前端凭据表单：字段清单（决定"要不要显示 username 输入框"）。 */
+  /** Frontend credential form: field list (decides "whether to show the username input"). */
   readonly formFields: readonly CredentialFormField[];
 
   /**
-   * 前端提交的表单值 → 落库前的凭据形态。
+   * Form values submitted by the frontend -> credential shape before persistence.
    *
-   * 允许方式自己做校验（如"basic 必须同时给 username 和 password"），
-   * 通不过就抛错。
+   * A method may do its own validation (e.g. "basic must provide both username and password"),
+   * and throws if it fails.
    *
-   * 注意：不含 provider_id / kind 这些 registry 层已知信息，只管表单值本身。
+   * Note: does not include provider_id / kind or other info already known at the registry layer; only handles the form values themselves.
    */
   buildCredential(form: Record<string, string | undefined>): {
     secret: string;
@@ -53,11 +53,11 @@ export interface AuthMethod {
   };
 
   /**
-   * 把凭据注入 clone URL。
+   * Inject the credential into the clone URL.
    *
-   * 参数 `cloneUsername` 是 provider 侧声明的占位用户名（各平台不同，
-   * 由 provider 自行提供，具体取值不在本文档固化），仅 bearer 用；
-   * basic 忽略它，一律用 cred.username。
+   * The `cloneUsername` parameter is the placeholder username declared by the provider (differs per platform,
+   * supplied by the provider itself; concrete values are not fixed in this document), used only by bearer;
+   * basic ignores it and always uses cred.username.
    */
   buildCloneUrl(repoUrl: string, cred: CredentialPayload, cloneUsername?: string): string;
 }

@@ -1,11 +1,11 @@
 /**
- * stages/injection-runner.ts — 主对话资产注入 stage。
+ * stages/injection-runner.ts — main-conversation asset injection stage.
  *
- * 提取自 openai-chat + anthropic runner 的 pipeline.process 调用块 (~30 行 × 2)。
- * codex/wb 的注入走独立的 synthetic body 合成路径, 不在此 stage 覆盖。
+ * Extracted from the pipeline.process call blocks in the openai-chat + anthropic runners (~30 lines x 2).
+ * Injection in codex/wb goes through a separate synthetic body composition path, not covered by this stage.
  *
- * 语义: try/catch 内部 silently 降级 (blueprint §5.2 red-line 2), 出错也不阻塞
- * 主 pipeline, fallback 原 body。
+ * Semantics: silently degrades inside try/catch (blueprint §5.2 red-line 2); errors do not block
+ * the main pipeline, falling back to the original body.
  */
 
 import type { ProxyConfig } from "../../types.js";
@@ -13,12 +13,12 @@ import { countHumanTurns } from "../../turnSeq.js";
 import type { AssetCapabilityFlags } from "../../injection/types.js";
 
 export interface InjectionRunnerInput {
-  /** injection 被跳过的所有 gate 汇总 (injectedSkipped, requestKind, etc.) */
+  /** all gates that caused injection to be skipped, aggregated (injectedSkipped, requestKind, etc.) */
   skip: boolean;
   config: ProxyConfig;
   body: Record<string, unknown>;
   protocol: "openai" | "anthropic";
-  /** 主 pipeline turnSeq (未 monotonic 化, injection 只用 stateless 数) */
+  /** main pipeline turnSeq (not made monotonic; injection uses only a stateless number) */
   messages: unknown[];
   traceId: string;
   keyId: string;
@@ -32,19 +32,19 @@ export interface InjectionRunnerInput {
   sessionInfo: Record<string, unknown> | null | undefined;
   assetCapabilities?: AssetCapabilityFlags;
   callerUserKey?: string;
-  /** anthropic 独有: fork 请求 readOnly=true 不触发 self-heal */
+  /** anthropic only: fork requests use readOnly=true and do not trigger self-heal */
   readOnly?: boolean;
 }
 
 export interface InjectionRunnerResult {
-  /** 若注入成功替换; 未注入或失败 → 原 body */
+  /** replaced if injection succeeded; if not injected or failed -> original body */
   body: Record<string, unknown>;
   /** body.messages after (may equal input messages) */
   messages: unknown[];
 }
 
 /**
- * 执行 injection pipeline; 失败 silently fallback。
+ * Run the injection pipeline; on failure silently fall back.
  */
 export async function stageInjectionRunner(
   input: InjectionRunnerInput,

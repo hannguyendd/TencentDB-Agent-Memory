@@ -778,11 +778,11 @@ components:
         source_type:
           type: string
           nullable: true
-          description: 来源类型（如 'iwiki'）；null = 手工上传。决定详情页 UI 走「上传文件」还是「从外部拉取」。
+          description: Source type (e.g. 'iwiki'); null = manual upload. Determines whether the detail page UI uses "Upload file" or "Pull from external source".
         source_url:
           type: string
           nullable: true
-          description: 外部来源根地址；仅 source_type 非 null 时有值。
+          description: Root URL of the external source; only set when source_type is non-null.
         service_url:
           type: string
           nullable: true
@@ -794,7 +794,7 @@ components:
         status:
           type: string
           enum: [draft, pending, processing, ready, failed]
-          description: draft = 建壳未加工（仅 create 一次性出现）；pending/processing = in-flight；ready = 可查询；failed = 可重试。
+          description: draft = shell created but not processed (appears only once, on create); pending/processing = in-flight; ready = queryable; failed = retryable.
         sync_error:
           type: string
           nullable: true
@@ -822,13 +822,13 @@ components:
           properties:
             name:
               type: string
-            # 外部来源（iWiki 等）：二者必须成对出现，缺一 → 400。
+            # External source (iWiki etc.): the two must appear together; if either is missing → 400.
             source_type:
               type: string
-              description: 来源类型（如 'iwiki'）；决定详情页 UI 走「上传文件」还是「从外部拉取」。
+              description: Source type (e.g. 'iwiki'); determines whether the detail page UI uses "Upload file" or "Pull from external source".
             source_url:
               type: string
-              description: 外部来源根地址（形如 <站点>/spaces/<spaceKey> 或 <站点>/p/<docId>）。
+              description: Root URL of the external source (of the form <site>/spaces/<spaceKey> or <site>/p/<docId>).
 
     WikiGetRequest:
       type: object

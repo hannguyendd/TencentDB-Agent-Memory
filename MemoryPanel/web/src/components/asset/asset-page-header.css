@@ -16,7 +16,7 @@
   flex-wrap: wrap;
 }
 
-/* 标题独占左列；筛选控件 + 操作按钮统一收纳在右侧容器内，与标题拉开间距 */
+/* The title occupies the left column alone; filter controls + action buttons are grouped in the right container, spaced apart from the title */
 ._asset-page-header-right {
   min-width: 0;
   gap: 16px;
@@ -39,7 +39,7 @@
   flex-wrap: wrap;
 }
 
-/* 筛选控件遵循内容宽度，不让 Select 在 Header 内继承全宽布局。 */
+/* Filter controls follow content width so Select does not inherit a full-width layout inside the Header. */
 ._asset-page-header-filters > * {
   flex: 0 0 auto;
 }

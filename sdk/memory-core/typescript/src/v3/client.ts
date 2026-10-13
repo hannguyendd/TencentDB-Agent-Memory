@@ -78,9 +78,9 @@ class IsolationContext {
   }
 
   /**
-   * 写入路径专用：`addConversation` 必须拿到一个非空 session_id。
-   * 缺则抛错——避免服务端把无 session 的写入静默合并到默认 bucket，
-   * 与其他调用方的数据混在一起。
+   * Write path only: `addConversation` must get a non-empty session_id.
+   * Throws if missing -- this prevents the server from silently merging session-less writes into the default bucket,
+   * mixing them with other callers' data.
    */
   resolveSessionForWrite(override?: string): string {
     const sid = override ?? this.sessionId;
@@ -118,12 +118,12 @@ class IsolationContext {
  * - L2/L3 are team+agent profile data and do not consume sessionId.
  */
 /**
- * 归一化批量删除的 id 列表：校验非空字符串、去重、检查上限。
+ * Normalizes the id list for batch deletes: validates non-empty strings, deduplicates, and checks the limit.
  *
- * 破坏性操作的入参在客户端就拦一道，比让服务端回 400 更早暴露问题，
- * 也避免把明显不合法的批量请求发出去。
+ * Input of destructive operations is checked on the client, which surfaces problems earlier than a server 400
+ * and avoids sending obviously invalid batch requests.
  *
- * @returns 归一化后的数组；入参为 undefined 时返回 undefined（表示"未提供"）
+ * @returns the normalized array; returns undefined when the input is undefined (meaning "not provided")
  */
 function normalizeDeleteIds(
   field: string,
@@ -169,7 +169,7 @@ export class MemoryClient {
       endpoint: cfg.endpoint,
       apiKey: cfg.apiKey,
       serviceId: cfg.serviceId,
-      // 可选：透传调用方身份。内核不校验，但前置网关/面板可能需要。
+      // Optional: forward the caller identity. The kernel does not validate it, but an upstream gateway/panel may need it.
       userKey: cfg.userKey,
       timeout: cfg.timeout,
       rejectUnauthorized: cfg.rejectUnauthorized,
@@ -221,17 +221,17 @@ export class MemoryClient {
   }
 
   /**
-   * `POST /v3/conversation/delete` — 批量删除 L0。
+   * `POST /v3/conversation/delete` — batch-delete L0.
    *
-   * `message_ids`（≤5000）与 `session_ids`（≤100）至少给一个，可同时给。
+   * At least one of `message_ids` (<=5000) and `session_ids` (<=100) is required; both may be given.
    *
-   * 注意作用域：这里**不会**回退到构造函数里的 `session_id`。删除是破坏性
-   * 操作，若像读接口那样自动带上默认 session，只想按 message_ids 删几条的
-   * 调用方会意外把整个会话删掉。要删会话必须显式传 `session_ids`。
+   * Note the scope: this does **not** fall back to the `session_id` from the constructor. Deletion is destructive;
+   * if the default session were attached automatically as in read endpoints, a caller who only wants to delete a few message_ids
+   * would accidentally delete the whole session. To delete sessions, pass `session_ids` explicitly.
    */
   deleteConversation(params: V3ConversationDeleteRequest = {}): Promise<V3ConversationDeleteData> {
     const messageIds = normalizeDeleteIds("message_ids", params.message_ids, 5000);
-    // 同时接受 session_ids（推荐）与已废弃的单数 session_id，归一成数组。
+    // Accepts both session_ids (recommended) and the deprecated singular session_id, normalized into an array.
     const sessionIds = normalizeDeleteIds("session_ids", params.session_ids, 100);
     const legacySingle = params.session_id;
     if (legacySingle !== undefined && !legacySingle) {
@@ -301,7 +301,7 @@ export class MemoryClient {
   }
 
   deleteAtomic(params: V3AtomicDeleteRequest): Promise<V3AtomicDeleteData> {
-    //ids 必填，单次至多 5000 条，去重后发送。
+    // ids are required, at most 5000 per call, sent after deduplication.
     const ids = normalizeDeleteIds("ids", params.ids, 5000);
     if (!ids?.length) {
       throw new ParamError("deleteAtomic requires a non-empty ids list");
@@ -367,30 +367,30 @@ export class MemoryClient {
   // -- Chat Memory (asset-level) -------------------------------------------
 
   /**
-   * `POST /v3/chat-memory/clear` — 一键清空 chat memory 的**全部内容**，
-   * 但保留资产本身。
+   * `POST /v3/chat-memory/clear` — clear **all content** of a chat memory in one call,
+   * while keeping the asset itself.
    *
-   * 清空范围：L0 / L1 / L2 / L3 + 向量 + 文件。
-   * 保留内容：`memory_id`、Team/Agent 归属、Agent 绑定、ACL、Owner、
-   * 名称、可见性 —— 清空后 Agent 继续用原 `memory_id` 写入，无需重建。
+   * Cleared: L0 / L1 / L2 / L3 + vectors + files.
+   * Kept: `memory_id`, Team/Agent ownership, Agent bindings, ACL, Owner,
+   * name, visibility -- after clearing, the Agent keeps writing with the original `memory_id`; no rebuild needed.
    *
-   * 与 L0/L1 删除接口不同，本接口是**资产级**操作：
-   *   - 作用域由 `memory_ids` 自身决定，不使用隔离三元组
-   *   - 任一 `memory_id` 不存在或不是 chat_memory 时**整批拒绝**，一条都不清
-   *   - 幂等：已清空过的再次调用仍返回成功，计数为 0
+   * Unlike the L0/L1 delete endpoints, this is an **asset-level** operation:
+   *   - scope is determined by `memory_ids` itself; the isolation triple is not used
+   *   - if any `memory_id` does not exist or is not a chat_memory, the **whole batch is rejected** and nothing is cleared
+   *   - idempotent: calling again on an already-cleared memory still succeeds, with counts of 0
    *
-   * 权限：与其它删除接口一致，内核不做用户级鉴权。若需要"仅 Owner 可清空"
-   * 的约束，请走面板后端 `/api/v1/chat-memory/clear`（那里会校验 Owner）。
+   * Permissions: as with other delete endpoints, the kernel does no user-level auth. If you need an "Owner only" restriction,
+   * go through the panel backend `/api/v1/chat-memory/clear` (which validates the Owner).
    *
-   * 失败项会带 `retryable` 标志；为 true 表示服务端已自动重试仍未成功，
-   * 稍后重试即可补齐残留内容。
+   * Failed items carry a `retryable` flag; true means the server already retried automatically without success,
+   * and retrying later will clean up the remaining content.
    */
   clearChatMemory(params: V3ChatMemoryClearRequest): Promise<V3ChatMemoryClearData> {
     const memoryIds = normalizeDeleteIds("memory_ids", params.memory_ids, 100);
     if (!memoryIds?.length) {
       throw new ParamError("clearChatMemory requires a non-empty memory_ids list");
     }
-    // 注意：不带隔离三元组 —— 作用域由 memory_ids 决定。
+    // Note: no isolation triple is sent -- scope is determined by memory_ids.
     return this.http.post(`${V3}/chat-memory/clear`, { memory_ids: memoryIds });
   }
 }

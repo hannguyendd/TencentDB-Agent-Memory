@@ -3,25 +3,25 @@
  */
 
 /**
- * 用于 `config.defaultTaskId` 兜底关联时，fetchTeamsAndAgents 在每个 team 的
- * tasks 列表头部注入的虚拟条目 label。
+ * With `config.defaultTaskId` fallback association, the label of the virtual entry that fetchTeamsAndAgents injects at the head of each team's
+ * tasks list.
  *
- * 通过在源头注入而不是在 form / extractor 侧加分支，让分页 total、auto-select
- * 级联、extractor 匹配全部走既有 tasks.length 路径，避免"分页真相分散"型 bug
- * （见 docs 里 defaultTaskId 相关记录 & 2026-07-29 issue）。
+ * By injecting at the source rather than adding branches on the form / extractor side, pagination totals, auto-select
+ * cascading and extractor matching all go through the existing tasks.length path, avoiding "pagination truth scattered" bugs
+ * (see the defaultTaskId notes in docs & the 2026-07-29 issue).
  */
-export const DEFAULT_TASK_LABEL = "暂时跳过";
+export const DEFAULT_TASK_LABEL = "Skip for now";
 
 /**
- * Session-init 状态机：
- *   uninitialized           → 第一次进来，控制面拉 teams[]
- *   pending_asset_confirm   → 已发轮0 form（是否关联团队资产），等用户答
- *   pending_team_select     → 已选"是"，已发轮1 form（只问 team），等用户答
- *   pending_agent_task      → 已选 team，已发轮2 form（agent + task），等用户答
- *   initialized             → 已识别完整三元组，登记完成
+ * Session-init state machine:
+ *   uninitialized           → first entry, control plane fetches teams[]
+ *   pending_asset_confirm   → round-0 form sent (associate team assets?), waiting for the user's answer
+ *   pending_team_select     → "Yes" chosen, round-1 form sent (team only), waiting for the user's answer
+ *   pending_agent_task      → team chosen, round-2 form sent (agent + task), waiting for the user's answer
+ *   initialized             → full triple identified, registration complete
  *
- * 当 teams.length === 1 时跳过 pending_team_select，直接进入 pending_agent_task。
- * 用户在 pending_asset_confirm 阶段选"否"时直接 bypass。
+ * When teams.length === 1, pending_team_select is skipped and it goes straight to pending_agent_task.
+ * When the user picks "No" at the pending_asset_confirm stage, it bypasses directly.
  */
 export type SessionInitStatus =
   | "uninitialized"
@@ -31,7 +31,7 @@ export type SessionInitStatus =
   | "pending_agent_select"  // CC: selecting agent (with pagination)
   | "pending_task_select"   // CC: selecting task (with pagination)
   | "initialized"
-  // legacy（一期单 form），保留以兼容旧测试 / 旧 store 数据
+  // legacy (phase-1 single form), kept for compatibility with old tests / old store data
   | "pending_form";
 
 export interface SessionInitState {
@@ -42,62 +42,62 @@ export interface SessionInitState {
   sessionInfo?: SessionInfo | null;
   /** User ID from auth/verify (not from header). */
   userId?: string;
-  /** 内核 /teams 返回的嵌套结构，用于渲染 form 与解析用户答复。 */
+  /** Nested structure returned by the kernel's /teams, used to render the form and parse the user's reply. */
   cachedTeams?: TeamOption[];
   /**
-   * 用户已在轮1 选定的 team_id（pending_agent_task 阶段才有意义）。
-   * 轮2 form 仅渲染该 team 下的 agents/tasks；extractor 也只在该 team 内匹配。
+   * The team_id the user already chose in round 1 (only meaningful in the pending_agent_task stage).
+   * The round-2 form renders only the agents/tasks under this team; the extractor also matches only within this team.
    */
   selectedTeamId?: string;
   /**
-   * Claude Code 分页模式下的当前 agent 页码（0-based）。
+   * Current agent page index (0-based) in Claude Code paging mode.
    *
-   * 背景：Claude Code 的 AskUserQuestion 单 question 限制 2–4 选项，当某 team
-   * 下 agent 数量超过 3 个时无法一次性铺开。我们沿用现有"多轮拦截"机制，每
-   * 渲染 3 个 agent + 1 个"更多→"或"本次不关联"槽位，用户点"更多"则 pageIndex++
-   * 再发下一页 form。详见 docs/reports/2026-06-19-cc-form-mode-experiment.md §4.4。
+   * Background: Claude Code's AskUserQuestion allows 2–4 options per question, so when a team
+   * has more than 3 agents they cannot all be laid out at once. We reuse the existing "multi-round interception" mechanism, rendering
+   * 3 agents + 1 "More →" or "Do not associate this time" slot each time; if the user clicks "More", pageIndex++
+   * and the next page of the form is sent. See docs/reports/2026-06-19-cc-form-mode-experiment.md §4.4.
    *
-   * - 仅 Claude Code（agentSource="claude-code"）使用，CodeBuddy 走 ask_followup_question
-   *   没有 4 选项限制，无需分页。
-   * - 仅在 status="pending_agent_task" 期间有效。
-   * - 默认 0（首页）；每次用户选"更多"，handler 把它 +1 重发 form。
+   * - Used only by Claude Code (agentSource="claude-code"); CodeBuddy goes through ask_followup_question,
+   *   which has no 4-option limit, so no paging is needed.
+   * - Only valid while status="pending_agent_task".
+   * - Defaults to 0 (first page); each time the user picks "More", the handler adds 1 to it and resends the form.
    */
   agentPageIndex?: number;
   /**
-   * Claude Code 分页模式下的当前 team 页码（0-based）。
+   * Current team page index (0-based) in Claude Code paging mode.
    *
-   * 与 `agentPageIndex` 语义完全对称，只在 team 数量 > 4 时进入分页。
-   * 2026-09-03 新增 —— 修复 team 阶段 `slice(0, 4)` 硬截断导致 ≥5 个 team
-   * 时后续 team 静默丢失、无 "更多 →" 入口的 pre-existing bug。
-   * 仅 CC 使用；CB 状态机（服务 WB/OC/dsh）走 `codexPageIndex.teamPage`。
+   * Fully symmetric with `agentPageIndex` semantics; paging only kicks in when the team count > 4.
+   * Added 2026-09-03 — fixes a pre-existing bug where the team stage's hard `slice(0, 4)` truncation silently dropped later teams
+   * when there were ≥5 teams, with no "More →" entry.
+   * Used only by CC; the CB state machine (serving WB/OC/dsh) goes through `codexPageIndex.teamPage`.
    */
   teamPageIndex?: number;
-  /** CC: 用户在 agent_select 阶段选定的 agent_id（用于 pending_task_select 阶段）。 */
+  /** CC: the agent_id the user chose in the agent_select stage (used in the pending_task_select stage). */
   selectedAgentId?: string;
   /** Resolved agent detail (cached after selection), used to inject context every request. */
   agentDetail?: AgentDetail | null;
   /** Resolved task detail (cached after selection), used to inject context every request. */
   taskDetail?: TaskDetail | null;
   /**
-   * 用户明确选择了"跳过"（本次不关联）。状态设为 initialized 防止重复弹窗，
-   * 但 agentDetail/taskDetail 为 null，后续请求只 strip 不 inject。
+   * The user explicitly chose "Skip" (do not associate this time). Status is set to initialized to prevent repeated popups,
+   * but agentDetail/taskDetail are null, so later requests only strip and do not inject.
    */
   bypassed?: boolean;
   /**
-   * codex 客户端专属分页页码（0-based），只在 agentSource="codex" 场景写入。
+   * Page indexes specific to the codex client (0-based), written only when agentSource="codex".
    *
-   * 背景：codex 的 request_user_input 单 question 最多 3 个 option（客户端会
-   * 自动追加"其他"占 1 位，proxy 不能自己塞）。当候选 > 3 时按 3-slot 上限
-   * 分页：前 N-1 页各 2 real + "更多..."，末页 2~3 real。
+   * Background: codex's request_user_input allows at most 3 options per question (the client
+   * automatically appends "Other" taking 1 slot; the proxy cannot add it itself). When candidates > 3, paging follows the 3-slot cap:
+   * the first N-1 pages each have 2 real + "More...", the last page has 2~3 real.
    *
-   * 独立于 CC 侧的 `agentPageIndex` —— CC 有自己的 4-slot 分页语义 (agent /
-   * task 共用一个字段，靠 stage 区分)，codex 需要 team / agent / task 三段
-   * 独立页码, 复用会互串。
+   * Independent of the CC-side `agentPageIndex` — CC has its own 4-slot paging semantics (agent /
+   * task share one field, distinguished by stage), while codex needs separate page indexes for the
+   * team / agent / task segments; reusing one would cross-contaminate them.
    *
-   * ── 谁写入 ──
-   * CB 状态机在 agentSource==="codex" + reqCtx.codexAnswerInput 命中 MORE 时
-   * bump 对应字段（团队规范 2026-08-08 codex session-init 重构：MORE 拦截从
-   * codexHandler 收敛到 CB 状态机内部）。CC/普通 CB 场景永远不写。
+   * ── Who writes it ──
+   * The CB state machine bumps the corresponding field when agentSource==="codex" + reqCtx.codexAnswerInput hits MORE
+   * (team convention 2026-08-08 codex session-init refactor: MORE interception moved from
+   * codexHandler into the CB state machine). Never written in CC / plain CB scenarios.
    */
   codexPageIndex?: {
     teamPage?: number;
@@ -125,32 +125,32 @@ export interface SessionInitState {
    */
   __recoverySource?: "l1" | "l2a" | "l2b" | "history-scan";
 
-  /** mem:session-reset 触发时写入，标记本次 init 是 reset 流程。 */
+  /** Written when mem:session-reset fires, marking this init as a reset flow. */
   resetFlow?: boolean;
-  /** mem:session-reset 触发的时间戳，跨节点一致性校验用。 */
+  /** Timestamp of the mem:session-reset trigger, used for cross-node consistency checks. */
   resetEpoch?: number;
 }
 
 /**
- * 来自控制面 `/api/v1/proxy/resources` 的嵌套结构：
+ * Nested structure from the control plane `/api/v1/proxy/resources`:
  *   teams[] → agents[]  +  tasks[]
  *
- * agents 和 tasks 是该 team 下的完整列表，平级展示。
- * session init 时用户自由选择 agent + task，task_agents 关联关系
- * 在 init 完成后由页面管理，不影响 init 时的选项列表。
+ * agents and tasks are the full lists under this team, shown side by side.
+ * During session init the user freely picks agent + task; the task_agents association
+ * is managed by the page after init completes and does not affect the option lists during init.
  */
 export interface TaskInTeam {
   task_id: string;
   task_name: string;
   /**
-   * 标识该条目是 `config.defaultTaskId` 兜底注入的虚拟 task（source: proxy）
-   * 而非内核里真实存在的 task。form 侧看到该字段会跳过 `(id-suffix)` 的拼接，
-   * 显示更干净的 label —— 反正虚拟 task 只有一个，不存在重名歧义。
+   * Marks this entry as a virtual task injected by the `config.defaultTaskId` fallback (source: proxy)
+   * rather than a task that really exists in the kernel. When the form side sees this field it skips the `(id-suffix)` suffix,
+   * showing a cleaner label — there is only one virtual task anyway, so no name ambiguity.
    */
   isDefault?: boolean;
   /**
-   * 关联到的 agent_id (core API 返回里带的字段, proxy 本身不消费, 但 extractor
-   * 测试里会给 task mock 这个字段表达"task 挂在哪个 agent 下"的关联)。
+   * The associated agent_id (a field in the core API response, not consumed by the proxy itself, but extractor
+   * tests give the task mock this field to express "which agent the task hangs under").
    */
   agent_id?: string;
 }
@@ -168,7 +168,7 @@ export interface TeamOption {
   tasks: TaskInTeam[];
 }
 
-/** @deprecated 旧扁平结构，保留以兼容旧测试；新代码用 TeamOption。 */
+/** @deprecated Old flat structure, kept for compatibility with old tests; new code uses TeamOption. */
 export interface AgentOption {
   id: string;
   name: string;
@@ -176,7 +176,7 @@ export interface AgentOption {
   team_id?: string;
 }
 
-/** @deprecated 旧扁平结构，保留以兼容旧测试；新代码用 TaskInTeam。 */
+/** @deprecated Old flat structure, kept for compatibility with old tests; new code uses TaskInTeam. */
 export interface TaskOption {
   id: string;
   name: string;

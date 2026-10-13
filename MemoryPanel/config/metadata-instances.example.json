@@ -1,15 +1,15 @@
 {
-  "_comment": "复制本文件为 metadata-instances.json 后按注释替换真值。真值文件已被 .gitignore 排除，禁止提交。api_key 是 tdai kernel gateway 的 bearer token，从 kernel 侧获取。proxy_endpoint 可选，仅影响 UI '客户端接入地址' 显示；本地开源 core+proxy 分开跑时填 proxy 对外地址（如 http://127.0.0.1:8096），线上/内网 gateway 前置 proxy 时省略。",
+  "_comment": "Copy this file to metadata-instances.json and replace the values as described. The real-value file is excluded by .gitignore and must not be committed. api_key is the bearer token of the tdai kernel gateway, obtained from the kernel side. proxy_endpoint is optional and only affects the UI 'client access address' display; when running open-source core+proxy separately locally, set it to the proxy's external address (e.g. http://127.0.0.1:8096), and omit it when the production/internal gateway sits behind the proxy.",
   "instances": [
     {
       "id": "default",
-      "name": "本地默认实例",
+      "name": "Local default instance",
       "gateway_endpoint": "http://127.0.0.1:8420",
       "api_key": "REPLACE_WITH_KERNEL_BEARER_TOKEN"
     },
     {
       "id": "e2e-test",
-      "name": "E2E 自动化测试专用（可随时清库）",
+      "name": "Dedicated to E2E automated tests (may be wiped at any time)",
       "gateway_endpoint": "http://127.0.0.1:8420",
       "api_key": "REPLACE_WITH_KERNEL_BEARER_TOKEN"
     }

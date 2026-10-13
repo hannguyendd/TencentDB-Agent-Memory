@@ -1,17 +1,17 @@
 /**
- * AssetListPanel — 资产管理页左侧列表面板样式。
+ * AssetListPanel — Styles for the left-side list panel of asset management pages.
  *
  * Apple-inspired clean design：
- *   - 标题行只有名称 + 操作，徽章独立成行
- *   - 徽章用纯文本 + 小图标，不用亮色 Tag
- *   - 选中态用浅品牌底色，不用左 border
- *   - 骨架屏、空态、禁用态统一
- *   - 颜色全部走 var(--tea-color-*)，不硬编码
+ *   - The title row has only the name + actions; badges get their own row
+ *   - Badges use plain text + small icons, not bright Tags Tag
+ *   - Selected state uses a light brand background, not a left border border
+ *   - Skeleton, empty state and disabled state are unified
+ *   - All colors go through var(--tea-color-*); nothing is hard-coded
  */
 
-/* ===== 面板容器 ===== */
+/* ===== Panel container ===== */
 ._alp {
-  /* 撑满左栏高度（外层 _asset-split-sidebar 已限定视口高度），内容少也不留空 */
+  /* Fill the left column height (the outer _asset-split-sidebar already constrains the viewport height), leaving no gap even with little content */
   height: 100%;
   min-height: 480px;
   padding: 16px;
@@ -23,7 +23,7 @@
   flex-direction: column;
 }
 
-/* ===== 头部：标题 + 计数 ===== */
+/* ===== Header: title + count ===== */
 ._alp-header {
   display: flex;
   align-items: center;
@@ -55,18 +55,18 @@
   flex-shrink: 0;
 }
 
-/* ===== 列表滚动区 ===== */
+/* ===== List scroll area ===== */
 ._alp-items {
   list-style: none;
   margin: 0;
   padding: 0;
-  /* 撑满卡片剩余高度并内部滚动（高度由外层 _alp 的 100% 约束），不再用固定 max-height */
+  /* Fill the card's remaining height and scroll internally (height is constrained by the outer _alp's 100%); no longer uses a fixed max-height max-height */
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
 
-/* ===== 空态 ===== */
+/* ===== Empty state ===== */
 ._alp-empty {
   padding: 48px 12px;
   text-align: center;
@@ -74,7 +74,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== 列表项 ===== */
+/* ===== List item ===== */
 ._alp-item {
   border-bottom: 1px solid var(--tea-color-border-secondary-default);
   transition: background-color 0.15s ease-in-out;
@@ -119,7 +119,7 @@
   background-color: transparent;
 }
 
-/* ===== 骨架屏 ===== */
+/* ===== Skeleton ===== */
 ._alp-skeleton {
   padding: 12px 12px;
   animation: _alp-pulse 1.5s ease-in-out infinite;
@@ -148,10 +148,10 @@
 }
 
 /* ============================================================
- * 列表项内容区 — 标准化 4 行结构
+ * List item content area — standardized 4-row structure
  * ============================================================ */
 
-/* 标题行：名称 + 操作按钮 */
+/* Title row: name + action button */
 ._alp-item-header {
   display: flex;
   align-items: center;
@@ -170,8 +170,8 @@
   flex: 1;
 }
 
-/* 资产真实 id：独立成行，紧贴标题行下方（与 ChatMemory 页 ._memory-card-id 同构）。
-   等宽灰色小字，超宽省略号截断。 */
+/* Real asset id: on its own row, right below the title row (same structure as ._memory-card-id on the ChatMemory page).
+   Small gray monospace text, truncated with an ellipsis when too wide. */
 ._alp-item-id {
   display: block;
   margin-top: 4px;
@@ -184,7 +184,7 @@
   white-space: nowrap;
 }
 
-/* 描述：2 行截断 */
+/* Description: truncated to 2 lines */
 ._alp-item-desc {
   margin: 4px 0 0;
   font-size: 13px;
@@ -198,7 +198,7 @@
   -webkit-box-orient: vertical;
 }
 
-/* 徽章行 */
+/* Badge row */
 ._alp-item-badges {
   display: flex;
   align-items: center;
@@ -207,7 +207,7 @@
   margin-top: 6px;
 }
 
-/* 纯文本徽章 — 替代亮色 Tag */
+/* Plain-text badge — replaces the bright Tag Tag */
 ._alp-badge {
   display: inline-flex;
   align-items: center;
@@ -227,7 +227,7 @@
   font-weight: 500;
 }
 
-/* 元信息行 */
+/* Meta row */
 ._alp-item-meta {
   display: flex;
   align-items: center;
@@ -241,18 +241,18 @@
 ._alp-item-time {
   margin-left: auto;
   white-space: nowrap;
-  /* 独立声明字号颜色，不再依赖 _alp-item-meta 行继承，保证放哪都统一 */
+  /* Declare font size and color independently, no longer relying on inheritance from the _alp-item-meta row, so it looks the same wherever it is placed */
   font-size: 12px;
   color: var(--tea-color-text-secondary);
 }
 
-/* 等宽字体（user_id / agent_id 等唯一标识） */
+/* Monospace font (unique identifiers such as user_id / agent_id) */
 ._alp-mono {
   font-family: var(--font-mono);
   color: var(--tea-color-text-secondary);
 }
 
-/* 详情面板空态 */
+/* Detail panel empty state */
 ._alp-detail-empty {
   display: flex;
   align-items: center;
@@ -262,7 +262,7 @@
   color: var(--tea-color-text-tertiary);
 }
 
-/* ===== 响应式 ===== */
+/* ===== Responsive ===== */
 @media (max-width: 960px) {
   ._alp {
     min-height: 0;

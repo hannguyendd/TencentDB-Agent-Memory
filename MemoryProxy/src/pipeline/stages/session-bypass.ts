@@ -1,34 +1,34 @@
 /**
- * stages/session-bypass.ts — session-init "bypass 分支" 后置处理小 helper。
+ * stages/session-bypass.ts — small helper for post-processing the session-init "bypass branch".
  *
- * 抽自 4 runner 里 ~6 行同构 (但 caller-owned 变量名不同, 无法就地 mutate):
+ * Extracted from ~6 lines of identical code in the 4 runners (but the caller-owned variable names differ, so it cannot mutate in place):
  *   if (initResult.bypassed) {
  *     injection[Ss]kipped = true;
  *     console.log("... bypassed → skipping injection");
  *     if (initResult.resetFlow) _resetFlowResult = { ...teamId(Short)?, bypassed: true };
  *   }
  *
- * 返回结构化 result 供 caller 应用, 不直接 mutate caller 变量。
+ * Returns a structured result for the caller to apply, and does not directly mutate caller variables.
  *
- * 目的:
- *   1. 让 "bypassed → skipInjection + 空 resetFlow" 约束显式化 (blueprint §5.2 red-line)
- *   2. 消灭 4 处小 duplicate, 未来加 agent 只加 caller side apply
+ * Goals:
+ *   1. make the "bypassed -> skipInjection + empty resetFlow" constraint explicit (blueprint §5.2 red-line)
+ *   2. eliminate 4 small duplicates; when adding an agent in the future, only add the caller-side apply
  *
- * 差异保留 (caller 显式处理):
- *   - wb 用 teamIdShort, 其他 3 家用 teamId — 通过 useTeamIdShort 参数
- *   - wb 独有 bypassReason 打入 log — 通过 extraLog 参数
- *   - warn 前缀 4 家各自
+ * Differences preserved (handled explicitly by the caller):
+ *   - wb uses teamIdShort, the other 3 use teamId — via the useTeamIdShort parameter
+ *   - wb alone puts bypassReason into the log — via the extraLog parameter
+ *   - warn prefix is separate for each of the 4
  */
 
 export interface SessionBypassInput {
   bypassed: boolean;
   resetFlow: boolean;
   sessionKey: string;
-  /** log 前缀 (如 "[codex]" / "[workbuddy]" / "[session-init]") */
+  /** log prefix (e.g. "[codex]" / "[workbuddy]" / "[session-init]") */
   logPrefix: string;
-  /** wb 独有: log 里追加的 " (reason=xxx)" 段 (其他 3 家传空字符串) */
+  /** wb only: the " (reason=xxx)" segment appended to the log (the other 3 pass an empty string) */
   extraLog?: string;
-  /** wb 独有: bypass reset 时 resetFlowResult 字段用 teamIdShort 而非 teamId */
+  /** wb only: on bypass reset, the resetFlowResult field uses teamIdShort instead of teamId */
   useTeamIdShort?: boolean;
 }
 
@@ -41,9 +41,9 @@ export interface ResetFlowBypassResult {
 }
 
 export interface SessionBypassResult {
-  /** 是否 bypass 生效 (caller 用来 set 自己那个变量: injectedSkipped 或 injectionSkipped) */
+  /** whether bypass took effect (the caller uses it to set its own variable: injectedSkipped or injectionSkipped) */
   skipInjection: boolean;
-  /** bypass reset-flow 时的 _resetFlowResult 内容 (为 undefined 时 caller 不动) */
+  /** content of _resetFlowResult on bypass reset-flow (when undefined the caller leaves it alone) */
   resetFlowResult?: ResetFlowBypassResult;
 }
 

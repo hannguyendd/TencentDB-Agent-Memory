@@ -1,15 +1,15 @@
 /**
- * 按 Anthropic / OpenAI 协议构造伪造的 LLM 响应。
+ * Builds a synthetic LLM response following the Anthropic / OpenAI protocol.
  *
- * 返回的 Response 对 IDE 来说就是一条正常的 assistant 回复。
+ * To the IDE, the returned Response looks like a normal assistant reply.
  */
 
 // ── Anthropic non-streaming ─────────────────────────────────────────────────
 
 export function buildAnthropicResponse(text: string, requestId: string, thinking?: boolean): Response {
   const content: Record<string, unknown>[] = [];
-  // 当请求开启了 extended thinking 时，必须包含 thinking block，
-  // 否则 Claude Code 会认为响应不完整并发起额外请求。
+  // When extended thinking is enabled on the request, a thinking block must be included,
+  // otherwise Claude Code treats the response as incomplete and issues extra requests.
   if (thinking) {
     content.push({ type: "thinking", thinking: "Processing mem: command.", signature: "" });
   }
@@ -42,8 +42,8 @@ export function buildAnthropicStreamResponse(text: string, requestId: string, th
 
   let blockIndex = 0;
 
-  // 当请求开启了 extended thinking 时，先发一个完整的 thinking block，
-  // 否则 Claude Code 会认为响应不完整并发起额外请求。
+  // When extended thinking is enabled on the request, emit a complete thinking block first,
+  // otherwise Claude Code treats the response as incomplete and issues extra requests.
   if (thinking) {
     lines.push(
       `event: content_block_start`,
@@ -180,9 +180,9 @@ export function buildResponsesStreamResponse(text: string, requestId: string): R
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
   };
 
-  // 关键：Responses API 里每个 event 的 data JSON **必须**带 `type` 字段
-  //（跟 SSE `event:` 头同名）。codex 客户端解析器优先读 data.type，缺字段
-  // 会丢弃事件，表现为伪造文本客户端不显示。对齐真实上游帧姿势。
+  // Key point: in the Responses API, each event's data JSON **must** carry a `type` field
+  // (same name as the SSE `event:` header). The codex client parser reads data.type first;
+  // events missing it are dropped, so the synthetic text never shows in the client. Match the real upstream framing.
   const sse = (event: string, d: Record<string, unknown>) =>
     `event: ${event}\ndata: ${JSON.stringify({ type: event, ...d })}\n\n`;
 
@@ -261,7 +261,7 @@ export interface BuildResponseOptions {
   protocol: "anthropic" | "openai" | "responses";
   stream: boolean;
   requestId?: string;
-  /** 请求是否开启了 extended thinking（Anthropic 专用） */
+  /** Whether extended thinking is enabled on the request (Anthropic only) */
   thinking?: boolean;
 }
 

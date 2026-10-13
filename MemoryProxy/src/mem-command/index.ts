@@ -1,12 +1,12 @@
 /**
- * mem-command 模块统一入口
+ * mem-command module unified entry point
  *
- * 提供：
- *  - parseMemCommand()  — 检测是否为 mem: 命令
- *  - executeMemCommand() — 执行命令并返回结果
+ * Provides:
+ *  - parseMemCommand()  — detects whether the input is a mem: command
+ *  - executeMemCommand() — executes a command and returns the result
  *
- * 命令拦截**恒定启用**（无配置开关），命令白名单已废弃 —— 未知命令由
- * executeMemCommand 内的 KNOWN_COMMANDS 兜底返回"未知命令"提示。
+ * Command interception is **always enabled** (no config switch); the command allowlist is deprecated -- unknown
+ * commands fall back to the "unknown command" message via KNOWN_COMMANDS in executeMemCommand.
  */
 
 import type { MemCommandContext, MemCommandResult } from "./types.js";
@@ -25,7 +25,7 @@ export type { MemCommandContext, MemCommandResult, MemCommandName, MemCommandMes
 export { getHelpText } from "./commands/help.js";
 export { extractSimpleMessages, truncateArgs } from "./utils.js";
 
-/** 已知命令列表 */
+/** Known command list */
 const KNOWN_COMMANDS = new Set([
   "sync",
   "create-skill",
@@ -36,7 +36,7 @@ const KNOWN_COMMANDS = new Set([
 ]);
 
 /**
- * 执行已解析的 mem: 命令。
+ * Execute a parsed mem: command.
  */
 export async function executeMemCommand(
   cmd: ParsedMemCommand,
@@ -44,9 +44,9 @@ export async function executeMemCommand(
 ): Promise<MemCommandResult> {
   const requestId = `mem-cmd-${Date.now()}`;
 
-  // 未知命令
+  // Unknown command
   if (!KNOWN_COMMANDS.has(cmd.command)) {
-    const text = `❌ 未知命令：\`mem:${cmd.command}\`。输入 \`mem:help\` 查看可用命令。`;
+    const text = `❌ Unknown command: \`mem:${cmd.command}\`. Type \`mem:help\` to see available commands.`;
     return {
       success: false,
       messageText: text,
@@ -68,7 +68,7 @@ export async function executeMemCommand(
     case "session-reset":
       return executeSessionReset(ctx);
     default: {
-      const text = `❌ 未知命令：\`mem:${cmd.command}\``;
+      const text = `❌ Unknown command: \`mem:${cmd.command}\``;
       return {
         success: false,
         messageText: text,

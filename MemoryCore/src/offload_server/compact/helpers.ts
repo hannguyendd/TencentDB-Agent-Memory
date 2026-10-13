@@ -3,19 +3,19 @@
  * Handles multiple message formats (OpenAI, Anthropic, OpenClaw).
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * OpenClaw 消息格式说明（来源：@mariozechner/pi-ai 类型定义）
+ * OpenClaw message format notes (source: @mariozechner/pi-ai type definitions)
  * ═══════════════════════════════════════════════════════════════════════════
  *
- * OpenClaw 内部使用统一的 AgentMessage 联合类型，包含以下几种消息：
+ * OpenClaw uses a unified AgentMessage union type internally, covering the following message kinds:
  *
  * ── 1. UserMessage ──
  * {
  *   role: "user",
- *   content: string | ContentBlock[],  // string 或 [{type:"text",text:"..."}] 或含图片块
+ *   content: string | ContentBlock[],  // string, or [{type:"text",text:"..."}], or including image blocks
  *   timestamp: number,
  * }
  *
- * ── 2. AssistantMessage（纯文本回复）──
+ * ── 2. AssistantMessage (plain text reply) ──
  * {
  *   role: "assistant",
  *   content: [{ type: "text", text: "..." }],
@@ -27,50 +27,50 @@
  *   usage: { input, output, totalTokens, ... },
  * }
  *
- * ── 3. AssistantMessage（含 tool_use / toolCall）──
+ * ── 3. AssistantMessage (with tool_use / toolCall) ──
  * {
  *   role: "assistant",
  *   content: [
- *     { type: "text", text: "I'll read the file..." },     // 可选文本块
+ *     { type: "text", text: "I'll read the file..." },     // optional text block
  *     { type: "toolCall", id: "call_abc123", name: "read_file", arguments: { path: "..." } },
  *     { type: "toolCall", id: "call_def456", name: "exec", arguments: { cmd: "..." } },
  *   ],
  *   stopReason: "toolUse",
- *   ...同上
+ *   ...same as above
  * }
- * 注: Anthropic 原生格式使用 { type: "tool_use", id, name, input }
- *     OpenClaw 内部统一为 { type: "toolCall", id, name, arguments }
- *     但消息到达后端时**两种格式都可能出现**（取决于客户端是否已转换），
- *     因此本模块所有判断都同时匹配 "tool_use" 和 "toolCall"。
+ * Note: Anthropic's native format uses { type: "tool_use", id, name, input }
+ *     OpenClaw unifies it internally as { type: "toolCall", id, name, arguments }
+ *     but when messages reach the backend **either format may appear** (depending on whether the client has already converted),
+ *     so every check in this module matches both "tool_use" and "toolCall".
  *
  * ── 4. ToolResultMessage ──
  * {
  *   role: "toolResult",
- *   toolCallId: "call_abc123",           // 对应 AssistantMessage 中 toolCall 的 id
+ *   toolCallId: "call_abc123",           // corresponds to the id of the toolCall in the AssistantMessage
  *   toolName: "read_file",
- *   content: [{ type: "text", text: "文件内容..." }],
+ *   content: [{ type: "text", text: "file content..." }],
  *   isError: false,
  *   timestamp: number,
- *   details?: any,                       // 可选的详细信息（不发给 LLM）
+ *   details?: any,                       // optional details (not sent to the LLM)
  * }
  *
- * ── 5. 消息配对规则 ──
- * - 每个 AssistantMessage 中的 toolCall 必须有对应的 ToolResultMessage
- * - toolCallId 是配对的唯一标识
- * - 删除 tool_result 时必须同时删除对应的 assistant toolCall（否则 provider 返回 400）
- * - 一个 assistant 消息可包含多个 toolCall（并行工具调用）
+ * ── 5. Message pairing rules ──
+ * - Every toolCall in an AssistantMessage must have a matching ToolResultMessage
+ * - toolCallId is the sole pairing identifier
+ * - When deleting a tool_result, the corresponding assistant toolCall must be deleted too (otherwise the provider returns 400)
+ * - One assistant message may contain multiple toolCalls (parallel tool calls)
  *
- * ── 6. 转换到 LLM Provider 原生格式 ──
+ * ── 6. Conversion to the LLM provider's native format ──
  * OpenAI:     toolResult → { role: "tool", tool_call_id: "...", content: "..." }
  * Anthropic:  toolResult → { role: "user", content: [{ type: "tool_result", tool_use_id: "...", content: "..." }] }
- * 注: 本模块处理的是 **转换后** 的消息（发送给 provider 前的格式），
- *     因此需要兼容所有上述格式。
+ * Note: this module handles **converted** messages (the format before sending to the provider),
+ *     so it must be compatible with all the formats above.
  *
- * ── 7. 特殊标记字段（本模块使用）──
- * - _offloaded: boolean          — 已被 summary 替换的 tool_result
- * - _mmdContextMessage: string   — MMD 注入消息标记（"active" | "history"）
- * - _mmdInjection: boolean       — 历史 MMD 注入消息标记
- * - _mmdVersion: string          — MMD 内容哈希，用于版本去重
+ * ── 7. Special marker fields (used by this module) ──
+ * - _offloaded: boolean          — tool_result already replaced by a summary
+ * - _mmdContextMessage: string   — MMD injection message marker ("active" | "history")
+ * - _mmdInjection: boolean       — historical MMD injection message marker
+ * - _mmdVersion: string          — MMD content hash, used for version dedup
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import type { OffloadEntry } from "../types.js";
@@ -184,7 +184,7 @@ export function replaceWithSummary(msg: Message, entry: OffloadEntry): void {
     `Summary: ${entry.summary}`,
   ];
   if (entry.result_ref) {
-    parts.push(`原始工具结果已存档，如需查看完整内容请调用 tdai_read_file(path="${entry.result_ref}")`);
+    parts.push(`The original tool result has been archived; to view the full content call tdai_read_file(path="${entry.result_ref}")`);
   }
   const summaryContent = parts.join("\n");
 
@@ -259,7 +259,7 @@ function estimateTextTokens(text: string): number {
 }
 
 /**
- * Estimate tokens for a message using CJK-aware heuristic (中文/1.7 + 非中文/4).
+ * Estimate tokens for a message using CJK-aware heuristic (CJK/1.7 + non-CJK/4).
  */
 export function estimateMessageTokens(msg: Message): number {
   const content = msg.content ?? msg.message?.content ?? "";

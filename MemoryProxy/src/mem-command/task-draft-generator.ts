@@ -1,132 +1,132 @@
 /**
- * task-draft-generator · mem:create-task / mem:update-task 的 LLM 草稿生成器。
+ * task-draft-generator - LLM draft generator for mem:create-task / mem:update-task.
  *
- * proxy 主动向 LLM 发起请求的模块，直接调用 OpenAI-compatible
- * chat/completions + AbortSignal.timeout，不引第三方 SDK。
+ * A module where the proxy proactively issues requests to the LLM, calling OpenAI-compatible
+ * chat/completions directly with AbortSignal.timeout, without any third-party SDK.
  *
- * 调用失败时返回 { ok: false, error }（显式错误），因为 Task 是持久化实体，
- * 坏草稿会污染库；上层 command 会把 error 拼进失败文案。
+ * On failure it returns { ok: false, error } (an explicit error), because a Task is a persistent entity
+ * and a bad draft would pollute the store; the upper-layer command appends the error to the failure message.
  *
- * 使用方：mem-command/commands/create-task.ts / update-task.ts（阶段 3.2 / 3.3）
+ * Used by: mem-command/commands/create-task.ts / update-task.ts (stage 3.2 / 3.3)
  *
- * 参考：docs/design/... TODO(阶段5) 补设计文档
+ * Reference: docs/design/... TODO(stage 5) add design doc
  */
 
-/** LLM 端点配置。 */
+/** LLM endpoint configuration. */
 export interface TaskDraftConfig {
-  /** 总开关。默认 false —— 未启用时命令层直接返"未配置"错误。 */
+  /** Master switch. Defaults to false -- when disabled the command layer returns a "not configured" error directly. */
   enabled: boolean;
-  /** 模型名，如 "deepseek-v3-0324"。 */
+  /** Model name, e.g. "deepseek-v3-0324". */
   model: string;
   /**
-   * API 端点 base（不含具体 endpoint）。按 protocol 拼接：
+   * API endpoint base (without the specific endpoint). Joined according to protocol:
    *   openai:    `${url}/chat/completions`
    *   anthropic: `${url}/v1/messages`
    *   responses: `${url}/responses`
    */
   url: string;
-  /** API Key。openai/responses 用 Bearer，anthropic 用 x-api-key。 */
+  /** API Key. openai/responses use Bearer, anthropic uses x-api-key. */
   apiKey: string;
-  /** 单次调用超时（毫秒）。建议 15000-30000（草稿要写完整）。 */
+  /** Per-call timeout (ms). 15000-30000 recommended (the draft must be written in full). */
   timeoutMs: number;
   /**
-   * 上游 API 家族。默认 "openai"（chat/completions）。
-   * 决定 attemptDraftOnce 里请求 URL / headers / body / 响应解析的形状。
+   * Upstream API family. Defaults to "openai" (chat/completions).
+   * Determines the shape of the request URL / headers / body / response parsing in attemptDraftOnce.
    */
   protocol?: "openai" | "anthropic" | "responses";
 }
 
-/** 最近对话消息片段（供 LLM 理解上下文）。 */
+/** Recent conversation message snippet (gives the LLM context). */
 export interface DraftMessage {
   role: "user" | "assistant" | "system";
   content: string;
 }
 
-/** 现有 Task（update 模式必填）。 */
+/** Existing Task (required in update mode). */
 export interface CurrentTask {
   title: string;
   description: string;
   status: string;
 }
 
-/** 生成器输入。 */
+/** Generator input. */
 export interface TaskDraftInput {
-  /** create：新建一个 task；update：基于现有 task 判定变更 + 改写。 */
+  /** create: create a new task; update: decide changes and rewrite based on the existing task. */
   mode: "create" | "update";
-  /** 用户 mem:create-task/update-task 后的额外提示（reason），可空。 */
+  /** Extra hint (reason) the user wrote after mem:create-task/update-task; may be empty. */
   hint?: string;
-  /** 最近对话消息（proxy 从 sessionMessages 剪出来，通常近 30 条）。 */
+  /** Recent conversation messages (the proxy slices them from sessionMessages, usually the latest 30). */
   recentMessages: DraftMessage[];
-  /** update 模式必填，其它模式忽略。 */
+  /** Required in update mode, ignored in other modes. */
   currentTask?: CurrentTask;
   /**
-   * 仅 create 模式生效。用户已在 mem:create-task 后写明 title，proxy 强制锁定：
-   * LLM 只负责根据对话生成 description，返回的 title 字段会被忽略。
-   * 上层调用方需自行把 lockedTitle 传下来（generator 不做 40 字截断，调用方保证）。
+   * Only effective in create mode. The user already wrote a title after mem:create-task, and the proxy locks it:
+   * the LLM only generates the description from the conversation, and the returned title field is ignored.
+   * The upstream caller must pass lockedTitle down itself (the generator does not truncate to 40 chars; the caller guarantees it).
    */
   lockedTitle?: string;
 }
 
-/** 生成器输出：成功携带结构化草稿；失败带 error 文案。 */
+/** Generator output: on success carries a structured draft; on failure carries an error message. */
 export type TaskDraftResult =
   | {
       ok: true;
       title: string;
       description: string;
-      /** 建议状态，允许模型给出（可选）。 */
+      /** Suggested status, which the model may provide (optional). */
       suggestedStatus?: string;
       /**
-       * 仅 update 模式有效。false 表示"最近对话未产生新进展，Task 无需更新"—— 上层
-       * 应直接返"Task 无需更新"给用户，不再进弹窗流程。create 模式恒为 true。
+       * Only meaningful in update mode. false means "the recent conversation produced no new progress; the Task needs no update" -- the upper layer
+       * should return "Task needs no update" to the user directly and skip the dialog flow. Always true in create mode.
        */
       changed: boolean;
     }
   | { ok: false; error: string };
 
 /**
- * Status 校验（放宽版）：
- *   按 TAPD 需求 & 用户决策，proxy 不做 status 枚举校验，LLM 出啥透传啥；
- *   仅做 trim + 空/非字符串过滤，最终由内核决定是否接受。
+ * Status validation (relaxed):
+ *   Per the TAPD requirement & user decision, the proxy does not validate status against an enum; whatever the LLM emits is passed through;
+ *   only trim + empty/non-string filtering is done, and the kernel finally decides whether to accept it.
  */
 const MAX_STATUS_LEN = 40;
-/** 输出 schema 上限。 */
+/** Output schema limits. */
 const MAX_TITLE_LEN = 40;
 const MAX_DESC_LEN = 300;
-/** 最近对话截断（防 prompt 过长）。 */
+/** Recent conversation truncation (prevents an overlong prompt). */
 const MAX_RECENT_MSGS = 30;
 const MAX_MSG_CONTENT_LEN = 800;
 /**
- * LLM 单次生成的 token 上限。
+ * Token limit for a single LLM generation.
  *
- * 从 800 提到 2000（2026-08-18 修复）：实际观察到 desc + title + status + JSON
- * 结构字符总量在中英混杂场景经常 >800 而被截断，导致 JSON 中途结束 parse 失败。
- * 参考：wiki-ingest 用 8192，L1 extractor 用 4096；本处 draft 输出限制在 title≤40
- * + desc≤300 + status，理论最大 ~800 字符 → tokens 上限给 2000 有充分余量。
+ * Raised from 800 to 2000 (fixed 2026-08-18): in practice the total of desc + title + status + JSON
+ * structural characters often exceeds 800 in mixed Chinese/English scenarios and got truncated, so the JSON ended midway and parsing failed.
+ * Reference: wiki-ingest uses 8192, the L1 extractor uses 4096; here the draft output is limited to title<=40
+ * + desc<=300 + status, theoretical max ~800 characters -> a 2000 token limit leaves ample headroom.
  */
 const LLM_MAX_TOKENS = 2000;
 
 /**
- * LLM 调用重试策略（2026-08-18 加入）。
+ * LLM call retry policy (added 2026-08-18).
  *
- * 触发场景：LLM 偶发抖动（空对象 / 截断 / 超时），单次成功率不到 100%，
- * 但连续 2 次全部空对象/截断的概率很低。用户视角：无感，一次点击 = 一次成功。
+ * Scenario: the LLM occasionally flakes (empty object / truncation / timeout), so single-call success is below 100%,
+ * but the chance of 2 consecutive empty-object/truncated results is very low. From the user's view it is seamless: one click = one success.
  *
- * 参数：
- *   - LLM_RETRY_MAX_ATTEMPTS=4：总共 4 次机会（1 次首发 + 3 次重试）
- *   - LLM_RETRY_BASE_DELAY_MS=200：指数退避基数，第 2/3/4 次分别等 200/400/800ms
+ * Parameters:
+ *   - LLM_RETRY_MAX_ATTEMPTS=4: 4 chances in total (1 initial attempt + 3 retries)
+ *   - LLM_RETRY_BASE_DELAY_MS=200: exponential backoff base; attempts 2/3/4 wait 200/400/800ms respectively
  *
- * 什么时候重试：只要 attemptDraftOnce 返回 ok=false 就重试（不区分具体错误类型，
- * 因为空对象 / 截断 / schema 违规 / 上游 5xx 都是"再来一次可能就好了"的情况）。
- * 什么时候不重试：cfg.enabled=false / 参数校验不通过 / 3 次都失败。
+ * When to retry: retry whenever attemptDraftOnce returns ok=false (no distinction between error types,
+ * since empty object / truncation / schema violation / upstream 5xx are all cases where "trying again may just work").
+ * When not to retry: cfg.enabled=false / parameter validation fails / all attempts failed.
  */
 const LLM_RETRY_MAX_ATTEMPTS = 4;
 const LLM_RETRY_BASE_DELAY_MS = 200;
 
 /**
- * 首次尝试的超时上限（2026-08-20）：现网观察到 gateway 偶发挂 20-30s，
- * 首次就用 cfg.timeoutMs（默认 30s）会让用户干等。首次改成 min(cfg.timeoutMs,
- * FIRST_TIMEOUT_MS=10s)，超时后立刻退避 200ms + retry，retry 用完整 timeoutMs
- * 兜底"真的慢但会成功"的场景。env TDAI_TASK_DRAFT_FIRST_TIMEOUT_MS 可覆盖。
+ * Timeout cap for the first attempt (2026-08-20): in production the gateway occasionally hangs for 20-30s,
+ * and using cfg.timeoutMs (default 30s) on the first try makes users wait. The first attempt now uses min(cfg.timeoutMs,
+ * FIRST_TIMEOUT_MS=10s); after a timeout it backs off 200ms and retries, and the retry uses the full timeoutMs
+ * as a safety net for the "really slow but will succeed" case. Can be overridden by env TDAI_TASK_DRAFT_FIRST_TIMEOUT_MS.
  */
 const LLM_FIRST_ATTEMPT_TIMEOUT_MS_DEFAULT = 10_000;
 
@@ -137,45 +137,45 @@ function firstAttemptTimeoutMs(configuredTimeoutMs: number): number {
     const n = Number(raw);
     if (Number.isFinite(n) && n > 0) cap = n;
   }
-  // 不能超过配置本身（不然改动无效）
+  // Must not exceed the configured value itself (otherwise the change has no effect)
   return Math.min(configuredTimeoutMs, cap);
 }
 
 /**
- * 智能拼接 taskDraft 请求 URL —— 处理 "base 尾巴可能已经带了 endpoint 前缀段" 的坑。
+ * Smartly join the taskDraft request URL -- handles the pitfall where "the base tail may already contain a leading segment of the endpoint".
  *
- * ## 背景（2026-09-01 修复 Claude Code 404）
+ * ## Background (2026-09-01 fix for Claude Code 404)
  *
- * 主链路（guard-adapter.joinUrl）的约定：`upstream.agents[x].url` 里的 `/v1`、`/v2`
- * 尾巴是 base 的一部分，endpoint 只写路径尾段（如 anthropic 用 `/messages`）。
- * 例如配置里：
- *   claude-code.url = "https://copilot.tencent.com/v1"   （base 自带 /v1 尾巴）
- *   codebuddy.url   = "https://copilot.tencent.com/v2"   （base 自带 /v2 尾巴）
- *   codex.url       = "https://copilot.tencent.com"      （base 是根，不带前缀）
+ * Convention of the main path (guard-adapter.joinUrl): the `/v1`, `/v2` tail in `upstream.agents[x].url`
+ * is part of the base, and the endpoint only writes the trailing path segment (e.g. anthropic uses `/messages`).
+ * For example in the config:
+ *   claude-code.url = "https://copilot.tencent.com/v1"   (base carries a /v1 tail)
+ *   codebuddy.url   = "https://copilot.tencent.com/v2"   (base carries a /v2 tail)
+ *   codex.url       = "https://copilot.tencent.com"      (base is the root, no prefix)
  *
- * 但 taskDraft 生成器为了自包含，写的 endpoint 是"完整路径"：
- *   anthropic  → "/v1/messages"
- *   openai     → "/chat/completions"（本来就没歧义）
- *   responses  → "/responses"
+ * But the taskDraft generator, to be self-contained, writes the endpoint as a "full path":
+ *   anthropic  -> "/v1/messages"
+ *   openai     -> "/chat/completions" (unambiguous anyway)
+ *   responses  -> "/responses"
  *
- * 直接 `${base}${endpoint}` 会踩：
- *   base=".../v1" + endpoint="/v1/messages" → ".../v1/v1/messages" ❌ 404
+ * Plain `${base}${endpoint}` would break:
+ *   base=".../v1" + endpoint="/v1/messages" -> ".../v1/v1/messages" ❌ 404
  *
- * ## 拼接规则
+ * ## Joining rules
  *
- * 1. base 已经完整以 endpoint 结尾 → 原样返回（幂等，处理 base 直接是完整 URL 的场景）
- * 2. base 已经以 endpoint **的开头段**结尾（如 base=`.../v1`，endpoint=`/v1/messages`）
- *    → 去掉 base 已有的那段前缀，只拼剩下的（`.../v1/messages`）
- * 3. base 与 endpoint 无重合 → 直接拼（`.../responses`）
+ * 1. base already ends with the whole endpoint -> return as-is (idempotent; handles a base that is already a full URL)
+ * 2. base already ends with **a leading segment of** the endpoint (e.g. base=`.../v1`, endpoint=`/v1/messages`)
+ *    -> strip that existing prefix from the endpoint and append only the rest (`.../v1/messages`)
+ * 3. base and endpoint do not overlap -> join directly (`.../responses`)
  *
- * 参考主链路 joinUrl 的处理（guard-adapter.ts:326）。
+ * See the main path's joinUrl handling (guard-adapter.ts:326).
  */
 export function joinTaskDraftUrl(base: string, endpoint: string): string {
   const normalized = base.replace(/\/+$/, "");
-  // 规则 1：完全相等
+  // Rule 1: exact match
   if (normalized.endsWith(endpoint)) return normalized;
-  // 规则 2：endpoint 可分段（如 "/v1/messages" → ["v1", "messages"]），从长到短
-  // 检查 base 是否已经带了 endpoint 的开头段。命中即剥离。
+  // Rule 2: the endpoint can be split into segments (e.g. "/v1/messages" -> ["v1", "messages"]); from longest to shortest,
+  // check whether base already carries a leading segment of the endpoint. Strip it on a hit.
   const segs = endpoint.split("/").filter(Boolean);
   for (let i = segs.length - 1; i > 0; i--) {
     const prefix = "/" + segs.slice(0, i).join("/");
@@ -183,14 +183,14 @@ export function joinTaskDraftUrl(base: string, endpoint: string): string {
       return normalized + "/" + segs.slice(i).join("/");
     }
   }
-  // 规则 3：无重合，直接拼
+  // Rule 3: no overlap, join directly
   return normalized + endpoint;
 }
 
 /**
- * 指令关键词剥离表：LLM 有时会把用户输入的原始指令字面搬进 title（如
- * "Fix mem:create-task LLM ..."），这些前缀既冗余又占字符预算。
- * 匹配到就截掉，让真正的语义部分能落到 40 字以内。
+ * Command keyword stripping table: the LLM sometimes copies the user's raw command verbatim into the title (e.g.
+ * "Fix mem:create-task LLM ..."); such prefixes are redundant and eat the character budget.
+ * Strip them when matched so the real semantic part fits within 40 characters.
  */
 const COMMAND_KEYWORD_PATTERNS = [
   /^\s*(?:mem:[a-z-]+)\s*[:：、,，]?\s*/i,
@@ -198,12 +198,12 @@ const COMMAND_KEYWORD_PATTERNS = [
 ];
 
 /**
- * create 模式 system prompt。
+ * create-mode system prompt.
  *
- * 2026-08-18 强化（针对生产失败根因）：
- *   - 用 STRICT / MUST NOT / NEVER 等硬约束词，代替之前的 ≤ 40（LLM 会越界）
- *   - 加正确示例 + 反例，让 LLM 明确"什么是超长"、"什么是空对象"
- *   - 明确禁止空对象：如果信息不够也要给合理默认，避免 `{}`
+ * Hardened 2026-08-18 (targeting the root cause of production failures):
+ *   - use hard-constraint words such as STRICT / MUST NOT / NEVER instead of the earlier <= 40 (the LLM would overshoot)
+ *   - add good and bad examples so the LLM knows exactly "what is too long" and "what is an empty object"
+ *   - explicitly forbid empty objects: if info is insufficient, give a reasonable default to avoid `{}`
  */
 const SYSTEM_PROMPT_CREATE = `You are a task drafting assistant for a coding agent's memory system.
 
@@ -212,13 +212,13 @@ Given the recent conversation, generate ONE task that captures what the user is 
 STRICT rules (violations will be rejected):
 - title: MUST be 1 to 40 characters. NEVER exceed 40. Imperative form preferred.
 - description: MUST be 1 to 300 characters, plain text. Cover three parts in order:
-    背景 (background) → 目标 (goal) → 已知约束 (known constraints)
+    Background → Goal → Known constraints
 - suggestedStatus: short lowercase word (e.g. "running", "completed").
 - NEVER return an empty object {}. If the conversation is unclear, infer a reasonable
   task from the most recent user message and produce a best-effort title + description.
 
 Examples of GOOD output:
-  {"title":"Refactor auth module","description":"背景：现有 auth 逻辑分散在 3 个文件。目标：合并到 auth-service。约束：不改动对外 API。","suggestedStatus":"running"}
+  {"title":"Refactor auth module","description":"Background: existing auth logic is spread across 3 files. Goal: merge it into auth-service. Constraint: no changes to the public API.","suggestedStatus":"running"}
 
 Examples of BAD output (DO NOT produce these):
   {}                                                     // ❌ empty object
@@ -227,7 +227,7 @@ Examples of BAD output (DO NOT produce these):
 
 Return ONLY the JSON object with keys: title, description, suggestedStatus. No prose, no markdown fence.`;
 
-/** create 模式（title 已锁定）system prompt —— 只让 LLM 出 description。 */
+/** create-mode (title locked) system prompt -- only asks the LLM for the description. */
 const SYSTEM_PROMPT_CREATE_LOCKED_TITLE = `You are a task drafting assistant for a coding agent's memory system.
 
 The user has ALREADY specified the task title. Your ONLY job is to write a good description
@@ -235,14 +235,14 @@ based on the recent conversation that matches this title.
 
 STRICT rules:
 - description: MUST be 1 to 300 characters, plain text. Cover three parts:
-    背景 → 目标 → 已知约束
+    Background → Goal → Known constraints
 - NEVER return an empty object {}. If unclear, infer a best-effort description from the title
   and most recent messages.
 - Do NOT include title in the output (it is fixed by the user).
 
 Return ONLY a JSON object with a single key: description. No prose, no markdown fence.`;
 
-/** update 模式 system prompt。 */
+/** update-mode system prompt. */
 const SYSTEM_PROMPT_UPDATE = `You are a task update assistant for a coding agent's memory system.
 
 Given an existing task and recent conversation, decide:
@@ -250,11 +250,11 @@ Given an existing task and recent conversation, decide:
 2. If yes, produce an updated description and a suggested status.
 
 Classify what changed into ONE OR MORE of these five categories (only if applicable):
-  - 目标调整 (goal changes)
-  - 约束 (constraint changes)
-  - 进展 (progress)
-  - 关联链接 (linked resources / references)
-  - 参与 Agent (collaborating agents)
+  - goal changes
+  - constraint changes
+  - progress
+  - linked resources / references
+  - collaborating agents
 
 STRICT rules:
 - If NO meaningful update → return {"changed": false}
@@ -267,7 +267,7 @@ STRICT rules:
 Return ONLY a JSON object. No prose, no markdown fence.`;
 
 /**
- * 构造发给 LLM 的 user message。
+ * Build the user message sent to the LLM.
  */
 function buildUserMessage(input: TaskDraftInput): string {
   const lines: string[] = [];
@@ -307,28 +307,28 @@ function buildUserMessage(input: TaskDraftInput): string {
 }
 
 /**
- * 从 LLM 原始输出里提取 JSON 对象。
+ * Extract a JSON object from the raw LLM output.
  *
- * 三级降级：
- *   1) 直接 JSON.parse —— 覆盖标准场景
- *   2) 剥离 markdown fence（```json ... ``` 或 ``` ... ```）后再 parse
- *   3) 括号平衡扫描：找到第一个 `{`，向后配对到匹配的 `}` 截取子串再 parse
- *      —— 覆盖 LLM 前后加了自然语言的场景，如：
- *      "好的，这是 JSON：{...}"、"Here you go:\n{...}\n希望有帮助"
+ * Three-level fallback:
+ *   1) direct JSON.parse -- covers the standard case
+ *   2) strip the markdown fence (```json ... ``` or ``` ... ```) and then parse
+ *   3) bracket-balanced scan: find the first `{`, pair forward to the matching `}`, slice the substring and parse
+ *      -- covers cases where the LLM added natural language around it, e.g.:
+ *      "Sure, here is the JSON: {...}", "Here you go:\n{...}\nHope this helps"
  *
- * 扫描时会正确处理字符串字面量内的 `{` `}` `"`（不参与平衡计数）。
+ * The scan correctly handles `{` `}` `"` inside string literals (they do not count toward balancing).
  *
- * 若三级都失败返回 null（调用方产出 "LLM output is not valid JSON" 错误）。
+ * If all three levels fail, returns null (the caller produces a "LLM output is not valid JSON" error).
  */
 export function extractJsonObject(raw: string): unknown | null {
-  // 1) 直接 parse
+  // 1) direct parse
   try {
     return JSON.parse(raw);
   } catch {
     // fall-through
   }
 
-  // 2) 剥离 markdown fence
+  // 2) strip markdown fence
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fenceMatch && fenceMatch[1]) {
     try {
@@ -338,7 +338,7 @@ export function extractJsonObject(raw: string): unknown | null {
     }
   }
 
-  // 3) 括号平衡扫描
+  // 3) bracket-balanced scan
   const balanced = findBalancedJsonObject(raw);
   if (balanced !== null) {
     try {
@@ -352,8 +352,8 @@ export function extractJsonObject(raw: string): unknown | null {
 }
 
 /**
- * 括号平衡扫描：从 raw 里找第一个能自洽闭合的 `{...}` 子串。
- * 状态机处理字符串字面量与转义，防止字符串里的 `{}` 干扰计数。
+ * Bracket-balanced scan: find the first self-consistently closed `{...}` substring in raw.
+ * The state machine handles string literals and escapes so `{}` inside strings does not disturb counting.
  */
 function findBalancedJsonObject(raw: string): string | null {
   const start = raw.indexOf("{");
@@ -394,14 +394,14 @@ function findBalancedJsonObject(raw: string): string | null {
 }
 
 /**
- * 归一化字符串字段：trim + 长度校验。
+ * Normalize a string field: trim + length validation.
  *
  * mode:
- *   - "strict"（默认）：超长返 null（老行为，用于必须严格的场景）
- *   - "clip"：超长自动截到 maxLen（保留有效内容，用于 title/description
- *     这类"哪怕不完美也比失败强"的字段）
+ *   - "strict" (default): return null when too long (legacy behavior, for cases that must be strict)
+ *   - "clip": auto-truncate to maxLen when too long (keeps useful content; for title/description
+ *     fields where "imperfect is better than failing")
  *
- * 空字符串一律返 null（没有任何截断能救空串）。
+ * An empty string always returns null (no truncation can rescue an empty string).
  */
 function normalizeStr(
   v: unknown,
@@ -418,10 +418,10 @@ function normalizeStr(
 }
 
 /**
- * 从 title 里剥离 mem:xxx 之类的指令关键词前缀。
- * LLM 常把用户当前指令写进 title（如 "Fix mem:create-task JSON parse"），
- * 剥离后能让真正的语义部分不超字数上限。
- * 只剥前缀、不剥中间；空匹配就原样返回。
+ * Strip a command-keyword prefix such as mem:xxx from the title.
+ * The LLM often writes the user's current command into the title (e.g. "Fix mem:create-task JSON parse"),
+ * and stripping it keeps the real semantic part within the length limit.
+ * Only prefixes are stripped, not the middle; an empty match returns the input unchanged.
  */
 function stripCommandKeywords(s: string): string {
   let out = s;
@@ -431,7 +431,7 @@ function stripCommandKeywords(s: string): string {
   return out.trim();
 }
 
-/** 归一化 status 字段：可选，允许缺失；不做枚举校验，只做基本清洗。 */
+/** Normalize the status field: optional, may be missing; no enum validation, only basic cleanup. */
 function normalizeStatus(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const s = v.trim();
@@ -440,14 +440,14 @@ function normalizeStatus(v: unknown): string | undefined {
 }
 
 /**
- * 生成 Task 草稿（带自动 retry）。
+ * Generate a Task draft (with automatic retry).
  *
- * 外层职责：
- *   - 前置参数校验（不重试）
- *   - 循环调 attemptDraftOnce，最多 LLM_RETRY_MAX_ATTEMPTS 次
- *   - 每次失败记录日志（attempt=N/M reason=xxx），指数退避后再试
+ * Outer responsibilities:
+ *   - upfront parameter validation (no retry)
+ *   - loop calling attemptDraftOnce, at most LLM_RETRY_MAX_ATTEMPTS times
+ *   - log every failure (attempt=N/M reason=xxx), then retry after exponential backoff
  *
- * @returns { ok:true, ... } 或 { ok:false, error }
+ * @returns { ok:true, ... } or { ok:false, error }
  */
 export async function generateTaskDraft(
   cfg: TaskDraftConfig,
@@ -463,7 +463,7 @@ export async function generateTaskDraft(
     return { ok: false, error: "no recent messages to draft from" };
   }
 
-  // 入口观测：每次 generateTaskDraft 都记录目标 upstream/model/protocol，方便对齐 handler 传参
+  // Entry observability: every generateTaskDraft records the target upstream/model/protocol, to help match the handler's arguments
   console.log(
     `[task-draft] START mode=${input.mode} protocol=${cfg.protocol ?? "openai"} url=${cfg.url} model=${cfg.model} msgs=${input.recentMessages.length}${input.lockedTitle ? ` lockedTitle="${input.lockedTitle}"` : ""}`,
   );
@@ -478,8 +478,8 @@ export async function generateTaskDraft(
   for (let attempt = 1; attempt <= LLM_RETRY_MAX_ATTEMPTS; attempt++) {
     const result = await attemptDraftOnce(cfg, input, systemPrompt, userMessage, attempt);
     if (result.ok) {
-      // 成功日志（每次都打，方便看抖动率和实际 attempt 消耗）
-      // attempt>1 时额外带 RETRY_SUCCEEDED 关键字，便于日志聚合看"抖动最终自愈"的次数。
+      // Success log (printed every time, to see the flake rate and actual attempt consumption)
+      // When attempt>1 the RETRY_SUCCEEDED keyword is added, so log aggregation can count how often a flake eventually self-healed.
       const titlePreview = "title" in result && result.title
         ? result.title.length > 40 ? `${result.title.slice(0, 40)}...` : result.title
         : "(no-title)";
@@ -490,7 +490,7 @@ export async function generateTaskDraft(
       return result;
     }
     lastError = result.error;
-    // 最后一次失败，不再等待
+    // Last failure, no more waiting
     if (attempt < LLM_RETRY_MAX_ATTEMPTS) {
       const delay = LLM_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1);
       console.log(
@@ -507,13 +507,13 @@ export async function generateTaskDraft(
 }
 
 /**
- * 单次 LLM 调用 + 结果解析。**内部函数，外层不要直接调**。
+ * Single LLM call + result parsing. **Internal function; callers outside must not call it directly**.
  *
- * 与老的 generateTaskDraft 主体逻辑一致，只是：
- *   - 参数校验移到了外层
- *   - 加了 finish_reason / usage / http_status 观测日志（第一次成功也打，方便看抖动率）
+ * Same main logic as the old generateTaskDraft, except:
+ *   - parameter validation moved to the outer layer
+ *   - added finish_reason / usage / http_status observability logs (also printed on first success, to see the flake rate)
  *
- * attempt 参数只用于日志。
+ * The attempt parameter is only used for logging.
  */
 async function attemptDraftOnce(
   cfg: TaskDraftConfig,
@@ -523,21 +523,21 @@ async function attemptDraftOnce(
   attempt: number,
 ): Promise<TaskDraftResult> {
   let resp: Response;
-  // 首次用短 timeout（默认 10s），后续用完整 cfg.timeoutMs
+  // Use a short timeout on the first attempt (default 10s), and the full cfg.timeoutMs afterwards
   const effectiveTimeoutMs = attempt === 1 ? firstAttemptTimeoutMs(cfg.timeoutMs) : cfg.timeoutMs;
   const protocol = cfg.protocol ?? "openai";
-  // 记录拼接后的完整 URL，用于观测日志（定位路径拼错，如 /v1/v1/messages）
+  // Record the full joined URL for observability logs (to spot wrong path joins such as /v1/v1/messages)
   let fetchUrl = cfg.url;
   try {
     if (protocol === "anthropic") {
-      // Anthropic Messages API：/v1/messages，system 走顶层字段，x-api-key + anthropic-version
-      // 拼接用 joinTaskDraftUrl：base 可能已经带 /v1 尾巴（主链路约定），避免拼成 /v1/v1/messages
-      // ⚠️ copilot 上游对 /v1/messages **强制返 SSE 流式**（非流式返 200 + event-stream body
-      // 会让 JSON.parse 直接爆 "Unexpected token 'e', event: mes..."）。因此显式设 stream:true
-      // 并走 parseAnthropicStream 累积 content_block_delta。与 openai 分支的策略一致。
-      // ⚠️ 认证头同时发 x-api-key（原生 Anthropic 规范）和 Authorization: Bearer（OpenAI
-      // 风格的兼容层，如 rcaaitoken——它用 Anthropic Messages 报文格式但只认 Bearer）。
-      // 原生 Anthropic 会忽略 Authorization，兼容层会忽略 x-api-key，两边都不会冲突。
+      // Anthropic Messages API: /v1/messages, system goes in a top-level field, x-api-key + anthropic-version
+      // Join with joinTaskDraftUrl: base may already carry a /v1 tail (main-path convention), avoiding /v1/v1/messages
+      // ⚠️ The copilot upstream **forces SSE streaming** for /v1/messages (a non-streaming request returns 200 + an event-stream body,
+      // making JSON.parse blow up with "Unexpected token 'e', event: mes..."). So stream:true is set explicitly
+      // and parseAnthropicStream accumulates content_block_delta. Same strategy as the openai branch.
+      // ⚠️ The auth headers send both x-api-key (native Anthropic spec) and Authorization: Bearer (OpenAI-
+      // style compatibility layers, e.g. rcaaitoken -- which uses the Anthropic Messages payload format but only accepts Bearer).
+      // Native Anthropic ignores Authorization and compatibility layers ignore x-api-key, so there is no conflict on either side.
       fetchUrl = joinTaskDraftUrl(cfg.url, "/v1/messages");
       resp = await fetch(fetchUrl, {
         method: "POST",
@@ -558,13 +558,13 @@ async function attemptDraftOnce(
         signal: AbortSignal.timeout(effectiveTimeoutMs),
       });
     } else if (protocol === "responses") {
-      // OpenAI Responses API：/responses，instructions 走顶层字段，input[] 结构化，
-      // token 上限字段名是 max_output_tokens。Bearer auth。
-      // 上游 codex base 是根（不带 /v1/v2 前缀），joinTaskDraftUrl 里规则 3 走"直接拼"分支。
-      // ⚠️ copilot 上游对 /responses 同样**强制返 SSE 流式**（非流式请求会被 200 + event-stream
-      // body 回给你，客户端按 JSON 直接爆 "Unexpected token 'e', event: res..."）。因此
-      // 显式 stream:true，走 parseResponsesStream 累积 response.output_text.delta。
-      // 与 anthropic/openai 分支的策略一致 —— copilot 三协议全强制流式。
+      // OpenAI Responses API: /responses, instructions go in a top-level field, input[] is structured,
+      // the token limit field is named max_output_tokens. Bearer auth.
+      // The upstream codex base is the root (no /v1/v2 prefix), so rule 3 ("join directly") in joinTaskDraftUrl applies.
+      // ⚠️ The copilot upstream likewise **forces SSE streaming** for /responses (a non-streaming request gets a 200 + event-stream
+      // body back, and the client parsing it as JSON blows up with "Unexpected token 'e', event: res..."). So
+      // stream:true is set explicitly and parseResponsesStream accumulates response.output_text.delta.
+      // Same strategy as the anthropic/openai branches -- copilot forces streaming on all three protocols.
       fetchUrl = joinTaskDraftUrl(cfg.url, "/responses");
       resp = await fetch(fetchUrl, {
         method: "POST",
@@ -585,13 +585,13 @@ async function attemptDraftOnce(
         signal: AbortSignal.timeout(effectiveTimeoutMs),
       });
     } else {
-      // OpenAI chat/completions（默认）。
-      // ⚠️ copilot 上游强制要求 stream:true（非流式返 400 "Non-stream chat request
-      // is currently not supported"）。因此去掉 response_format（流式下部分上游不认），
-      // JSON 靠 prompt 约束 + 三级 extractJsonObject 兜底。stream_options.include_usage
-      // 让上游末尾额外回一个 usage chunk 用于观测。
-      // base 通常自带 /v2 尾巴（主链路约定），joinTaskDraftUrl 里规则 3 走"直接拼"分支
-      // 得到 .../v2/chat/completions（endpoint 与 base 无重合）。
+      // OpenAI chat/completions (default).
+      // ⚠️ The copilot upstream requires stream:true (non-streaming returns 400 "Non-stream chat request
+      // is currently not supported"). So response_format is dropped (some upstreams do not accept it when streaming),
+      // JSON relies on prompt constraints + the three-level extractJsonObject fallback. stream_options.include_usage
+      // makes the upstream send one extra usage chunk at the end for observability.
+      // base usually carries a /v2 tail (main-path convention), so rule 3 ("join directly") in joinTaskDraftUrl applies
+      // yielding .../v2/chat/completions (endpoint and base do not overlap).
       fetchUrl = joinTaskDraftUrl(cfg.url, "/chat/completions");
       resp = await fetch(fetchUrl, {
         method: "POST",
@@ -621,7 +621,7 @@ async function attemptDraftOnce(
     return { ok: false, error: `LLM request failed: ${msg}` };
   }
 
-  // 每次上游返回都打 HTTP 状态（成功/失败都记录，便于定位路径拼错 / 401 / 上游 502 等）
+  // Log the HTTP status of every upstream response (success or failure, to help locate wrong path joins / 401 / upstream 502 etc.)
   console.log(
     `[task-draft] mode=${input.mode} attempt=${attempt} HTTP status=${resp.status} protocol=${protocol} url=${cfg.url} fullUrl=${fetchUrl} model=${cfg.model}`,
   );
@@ -645,7 +645,7 @@ async function attemptDraftOnce(
   let content: string | undefined;
 
   if (protocol === "openai") {
-    // 流式：读 SSE 文本，累积 delta.content + 最后 finish_reason / usage
+    // Streaming: read the SSE text, accumulate delta.content + the final finish_reason / usage
     const sse = await parseOpenAiStream(resp);
     if (sse === null) {
       return { ok: false, error: "LLM stream response unreadable" };
@@ -654,9 +654,9 @@ async function attemptDraftOnce(
     finishReason = sse.finishReason;
     completionTokens = sse.completionTokens;
   } else if (protocol === "anthropic") {
-    // Anthropic 上游同样只支持 SSE（copilot 尤其如此）。读事件流，累积
-    // content_block_delta.delta.text_delta.text；stop_reason / output_tokens 走
-    // message_delta 事件的 usage 字段。
+    // The Anthropic upstream likewise only supports SSE (the copilot one especially). Read the event stream and accumulate
+    // content_block_delta.delta.text_delta.text; stop_reason / output_tokens come from
+    // the usage field of the message_delta event.
     const sse = await parseAnthropicStream(resp);
     if (sse === null) {
       return { ok: false, error: "LLM stream response unreadable" };
@@ -665,8 +665,8 @@ async function attemptDraftOnce(
     finishReason = sse.finishReason;
     completionTokens = sse.completionTokens;
   } else {
-    // responses：copilot 上游同样强制 SSE。累积 response.output_text.delta 事件的 delta；
-    // status / usage.output_tokens 走 response.completed 事件。
+    // responses: the copilot upstream likewise forces SSE. Accumulate the delta of response.output_text.delta events;
+    // status / usage.output_tokens come from the response.completed event.
     const sse = await parseResponsesStream(resp);
     if (sse === null) {
       return { ok: false, error: "LLM stream response unreadable" };
@@ -676,20 +676,20 @@ async function attemptDraftOnce(
     completionTokens = sse.completionTokens;
   }
 
-  // 三个协议分支 content 为空时都已提前 return，到这里 content 一定非空
+  // All three protocol branches return early when content is empty, so content is guaranteed non-empty here
   if (typeof content !== "string" || content.length === 0) {
     return { ok: false, error: "LLM response content empty" };
   }
 
-  // 观测公共字段（每条 FAIL 日志都会带这些，方便一眼看出根因）
+  // Common observability fields (every FAIL log carries these, so the root cause is visible at a glance)
   const obs = `attempt=${attempt} protocol=${protocol} finish_reason=${finishReason} completion_tokens=${completionTokens}`;
 
-  // 三级兜底：直接 parse → markdown fence → 括号平衡扫描
+  // Three-level fallback: direct parse -> markdown fence -> bracket-balanced scan
   const parsed = extractJsonObject(content);
   if (parsed === null) {
-    // 关键排查日志：把 LLM 原始 content 前 500 字打出来，方便定位是哪种失败模式
-    // （标准场景 / markdown fence / 前后带自然语言 / 完全无 JSON）
-    // finish_reason=length 就说明是 max_tokens 截断，需要扩大上限
+    // Key diagnostic log: print the first 500 chars of the raw LLM content, to identify which failure mode occurred
+    // (standard case / markdown fence / natural language around it / no JSON at all)
+    // finish_reason=length means max_tokens truncation, so the limit needs raising
     console.log(
       `[task-draft] mode=${input.mode} FAIL=json_parse ${obs} content_preview=${JSON.stringify(previewContent(content))}`,
     );
@@ -704,9 +704,9 @@ async function attemptDraftOnce(
 
   const obj = parsed as Record<string, unknown>;
 
-  // update 模式：先看 changed 字段
+  // update mode: check the changed field first
   if (input.mode === "update" && obj.changed === false) {
-    // 保留 currentTask 值原样返回，changed=false 上层直接跳过弹窗
+    // Return the currentTask values unchanged; with changed=false the upper layer skips the dialog directly
     return {
       ok: true,
       changed: false,
@@ -716,10 +716,10 @@ async function attemptDraftOnce(
     };
   }
 
-  // create 模式 + lockedTitle：title 强制使用 lockedTitle，只解析 description
+  // create mode + lockedTitle: title is forced to lockedTitle, only description is parsed
   //
-  // 宽容策略（2026-08-18）：description 只在**完全缺失/空串/非字符串**时才失败；
-  // 超长自动截断到 MAX_DESC_LEN——LLM 少写几个字比返错给用户强得多。
+  // Lenient policy (2026-08-18): description fails only when **entirely missing/empty/non-string**;
+  // an overlong one is auto-truncated to MAX_DESC_LEN -- the LLM writing a few fewer characters beats returning an error to the user.
   if (input.mode === "create" && input.lockedTitle) {
     const description = normalizeStr(obj.description, MAX_DESC_LEN, "clip");
     if (!description) {
@@ -738,9 +738,9 @@ async function attemptDraftOnce(
     };
   }
 
-  // title 归一化：先剥指令关键词前缀，再走 clip 模式。
-  //   典型场景："Fix mem:create-task JSON parse failure"（42 字，会因超 40 拒绝）
-  //   → 剥离 "Fix mem:create-task " → "JSON parse failure"（更精炼且不超字）
+  // Title normalization: strip the command-keyword prefix first, then use clip mode.
+  //   Typical case: "Fix mem:create-task JSON parse failure" (42 chars, would be rejected for exceeding 40)
+  //   -> strip "Fix mem:create-task " -> "JSON parse failure" (tighter and within the limit)
   const rawTitle = typeof obj.title === "string" ? stripCommandKeywords(obj.title) : obj.title;
   const title = normalizeStr(rawTitle, MAX_TITLE_LEN, "clip");
   if (!title) {
@@ -768,8 +768,8 @@ async function attemptDraftOnce(
 }
 
 /**
- * 日志辅助：截断长字符串，防止 LLM 洗版把日志撑爆。
- * 500 字够看清 JSON 结构与主要内容，多余的用 `...[truncated N]` 标记。
+ * Log helper: truncate long strings so an LLM flood does not blow up the logs.
+ * 500 chars suffice to see the JSON structure and main content; the rest is marked with `...[truncated N]`.
  */
 function previewContent(s: string): string {
   const MAX = 500;
@@ -777,8 +777,8 @@ function previewContent(s: string): string {
 }
 
 /**
- * 日志辅助：把已解析的 obj 序列化为紧凑字符串再截断（保留结构）。
- * 用于失败分支——让排查时能一眼看到 LLM 到底填了什么字段、什么值。
+ * Log helper: serialize the parsed obj to a compact string and then truncate (keeping the structure).
+ * Used in failure branches -- so that troubleshooting can see at a glance which fields and values the LLM actually filled in.
  */
 function previewObj(obj: Record<string, unknown>): string {
   try {
@@ -789,14 +789,14 @@ function previewObj(obj: Record<string, unknown>): string {
 }
 
 /**
- * 解析 OpenAI chat/completions 的 SSE 流式响应。
+ * Parse the SSE streaming response of OpenAI chat/completions.
  *
- * copilot 上游只支持 stream:true，返回 `text/event-stream`，每行形如
- * `data: {...}`，末尾 `data: [DONE]`。这里累积所有 `choices[].delta.content`
- * 片段拼成完整正文，并记录最后一个非空 finish_reason，以及
- * stream_options.include_usage=true 时末尾 usage chunk 的 completion_tokens。
+ * The copilot upstream only supports stream:true and returns `text/event-stream`, with each line shaped like
+ * `data: {...}` and a trailing `data: [DONE]`. Here all `choices[].delta.content`
+ * fragments are accumulated into the full body, recording the last non-empty finish_reason, plus
+ * the completion_tokens of the final usage chunk when stream_options.include_usage=true.
  *
- * 返回 null 表示流读取失败（body 读不到 / 无有效 content）。
+ * Returns null to indicate a stream read failure (body unreadable / no valid content).
  */
 async function parseOpenAiStream(resp: Response): Promise<{
   content: string;
@@ -824,7 +824,7 @@ async function parseOpenAiStream(resp: Response): Promise<{
     try {
       evt = JSON.parse(dataStr) as Record<string, unknown>;
     } catch {
-      continue; // keep-alive / 半包等，忽略
+      continue; // keep-alive / partial packets etc., ignore
     }
 
     const choices = evt.choices;
@@ -852,9 +852,9 @@ async function parseOpenAiStream(resp: Response): Promise<{
 }
 
 /**
- * 解析 Anthropic Messages API 的 SSE 流式响应。
+ * Parse the SSE streaming response of the Anthropic Messages API.
  *
- * copilot 上游对 /v1/messages 强制返 SSE（`text/event-stream`），格式：
+ * The copilot upstream forces SSE (`text/event-stream`) for /v1/messages, in the format:
  *   event: message_start
  *   data: {"type":"message_start", "message":{...,"usage":{"input_tokens":N,"output_tokens":M}}}
  *
@@ -870,16 +870,16 @@ async function parseOpenAiStream(resp: Response): Promise<{
  *   event: message_stop
  *   data: {"type":"message_stop"}
  *
- * 提取：
- *   - content = 所有 content_block_delta.delta.text_delta.text 顺序拼接
- *   - finishReason = message_delta.delta.stop_reason（若无则 unknown）
+ * Extraction:
+ *   - content = all content_block_delta.delta.text_delta.text concatenated in order
+ *   - finishReason = message_delta.delta.stop_reason (unknown if absent)
  *   - completionTokens = message_delta.usage.output_tokens
- *     （若上游把 output_tokens 塞在 message_start.message.usage 里也接住，取最后一次覆盖）
+ *     (if the upstream puts output_tokens in message_start.message.usage, that is also picked up; the last value overrides)
  *
- * 与 parseOpenAiStream 一致：忽略 `event:` 行、忽略 keep-alive/半包 JSON、
- * 忽略非 text_delta 的 delta（如 input_json_delta 用于 tool_use，本场景不需要）。
+ * Consistent with parseOpenAiStream: ignore `event:` lines, ignore keep-alive/partial JSON,
+ * ignore non-text_delta deltas (e.g. input_json_delta is for tool_use and not needed here).
  *
- * 返回 null 表示：body 读不到 / 累积到最后 content 为空（无 text_delta）。
+ * Returns null to indicate: body unreadable / content empty at the end of accumulation (no text_delta).
  */
 async function parseAnthropicStream(resp: Response): Promise<{
   content: string;
@@ -899,7 +899,7 @@ async function parseAnthropicStream(resp: Response): Promise<{
 
   for (const rawLine of text.split("\n")) {
     const line = rawLine.trim();
-    // 只关心 `data:` 行；`event:` 行仅用于分隔事件，不含负载
+    // Only `data:` lines matter; `event:` lines only separate events and carry no payload
     if (!line.startsWith("data:")) continue;
     const dataStr = line.slice(5).trim();
     if (!dataStr) continue;
@@ -908,12 +908,12 @@ async function parseAnthropicStream(resp: Response): Promise<{
     try {
       evt = JSON.parse(dataStr) as Record<string, unknown>;
     } catch {
-      continue; // keep-alive / 半包等，忽略
+      continue; // keep-alive / partial packets etc., ignore
     }
 
     const evtType = evt.type;
 
-    // 1) content_block_delta：累积文本
+    // 1) content_block_delta: accumulate text
     if (evtType === "content_block_delta") {
       const delta = evt.delta as Record<string, unknown> | undefined;
       if (delta && delta.type === "text_delta" && typeof delta.text === "string" && delta.text.length > 0) {
@@ -922,7 +922,7 @@ async function parseAnthropicStream(resp: Response): Promise<{
       continue;
     }
 
-    // 2) message_delta：拿 stop_reason + output_tokens
+    // 2) message_delta: get stop_reason + output_tokens
     if (evtType === "message_delta") {
       const delta = evt.delta as Record<string, unknown> | undefined;
       if (delta && typeof delta.stop_reason === "string") {
@@ -935,7 +935,7 @@ async function parseAnthropicStream(resp: Response): Promise<{
       continue;
     }
 
-    // 3) message_start：有些上游会把 output_tokens 塞在这里（可能为 0/1，先接住兜底）
+    // 3) message_start: some upstreams put output_tokens here (may be 0/1; pick it up as a fallback first)
     if (evtType === "message_start") {
       const message = evt.message as Record<string, unknown> | undefined;
       const usage = message?.usage as Record<string, unknown> | undefined;
@@ -944,7 +944,7 @@ async function parseAnthropicStream(resp: Response): Promise<{
       }
       continue;
     }
-    // 其余 event（content_block_start / content_block_stop / message_stop / ping）无需处理
+    // Other events (content_block_start / content_block_stop / message_stop / ping) need no handling
   }
 
   const content = parts.join("");
@@ -953,10 +953,10 @@ async function parseAnthropicStream(resp: Response): Promise<{
 }
 
 /**
- * 解析 OpenAI Responses API 的 SSE 流式响应。
+ * Parse the SSE streaming response of the OpenAI Responses API.
  *
- * copilot 上游对 /responses 强制返 SSE（`text/event-stream`）。事件流格式（
- * 见 https://platform.openai.com/docs/api-reference/responses-streaming）：
+ * The copilot upstream forces SSE (`text/event-stream`) for /responses. Event stream format (
+ * see https://platform.openai.com/docs/api-reference/responses-streaming):
  *
  *   event: response.created
  *   data: {"type":"response.created","response":{"id":"resp_x","status":"in_progress",...}}
@@ -971,21 +971,21 @@ async function parseAnthropicStream(resp: Response): Promise<{
  *   data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"..."}
  *
  *   event: response.output_text.done
- *   data: {"type":"response.output_text.done","output_index":0,"content_index":0,"text":"完整文本"}
+ *   data: {"type":"response.output_text.done","output_index":0,"content_index":0,"text":"full text"}
  *
  *   event: response.completed
  *   data: {"type":"response.completed","response":{"status":"completed","usage":{"output_tokens":42},...}}
  *
- * 提取：
- *   - content = 所有 response.output_text.delta.delta 顺序拼接
- *     （fallback：若无 delta 事件但有 response.output_text.done，直接用 done.text）
- *   - finishReason = response.completed.response.status（"completed" / "incomplete" 等）
+ * Extraction:
+ *   - content = all response.output_text.delta.delta concatenated in order
+ *     (fallback: if there is no delta event but there is response.output_text.done, use done.text directly)
+ *   - finishReason = response.completed.response.status ("completed" / "incomplete" etc.)
  *   - completionTokens = response.completed.response.usage.output_tokens
  *
- * 忽略 event: 分隔行 / 半包 JSON / 其它未识别事件（如 response.in_progress、
- * response.output_item.done、response.reasoning_summary_* 等）。
+ * Ignore event: separator lines / partial JSON / other unrecognized events (such as response.in_progress,
+ * response.output_item.done, response.reasoning_summary_* etc.).
  *
- * 返回 null 表示：body 读不到 / 累积到最后 content 为空。
+ * Returns null to indicate: body unreadable / content empty at the end of accumulation.
  */
 async function parseResponsesStream(resp: Response): Promise<{
   content: string;
@@ -1000,8 +1000,8 @@ async function parseResponsesStream(resp: Response): Promise<{
   }
 
   const parts: string[] = [];
-  // 兜底：若上游不发 delta 而只发一次 output_text.done（罕见但按规范允许），
-  // 保留最后一次 done.text 作为 fallback。
+  // Fallback: if the upstream sends no delta and only a single output_text.done (rare but allowed by the spec),
+  // keep the last done.text as the fallback.
   let doneText: string | null = null;
   let finishReason = "unknown";
   let completionTokens = -1;
@@ -1021,7 +1021,7 @@ async function parseResponsesStream(resp: Response): Promise<{
 
     const evtType = evt.type;
 
-    // 1) response.output_text.delta：主路径，累积增量文本
+    // 1) response.output_text.delta: main path, accumulate incremental text
     if (evtType === "response.output_text.delta") {
       const delta = evt.delta;
       if (typeof delta === "string" && delta.length > 0) {
@@ -1030,7 +1030,7 @@ async function parseResponsesStream(resp: Response): Promise<{
       continue;
     }
 
-    // 2) response.output_text.done：fallback，拿完整 text（当无 delta 时兜底用）
+    // 2) response.output_text.done: fallback, take the full text (used as a fallback when there is no delta)
     if (evtType === "response.output_text.done") {
       const t = evt.text;
       if (typeof t === "string" && t.length > 0) {
@@ -1039,7 +1039,7 @@ async function parseResponsesStream(resp: Response): Promise<{
       continue;
     }
 
-    // 3) response.completed：拿最终 status / usage
+    // 3) response.completed: take the final status / usage
     if (evtType === "response.completed") {
       const response = evt.response as Record<string, unknown> | undefined;
       if (response) {
@@ -1053,11 +1053,11 @@ async function parseResponsesStream(resp: Response): Promise<{
       }
       continue;
     }
-    // 其余事件（response.created / response.in_progress / response.output_item.* /
-    // response.content_part.* / response.reasoning_summary_* / ping 等）无需处理
+    // Other events (response.created / response.in_progress / response.output_item.* /
+    // response.content_part.* / response.reasoning_summary_* / ping etc.) need no handling
   }
 
-  // 优先用 delta 拼接结果；delta 全无时才回落到 done.text
+  // Prefer the delta-concatenated result; fall back to done.text only when there are no deltas at all
   const content = parts.length > 0 ? parts.join("") : (doneText ?? "");
   if (content.length === 0) return null;
   return { content, finishReason, completionTokens };

@@ -1,12 +1,12 @@
 /**
- * LoginGate 登录页样式 —— 单列居中的明亮极简风格。
+ * LoginGate login page styles — single-column centered, bright minimalist style.
  *
- * 视觉基调：接近纯白的柔和渐变底 + 点阵波纹动效（Canvas）+ 居中毛玻璃卡片。
- * 目标是"简洁明亮"：弱化装饰、强化内容层级（logo → 标题 → 表单 → 主按钮）。
+ * Visual tone: a soft gradient background close to pure white + dot-matrix wave animation (Canvas) + a centered frosted-glass card.
+ * The goal is "clean and bright": de-emphasize decoration and strengthen content hierarchy (logo → title → form → primary button).
  *
- * 说明：登录页是独立全屏场景，不套 ConsoleLayout，因此这里直接写死明亮基调色，
- * 不使用控制台的 Tea 背景 token；文字与描边仍尽量走 Tea token 保持一致性。
- * 深色模式下整体转为深底浅字（见文件末尾 .dark 分支）。
+ * Note: the login page is a standalone full-screen scene and is not wrapped in ConsoleLayout, so the bright base colors are hard-coded here,
+ * not the console's Tea background tokens; text and borders still use Tea tokens where possible for consistency.
+ * In dark mode everything switches to dark background with light text (see the .dark branch at the end of the file).
  */
 
 ._tdai-login {
@@ -15,12 +15,12 @@
   z-index: 100;
   display: flex;
   overflow-y: auto;
-  /* 顶部微冷白 → 底部略暖白的柔和渐变，营造"光从上方来"的明亮感 */
+  /* Soft gradient from slightly cool white at the top to slightly warm white at the bottom, creating a bright "light from above" feel */
   background:
     radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #f7f9fc 45%, #eef2f7 100%);
 }
 
-/* ===== 动效背景层 ===== */
+/* ===== Animated background layer ===== */
 ._tdai-login-bg {
   position: absolute;
   inset: 0;
@@ -34,11 +34,11 @@
   height: 100%;
 }
 
-/* 中心加一层柔光，让卡片区域更亮、四周自然收敛（避免点阵抢视觉） */
-/* 中心加一层柔光，让卡片区域更亮、四周自然收敛。
-   注意：伪元素绘制在 canvas 之上，透明度过高会直接盖掉点阵动效
-   （之前中心用 0.92 白，点阵几乎完全不可见）。表单可读性由卡片自身的
-   毛玻璃底色保证，这里只做很弱的提亮。 */
+/* Add a soft glow in the center to brighten the card area and let the surroundings fade naturally (so the dot matrix does not steal attention) */
+/* Add a soft glow in the center to brighten the card area and let the surroundings fade naturally.
+   Note: the pseudo-element is painted above the canvas, and too high an opacity would cover the dot-matrix animation directly
+   (previously the center used 0.92 white, making the dots almost completely invisible). Form readability is guaranteed by the card's own
+   frosted-glass background; only a very subtle brightening is done here. */
 ._tdai-login-bg::after {
   content: '';
   position: absolute;
@@ -51,7 +51,7 @@
   );
 }
 
-/* ===== 内容区 ===== */
+/* ===== Content area ===== */
 ._tdai-login-main {
   position: relative;
   z-index: 1;
@@ -105,14 +105,14 @@
   text-align: center;
 }
 
-/* ===== 表单 ===== */
+/* ===== Form ===== */
 ._tdai-login-form {
   width: 100%;
   margin-top: 28px;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  /* 表单内元素统一左对齐（卡片本身是 center 对齐的） */
+  /* Elements inside the form are uniformly left-aligned (the card itself is center-aligned) */
   align-items: stretch;
   text-align: left;
 }
@@ -141,7 +141,7 @@
   margin: 0;
 }
 
-/* 主按钮：加高、圆角、深色实底，贴合参考稿的"大号主行动按钮" */
+/* Primary button: taller, rounded, solid dark fill, matching the "large primary action button" in the reference design" */
 ._tdai-login-submit.tea-btn {
   width: 100%;
   height: 42px;
@@ -171,10 +171,10 @@
 }
 
 /*
- * 登录方式互跳链接（user_key 页 → iOA，iOA 确认页 → user_key）。
+ * Login-method switch links (user_key page → iOA, iOA confirmation page → user_key).
  *
- * 用链接而非整宽按钮：它是"换一种方式"的旁路入口，不能和主操作
- * （登录 / 确认创建）抢视觉权重，否则又变回一个隐性的方式选择页。
+ * Use a link rather than a full-width button: it is a side entry for "use another method" and must not fight with the primary action
+ * (login / confirm creation) for visual weight, otherwise it turns back into an implicit method selection page.
  */
 ._tdai-login-switch {
   margin-top: 16px;
@@ -197,7 +197,7 @@
   text-align: center;
 }
 
-/* Tea 表单控件在本页统一撑满宽度（Select 的 button 外观默认按内容宽度） */
+/* Tea form controls fill the full width on this page (a Select's button appearance defaults to content width) */
 ._tdai-login-form .tea-form-control,
 ._tdai-login-form .tea-dropdown,
 ._tdai-login-form .tea-select {
@@ -208,7 +208,7 @@
   width: 100%;
 }
 
-/* ===== 窄屏适配 ===== */
+/* ===== Narrow-screen adaptation ===== */
 @media (max-width: 480px) {
   ._tdai-login-main {
     padding: 24px 16px;
@@ -225,7 +225,7 @@
   }
 }
 
-/* ===== 深色模式 ===== */
+/* ===== Dark mode ===== */
 .dark ._tdai-login {
   background: radial-gradient(120% 80% at 50% -10%, #131c2e 0%, #0f172a 45%, #0b1120 100%);
 }

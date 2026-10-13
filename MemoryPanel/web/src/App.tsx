@@ -1,16 +1,16 @@
 /**
- * App.tsx — 根组件
+ * App.tsx — Root component
  *
- * 职责：
- *   1. 管理登录态（zustand auth store，对接新面板 Control 的 sessionStorage 会话）
- *   2. 启动时读取本地会话缓存是否有效（checkSession）：
- *        - 检测中 → loading
- *        - 未登录 → LoginGate
- *        - 已登录 → RouterProvider（ConsoleLayout + pages）
- *   3. 初始化 team store 的事件同步
- *   4. 同步 react-i18next 语言 → tea-component ConfigProvider，
- *      让 tea-component 内置组件文案（StatusTip 加载中、Table 暂无数据 等）
- *      随用户切换语言自动跟随。
+ * Responsibilities:
+ *   1. Manage login state (zustand auth store, backed by the new panel Control's sessionStorage session)
+ *   2. On startup, check whether the cached local session is valid (checkSession):
+ *        - Checking → loading
+ *        - Not logged in → LoginGate
+ *        - Logged in
+ *   3. Initialize event sync for the team store
+ *   4. Sync the react-i18next language → tea-component ConfigProvider,
+ *      so built-in tea-component texts (StatusTip loading, Table no data, etc.)
+ *      follow the user's language switch automatically.
  */
 import { useEffect, useState } from 'react';
 import { RouterProvider } from 'react-router-dom';
@@ -20,7 +20,7 @@ import LoginGate from '@/components/LoginGate';
 import { useAuthStore } from '@/stores/auth';
 import { router } from '@/routes';
 
-/** react-i18next 语言 → tea-component locale 映射 */
+/** react-i18next language → tea-component locale mapping */
 function toTeaLocale(lang: string): 'zh' | 'en' {
   return lang.startsWith('zh') ? 'zh' : 'en';
 }
@@ -30,10 +30,10 @@ export default function App() {
   const auth = useAuthStore((s) => s.auth);
   const setAuth = useAuthStore((s) => s.setAuth);
   const checkSession = useAuthStore((s) => s.checkSession);
-  // 当前 tea-component locale，跟 react-i18next 同步
+  // Current tea-component locale, kept in sync with react-i18next
   const [teaLocale, setTeaLocale] = useState<'zh' | 'en'>(() => toTeaLocale(i18n.language));
 
-  // 监听 react-i18next 语言切换，同步给 tea-component
+  // Listen for react-i18next language changes and sync them to tea-component tea-component
   useEffect(() => {
     setTeaLocale(toTeaLocale(i18n.language));
     const handler = (lng: string) => setTeaLocale(toTeaLocale(lng));
@@ -41,7 +41,7 @@ export default function App() {
     return () => i18n.off('languageChanged', handler);
   }, [i18n]);
 
-  // 启动时读取 sessionStorage 缓存的 { instance_id, user_key, user } 是否有效
+  // On startup, check whether the sessionStorage-cached { instance_id, user_key, user } is valid
   useEffect(() => {
     checkSession();
   }, [checkSession]);

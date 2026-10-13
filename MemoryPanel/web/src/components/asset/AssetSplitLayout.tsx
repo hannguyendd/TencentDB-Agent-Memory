@@ -1,10 +1,10 @@
 /**
- * AssetSplitLayout — 资产管理页通用分栏布局。
+ * AssetSplitLayout — Generic split-pane layout for asset management pages.
  *
- * 统一 Skills / Memory 等资产页的「左侧列表 + 右侧详情」分栏结构：
- * - 左右宽度可拖拽调节，比例记忆到 localStorage（同一浏览器下次保留）
- * - 右侧详情设最大高度，内容超出时在详情区内部滚动，不撑开外层页面高度
- *   （外层容器不出现滚动条）
+ * Unifies the "left list + right detail" split structure of asset pages such as Skills / Memory:
+ * - Left/right widths are drag-adjustable; the ratio is remembered in localStorage (kept next time in the same browser)
+ * - The right detail pane has a max height; overflowing content scrolls inside the detail area without stretching the outer page height
+ *   (the outer container shows no scrollbar)
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -14,7 +14,7 @@ import './asset-split-layout.css';
 interface AssetSplitLayoutProps {
   sidebar: ReactNode;
   detail: ReactNode;
-  /** 拖拽宽度的持久化 key（不同页面互不干扰）；不传则不持久化 */
+  /** Persistence key for the dragged width (pages do not interfere with each other); not persisted if omitted */
   storageKey?: string;
 }
 
@@ -43,7 +43,7 @@ export function AssetSplitLayout({ sidebar, detail, storageKey }: AssetSplitLayo
   const [dragging, setDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 拖拽过程：以容器左边界为基准计算左栏宽度，限制在 [MIN, MAX] 内
+  // While dragging: compute the left column width relative to the container's left edge, clamped within [MIN, MAX]
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: MouseEvent) => {
@@ -55,7 +55,7 @@ export function AssetSplitLayout({ sidebar, detail, storageKey }: AssetSplitLayo
     const onUp = () => setDragging(false);
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-    // 拖拽时禁用文本选中，避免选到列表内容
+    // Disable text selection while dragging to avoid selecting list content
     const prevUserSelect = document.body.style.userSelect;
     document.body.style.userSelect = 'none';
     return () => {
@@ -65,13 +65,13 @@ export function AssetSplitLayout({ sidebar, detail, storageKey }: AssetSplitLayo
     };
   }, [dragging]);
 
-  // 拖拽结束后持久化最终宽度
+  // Persist the final width after dragging ends
   useEffect(() => {
     if (dragging || !storageKey) return;
     try {
       window.localStorage.setItem(storageKey, String(sidebarWidth));
     } catch {
-      /* localStorage 不可用时静默忽略，仅影响记忆能力 */
+      /* localStorage unavailable: silently ignore; only affects the remembering ability */
     }
   }, [dragging, sidebarWidth, storageKey]);
 
@@ -93,7 +93,7 @@ export function AssetSplitLayout({ sidebar, detail, storageKey }: AssetSplitLayo
         aria-label={t('assetSplit.resizer.label')}
         onMouseDown={onHandleMouseDown}
         onKeyDown={(e) => {
-          // 键盘可达：左右箭头以 16px 步进调整左栏宽度
+          // Keyboard accessible: left/right arrows adjust the left column width in 16px steps
           if (e.key === 'ArrowLeft') {
             e.preventDefault();
             setSidebarWidth((w) => clampWidth(w - 16));

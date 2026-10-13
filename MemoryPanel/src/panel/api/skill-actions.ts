@@ -1,16 +1,16 @@
 /**
- * 内核 /v3/skill/* 数据面 action 列表（14 条，全部 POST）。
+ * Action list for the kernel /v3/skill/* data plane (14 actions, all POST).
  *
- * 对接文档：tdai-memory-openclaw-plugin/docs/skill-api-for-frontend.md
+ * Reference doc: tdai-memory-openclaw-plugin/docs/skill-api-for-frontend.md
  *
- * 与 /v3/meta/* 不同点：
- *   - skill 数据面自带独立存储（skill_id 前缀 skl-），团队内可读、owner agent 可写；
- *   - 身份字段（user_id / team_id / agent_id / task_id）放在 body，不放 Header；
- *   - 分页用嵌套 pagination.{limit,offset}，不是顶层 limit/offset，故不需要 meta 的
- *     sanitizeBody 逻辑，body 原样透传即可。
+ * Differences from /v3/meta/*:
+ *   - The skill data plane has its own storage (skill_id prefix skl-); readable within the team, writable by the owner agent;
+ *   - Identity fields (user_id / team_id / agent_id / task_id) go in the body, not headers;
+ *   - Pagination uses nested pagination.{limit,offset} rather than top-level limit/offset, so meta's
+ *     sanitizeBody logic is not needed; the body can be passed through as-is.
  */
 
-/** 读操作（可选 agent_id）；此处仅用于文档标注，透传不区分。 */
+/** Read operations (agent_id optional); used here only for documentation, passthrough does not distinguish. */
 export const SKILL_LIST_ACTIONS = new Set(['list', 'search', 'versions']);
 
 export const SKILL_ACTIONS = [

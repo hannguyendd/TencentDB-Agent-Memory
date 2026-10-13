@@ -1,6 +1,6 @@
 /**
- * MemberSection —— team 成员列表 + 移除操作。
- * AddMemberDialog / CreatedUserKeyModal —— 添加已有用户 / 新建用户弹窗。
+ * MemberSection - team member list + remove action.
+ * AddMemberDialog / CreatedUserKeyModal - dialogs for adding existing users / creating new users.
  */
 
 import { useState } from 'react';
@@ -27,7 +27,7 @@ export function MemberSection({
 }) {
   const [removing, setRemoving] = useState<string | null>(null);
   const { t } = useTranslation();
-  // 只有全局 admin 或 team admin/owner 才能添加成员；普通成员无此入口。
+  // Only global admin or team admin/owner can add members; regular members have no such entry.
   const canAddMember = _globalAdmin || isTeamAdmin(team, currentUser);
 
   async function handleRemove(userId: string) {
@@ -153,9 +153,9 @@ function MemberCard({
 // =================== Add/create member dialog ===================
 
 /**
- * 添加用户 — 两种模式：
- *   - 添加已有用户：按已知 user_id 加入 team
- *   - 新建用户并加入团队：调 meta/user/create 创建用户账号，再自动加入 team
+ * Add user - two modes:
+ *   - Add existing user: join the team by a known user_id
+ *   - Create user and join team: call meta/user/create to create the account, then auto-join the team
  */
 export function AddMemberDialog({
   team,
@@ -166,7 +166,7 @@ export function AddMemberDialog({
 }: {
   team: Team;
   onClose: () => void;
-  /** 新建用户成功后，回调父组件展示初始 API Key */
+  /** After a new user is created successfully, callback for the parent to show the initial API Key */
   onCreatedUser?: (info: { username: string; userId: string; keyValue: string }) => void;
   currentUser: string;
   isAdmin: boolean;
@@ -178,15 +178,15 @@ export function AddMemberDialog({
   const [submitting, setSubmitting] = useState(false);
   const { t } = useTranslation();
 
-  // 新建用户表单
+  // New user form
   const [newUsername, setNewUsername] = useState('');
-  // 自定义 user_key 开关（仅新建用户模式生效）：默认关 → 内核自动生成；开启 → 走 user/create-with-key
+  // Custom user_key switch (only effective in create-user mode): off by default → kernel auto-generates; on → uses user/create-with-key
   const [customKeyEnabled, setCustomKeyEnabled] = useState(false);
   const [customKey, setCustomKey] = useState('');
 
   const canGrantAdmin = isTeamAdmin(team, currentUser) || _globalAdmin;
-  // user/create 须 system_admin 权限（见 docs/api/metadata-api.md §1.4），
-  // 非 全局 admin 调了必 403 —— 这里直接隐藏"新建用户"选项，避免用户操作后才报错。
+  // user/create requires system_admin permission (see docs/api/metadata-api.md §1.4),
+  // a non-global admin would get 403 - so hide the "create user" option directly to avoid an error after the user acts.
   const canCreateUser = _globalAdmin;
 
 
@@ -220,12 +220,12 @@ export function AddMemberDialog({
       setError(t('addMember.error.emptyName'));
       return;
     }
-    // 用户名只允许英文字母、数字、下划线（与后端 user_id 段校验规则一致）
+    // Username may only contain English letters, digits and underscores (consistent with backend user_id segment validation rules)
     if (!/^[A-Za-z0-9_]+$/.test(username)) {
       setError(t('addMember.error.invalidName'));
       return;
     }
-    // 自定义 key 模式下额外校验 user_key 非空
+    // In custom key mode, additionally validate that user_key is non-empty
     const trimmedKey = customKey.trim();
     if (customKeyEnabled && !trimmedKey) {
       setError(t('addMember.error.emptyKey'));
@@ -234,9 +234,9 @@ export function AddMemberDialog({
     setSubmitting(true);
     setError(null);
     try {
-      // Step 1: 创建用户
-      //   - 默认走 meta/user/create（内核自动生成 default_user_key）
-      //   - 开启「自定义 user_key」→ 走 meta/user/create-with-key，把 key 交给内核作为默认 key
+      // Step 1: create user
+      //   - Default uses meta/user/create (kernel auto-generates default_user_key)
+      //   - With "custom user_key" on → uses meta/user/create-with-key, handing the key to the kernel as the default key
       const created = customKeyEnabled
         ? await usersApi.createWithKey({ username, user_key: trimmedKey })
         : await usersApi.create({
@@ -245,10 +245,10 @@ export function AddMemberDialog({
             external_id: username,
           });
       const keyValue = created.default_user_key ?? '';
-      // Step 3: 自动加入当前 team
+      // Step 3: auto-join the current team
       await membersApi.add(team.team_id, { user_id: created.user_id, role });
       invalidateBackendCache();
-      // Step 4: 关闭添加弹窗，通过回调让父组件展示密钥弹窗
+      // Step 4: close the add dialog and let the parent show the key dialog via callback
       onClose();
       onCreatedUser?.({
         username,
@@ -349,9 +349,9 @@ export function AddMemberDialog({
           </Form.Item>
 
           {/*
-            自定义 user_key 开关：
-            - 关（默认）：走 user/create，内核自动生成 default_user_key（现有行为）
-            - 开：走 user/create-with-key，把用户指定的 key 作为默认 key
+            Custom user_key switch:
+            - Off (default): uses user/create, kernel auto-generates default_user_key (existing behavior)
+            - On: uses user/create-with-key, using the user-specified key as the default key
           */}
           <Form.Item label={t('addMember.customKey.label')}>
             <div>
@@ -412,7 +412,7 @@ export function AddMemberDialog({
 }
 
 /**
- * 创建用户成功后展示初始 API Key —— 仅此一次，关闭后无法再次获取。
+ * After creating a user, show the initial API Key - once only; it cannot be retrieved again after closing.
  */
 export function CreatedUserKeyModal({
   info,

@@ -1,42 +1,42 @@
 /**
- * AssetListPanel — 资产管理页通用左侧列表面板。
+ * AssetListPanel — Generic left-side list panel for asset management pages.
  *
- * 统一 Skills / Memory 等资产页的左侧导航列表容器，提供：
- *   - 面板标题 + 条数统计
- *   - 加载骨架屏
- *   - 空态提示
- *   - 选中态管理（浅品牌底色，无边框）
- *   - 统一的列表项 4 行结构（标题 / 描述 / 徽章 / 元信息）
+ * Unifies the left-side navigation list container of asset pages such as Skills / Memory, providing:
+ *   - Panel title + item count
+ *   - Loading skeleton
+ *   - Empty-state hint
+ *   - Selection state management (light brand background, no border)
+ *   - Unified 4-row list item structure (title / description / badge / meta)
  *
- * 列表项内容通过 render prop 由各资产页自行填充，
- * 保持容器与业务解耦。
+ * List item content is filled in by each asset page via a render prop,
+ * keeping the container decoupled from business logic.
  */
 
 import type { ReactNode } from 'react';
 import './asset-list-panel.css';
 
-/* ── 面板 ── */
+/* ── Panel ── */
 
 interface AssetListPanelProps<T> {
-  /** 面板标题 */
+  /** Panel title */
   title: ReactNode;
-  /** 条数统计文本 */
+  /** Item count text */
   count?: ReactNode;
-  /** 是否加载中 */
+  /** Whether loading */
   loading?: boolean;
-  /** 数据项 */
+  /** Data items */
   items: T[];
-  /** 当前选中项 id */
+  /** Currently selected item id id */
   selectedId?: string | null;
-  /** 从数据项提取唯一 id */
+  /** Extract a unique id from a data item id */
   getItemId: (item: T) => string;
-  /** 选中回调 */
+  /** Selection callback */
   onSelect: (item: T) => void;
-  /** 渲染单个列表项内容（不含外层选中态容器） */
+  /** Render a single list item's content (excluding the outer selection-state container) */
   renderItem: (item: T, isSelected: boolean) => ReactNode;
-  /** 判断某项是否禁用（不可点击） */
+  /** Determine whether an item is disabled (not clickable) */
   isItemDisabled?: (item: T) => boolean;
-  /** 空态文本 */
+  /** Empty-state text */
   emptyText?: ReactNode;
 }
 
@@ -104,14 +104,14 @@ export function AssetListPanel<T>({
   );
 }
 
-/* ── 列表项内容区 — 标准化 4 行结构 ── */
+/* ── List item content area — standardized 4-row structure ── */
 
-/** 标题行：主标识 + 可选操作按钮 */
+/** Title row: primary identifier + optional action button */
 export function AssetItemHeader({ children }: { children: ReactNode }) {
   return <div className="_alp-item-header">{children}</div>;
 }
 
-/** 名称 / 标题文本 */
+/** Name / title text */
 export function AssetItemName({ children, title }: { children: ReactNode; title?: string }) {
   return (
     <span className="_alp-item-name" title={title}>
@@ -120,7 +120,7 @@ export function AssetItemName({ children, title }: { children: ReactNode; title?
   );
 }
 
-/** 资产真实 id —— 弱化展示，附在名称旁，便于识别 ID 化命名的资产（name + id 组合） */
+/** Real asset id — shown de-emphasized next to the name, to help identify assets with ID-based naming (name + id combination) */
 export function AssetItemId({ children }: { children: ReactNode }) {
   return (
     <span className="_alp-item-id" title={typeof children === 'string' ? children : undefined}>
@@ -129,17 +129,17 @@ export function AssetItemId({ children }: { children: ReactNode }) {
   );
 }
 
-/** 描述文本（2 行截断） */
+/** Description text (truncated to 2 lines) */
 export function AssetItemDesc({ children }: { children: ReactNode }) {
   return <p className="_alp-item-desc">{children}</p>;
 }
 
-/** 徽章行容器 */
+/** Badge row container */
 export function AssetItemBadges({ children }: { children: ReactNode }) {
   return <div className="_alp-item-badges">{children}</div>;
 }
 
-/** 纯文本徽章 — 替代亮色 Tag */
+/** Plain-text badge — replaces the bright Tag Tag */
 export function AssetBadge({
   icon,
   children,
@@ -157,17 +157,17 @@ export function AssetBadge({
   );
 }
 
-/** "含你"/"你" 标识 — 品牌色纯文本 */
+/** "Includes you"/"You" marker — brand-color plain text */
 export function AssetBadgeYou({ children }: { children: ReactNode }) {
   return <span className="_alp-badge-you">{children}</span>;
 }
 
-/** 元信息行容器 */
+/** Meta row container */
 export function AssetItemMeta({ children }: { children: ReactNode }) {
   return <div className="_alp-item-meta">{children}</div>;
 }
 
-/** 元信息右侧时间 */
+/** Meta right-side time */
 export function AssetItemTime({ children }: { children: ReactNode }) {
   return <span className="_alp-item-time">{children}</span>;
 }

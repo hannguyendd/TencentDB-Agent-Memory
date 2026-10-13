@@ -1,15 +1,15 @@
 /**
- * stages/credit.ts — 计费上报 stage (Phase 1)。
+ * stages/credit.ts — billing report stage (Phase 1).
  *
- * 提取自 handler.ts:1972-2006 / anthropicHandler.ts:1896-1930 的完整"上报 +
- * 失败头 + 失败 raw"逻辑, 二者语义 100% 一致。
+ * Extracted from the complete "report +
+ * failure header + failure raw" logic at handler.ts:1972-2006 / anthropicHandler.ts:1896-1930; the two are 100% semantically identical.
  *
- * codex/wb 原本缺失 (handler-audit bug B2 P0), Phase 5.6 opt-in 后走本 stage
- * 自动补上; 此前 codex/wb 走 pipeline 时 stageGates.creditReport=false 保持零回归。
+ * codex/wb originally lacked it (handler-audit bug B2 P0); after Phase 5.6 opt-in it goes through this stage
+ * and is filled in automatically; before that, when codex/wb went through the pipeline stageGates.creditReport=false kept zero regression.
  *
- * ⚠️ 与 stream/non-stream 都相关: stream 完成后调用一次, non-stream 收到响应后
- * 调用一次, 各自单独覆盖 (原 handler 就是这样两处 call site 分开)。
- * 本 stage 不 hardcode "stream" vs "non-stream", 由 caller 通过 event 参数区分。
+ * WARNING: relevant to both stream/non-stream: called once after the stream completes, called
+ * once after a non-stream response is received, each covered separately (the original handler also had these as two separate call sites).
+ * This stage does not hardcode "stream" vs "non-stream"; the caller distinguishes them via the event parameter.
  */
 
 import type { ProxyConfig } from "../../types.js";
@@ -18,7 +18,7 @@ import { writeFailedReportRaw } from "../../clickhouse.js";
 import type { Pipeline } from "../../logger.js";
 
 export interface CreditStageInput {
-  /** true 时完全跳过 (custom upstream 场景); undefined 视为 false */
+  /** when true, skip entirely (custom upstream scenario); undefined is treated as false */
   skipCreditReport: boolean | undefined;
   config: Pick<ProxyConfig, "creditReport" | "creditPricing">;
   path: string;
@@ -27,9 +27,9 @@ export interface CreditStageInput {
   upstreamUrl: string;
   event: "usage";
   startTime: Date;
-  /** PipelineIds 兼容: 老 handler 传 pipe.ids() 直接进来, stage 内部只做 spread */
+  /** PipelineIds compatible: the old handler passed pipe.ids() straight in, and the stage only spreads it internally */
   reqIds: object;
-  /** 上游 x-request-id, 空串/缺省时下游走空值 */
+  /** upstream x-request-id; when empty/absent, downstream uses an empty value */
   upstreamRequestId?: string;
   sessionKey: string;
   stream: boolean;
@@ -38,23 +38,23 @@ export interface CreditStageInput {
 }
 
 export interface CreditStageResult {
-  /** 是否触发了上报 (skipCreditReport=true 时为 false) */
+  /** whether a report was triggered (false when skipCreditReport=true) */
   attempted: boolean;
-  /** 上报是否成功 (attempted=false 时无意义) */
+  /** whether the report succeeded (meaningless when attempted=false) */
   ok: boolean;
-  /** 需要塞进响应头的 x-credit-report-error 值 (仅 attempted && !ok 时) */
+  /** value of x-credit-report-error to put in the response header (only when attempted && !ok) */
   responseErrorHeader?: string;
 }
 
 /**
- * 计费上报 + 失败头 + 失败 raw 兜底记账。
+ * Billing report + failure header + failure raw fallback bookkeeping.
  *
- * 原 handler 里的三步:
+ * The three steps in the original handler:
  *   1. skipCreditReport ? no-op : tryReportCreditFromPath
- *   2. attempted && !ok → pipe.error + set 响应头 x-credit-report-error
- *   3. attempted && !ok → writeFailedReportRaw (CH 兜底)
+ *   2. attempted && !ok → pipe.error + set the x-credit-report-error response header
+ *   3. attempted && !ok → writeFailedReportRaw (CH fallback)
  *
- * 保持完全等价, 唯一改动是把响应头 set 交给 caller (返回 header 值即可)。
+ * Kept fully equivalent; the only change is handing the response-header set to the caller (just return the header value).
  */
 export async function stageCredit(input: CreditStageInput, pipe: Pipeline): Promise<CreditStageResult> {
   if (input.skipCreditReport) {

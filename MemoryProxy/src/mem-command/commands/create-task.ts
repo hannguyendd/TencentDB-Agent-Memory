@@ -1,28 +1,28 @@
 /**
- * mem:create-task — 从当前会话上下文生成 Task 并绑定到本 session。
+ * mem:create-task - generate a Task from the current session context and bind it to this session.
  *
- * 交互（对齐 TAPD 需求"用户确认"闸门）：
+ * Interaction (aligned with the TAPD requirement's "user confirmation" gate):
  *
- *   ┌ session 未绑真实 task：
- *   │    无参数 → LLM 生成 title+desc → 直接落库+绑定（无需 confirm）
- *   │    有参数 → title = 用户参数(≤40 字)，LLM 只生成 desc → 直接落库+绑定
- *   │            LLM 失败 → 降级：desc 留空，task 照样落库
+ *   ┌ session not bound to a real task:
+ *   │    no args -> LLM generates title+desc -> persist + bind directly (no confirm needed)
+ *   │    with args -> title = user argument (<=40 chars), LLM only generates desc -> persist + bind directly
+ *   │            LLM failure -> degrade: desc left empty, the task is still persisted
  *   │
- *   ├ session 已绑真实 task：
- *   │    生成新 draft → 写入 pending-store（TTL 5 分钟）→ 返"预览 + 三选一引导"：
- *   │      1) mem:create-task confirm — 覆盖绑定，新建
- *   │      2) mem:update-task [新描述] — 继续复用当前 Task 只更新描述
- *   │      3) mem:create-task cancel — 撤销
+ *   ├ session already bound to a real task:
+ *   │    generate a new draft -> write to pending-store (TTL 5 minutes) -> return "preview + three-option guidance":
+ *   │      1) mem:create-task confirm — override binding, create new
+ *   │      2) mem:update-task [new description] - keep using the current Task and only update its description
+ *   │      3) mem:create-task cancel - revoke
  *   │
  *   ├ `mem:create-task confirm`：
- *   │    从 pending 取出 draft → 创建新 task → 覆盖 session 绑定 → 清 pending
+ *   │    take the draft from pending -> create a new task -> override the session binding -> clear pending
  *   │
  *   └ `mem:create-task cancel`：
- *        清 pending，不落库
+ *        clear pending, do not persist
  *
- * 参数解析：
- *   - `confirm` / `cancel`（大小写不敏感）单独出现视为子命令
- *   - 其它任意 args 一律作为 lockedTitle（首次调用的 title 提示）
+ * Argument parsing:
+ *   - `confirm` / `cancel` (case-insensitive) on their own are treated as subcommands
+ *   - any other args are used as lockedTitle (the title hint of the first call)
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
@@ -38,7 +38,7 @@ const TITLE_MAX_LEN = 40;
 
 function trimDesc(desc: string | undefined | null): string {
   const text = desc ?? "";
-  if (text.length === 0) return "(空)";
+  if (text.length === 0) return "(empty)";
   return text.length > DESC_PREVIEW_LEN ? `${text.slice(0, DESC_PREVIEW_LEN)}...` : text;
 }
 
@@ -47,7 +47,7 @@ function truncateTitle(raw: string): string {
   return s.length > TITLE_MAX_LEN ? s.slice(0, TITLE_MAX_LEN) : s;
 }
 
-/** 判定 args 是否是 confirm / cancel 子命令。仅当整体 trim 后严格等于时命中。 */
+/** Determine whether args is a confirm / cancel subcommand. Only matches when strictly equal after trim. */
 function parseSubcommand(args: string): "confirm" | "cancel" | null {
   const s = args.trim().toLowerCase();
   if (s === "confirm") return "confirm";
@@ -76,7 +76,7 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
 
   const subcommand = parseSubcommand(rawArgs);
 
-  // ── confirm 分支 ────────────────────────────────────────────────────────
+  // ── confirm branch ────────────────────────────────────────────────────────
   if (subcommand === "confirm") {
     const result = await confirmPendingTaskAction({
       sessionKey: ctx.sessionKey,
@@ -87,27 +87,27 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
 
     if (result.noPending) {
       return finalize(
-        `⚠️ 没有待确认的 Task 操作（可能已超时或被取消）。请重新执行 \`mem:create-task [标题]\`。`,
+        `⚠️ No pending Task action (it may have timed out or been cancelled). Please run \`mem:create-task [title]\` again.`,
         false,
         { reason: "no_pending" },
       );
     }
     if (!result.success) {
       return finalize(
-        `❌ Task 创建失败：${result.error ?? "unknown error"}`,
+        `❌ Failed to create Task: ${result.error ?? "unknown error"}`,
         false,
         { reason: "create_failed", detail: result.error },
       );
     }
 
     const prevLine = result.previousTaskId
-      ? `\n\n（已解除原绑定 Task \`${result.previousTaskId}\`）`
+      ? `\n\n(Previously bound Task \`${result.previousTaskId}\` has been unbound)`
       : "";
     return finalize(
-      `✅ 已创建并绑定新 Task。\n\n` +
-        `- **标题**：${result.title}\n` +
-        `- **状态**：${result.status ?? "running"}\n` +
-        `- **描述**：${trimDesc(result.description)}\n` +
+      `✅ New Task created and bound.\n\n` +
+        `- **Title**: ${result.title}\n` +
+        `- **Status**: ${result.status ?? "running"}\n` +
+        `- **Description**: ${trimDesc(result.description)}\n` +
         `- **Task ID**：\`${result.taskId}\`${prevLine}`,
       true,
       {
@@ -121,7 +121,7 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
     );
   }
 
-  // ── cancel 分支 ─────────────────────────────────────────────────────────
+  // ── cancel branch ─────────────────────────────────────────────────────────
   if (subcommand === "cancel") {
     const result = await cancelPendingTaskAction({
       sessionKey: ctx.sessionKey,
@@ -131,25 +131,25 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
     });
     if (!result.success) {
       return finalize(
-        `⚠️ 取消失败：${result.error ?? "unknown"}`,
+        `⚠️ Cancel failed: ${result.error ?? "unknown"}`,
         false,
         { reason: "cancel_failed", detail: result.error },
       );
     }
     const msg = result.cancelled
-      ? `✅ 已取消待确认的 Task 操作。`
-      : `ℹ️ 当前没有待确认的 Task 操作。`;
+      ? `✅ Pending Task action cancelled.`
+      : `ℹ️ There is no pending Task action.`;
     return finalize(msg, true, { cancelled: result.cancelled ?? false });
   }
 
-  // ── 首次调用分支 ────────────────────────────────────────────────────────
+  // ── first-call branch ────────────────────────────────────────────────────────
 
   const lockedTitle = rawArgs.length > 0 ? truncateTitle(rawArgs) : undefined;
 
   if (recentMessages.length === 0) {
     return finalize(
-      `⚠️ 当前请求未携带对话消息，\`mem:create-task\` 需要最近对话作为上下文才能生成 Task。` +
-        `\n\n提示：请先与 AI 进行几轮对话后再执行此命令。`,
+      `⚠️ This request carries no conversation messages; \`mem:create-task\` needs recent conversation as context to generate a Task.` +
+        `\n\nTip: have a few rounds of conversation with the AI first, then run this command.`,
       false,
       { reason: "no_recent_messages" },
     );
@@ -161,9 +161,9 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
     config: ctx.config,
     spaceId: ctx.spaceId,
     recentMessages,
-    // 方案 D：taskDraft LLM 跟随主模型 —— 透传客户端当次 model / 上游 / apiKey
-    // upstreamProtocol 独立于 ctx.protocol（后者只管响应渲染 SSE 骨架格式,
-    // 前者决定 taskDraft 请求打 /messages | /chat/completions | /responses）。
+    // Option D: the taskDraft LLM follows the main model -- pass through the client's current model / upstream / apiKey
+    // upstreamProtocol is independent of ctx.protocol (the latter only controls the response-rendering SSE skeleton format,
+    // while the former decides whether the taskDraft request hits /messages | /chat/completions | /responses).
     ...(ctx.model ? { model: ctx.model } : {}),
     ...(ctx.upstreamUrl ? { upstreamUrl: ctx.upstreamUrl } : {}),
     ...(ctx.upstreamProtocol ? { protocol: ctx.upstreamProtocol } : {}),
@@ -171,34 +171,34 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
     ...(lockedTitle ? { lockedTitle, hint: rawArgs } : {}),
   });
 
-  // 落库失败
+  // Persistence failed
   if (!result.success) {
     const detail = result.error ?? "unknown error";
     const hintLine = lockedTitle
       ? ""
-      : "\n\n你可以：\n1. 稍后重试\n2. `mem:create-task <你的标题>` 手动指定标题（LLM 只生成描述，即便失败也会用空描述兜底）";
+      : "\n\nYou can:\n1. Retry later\n2. `mem:create-task <your title>` to specify the title manually (the LLM only generates the description, and falls back to an empty description even if it fails)";
     return finalize(
-      `❌ Task 创建失败：${detail}${hintLine}`,
+      `❌ Failed to create Task: ${detail}${hintLine}`,
       false,
       { reason: "create_failed", detail },
     );
   }
 
-  // 已绑分支：pending 预览
+  // Already-bound branch: pending preview
   if (result.pending && result.pending.kind === "create") {
     const p = result.pending;
     const currentLine = p.currentTaskTitle
-      ? `\`${p.currentTaskId}\`「${p.currentTaskTitle}」`
+      ? `\`${p.currentTaskId}\`"${p.currentTaskTitle}"`
       : `\`${p.currentTaskId}\``;
     return finalize(
-      `⚠️ 当前会话已绑定 Task ${currentLine}。\n\n` +
-        `**新 Task 预览**\n` +
-        `- 标题：${p.draftTitle}\n` +
-        `- 描述：${trimDesc(p.draftDescription)}\n\n` +
-        `请选择下一步：\n` +
-        `1. \`mem:create-task confirm\` — 覆盖当前绑定，创建新 Task\n` +
-        `2. \`mem:update-task\` 或 \`mem:update-task <新描述>\` — 继续复用当前 Task，只更新描述（不新建）\n` +
-        `3. \`mem:create-task cancel\` — 取消，不做任何改动`,
+      `⚠️ The current session is already bound to Task ${currentLine}.\n\n` +
+        `**New Task preview**\n` +
+        `- Title: ${p.draftTitle}\n` +
+        `- Description: ${trimDesc(p.draftDescription)}\n\n` +
+        `Please choose the next step:\n` +
+        `1. \`mem:create-task confirm\` - override the current binding and create a new Task\n` +
+        `2. \`mem:update-task\` or \`mem:update-task <new description>\` - keep using the current Task and only update its description (no new Task)\n` +
+        `3. \`mem:create-task cancel\` - cancel, make no changes`,
       true,
       {
         reason: "pending",
@@ -213,14 +213,14 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
     );
   }
 
-  // 未绑分支：直接落库成功
+  // Unbound branch: persisted directly
   return finalize(
-    `✅ Task 已创建并绑定到本会话。\n\n` +
-      `- **标题**：${result.title}\n` +
-      `- **状态**：${result.status ?? "running"}\n` +
-      `- **描述**：${trimDesc(result.description)}\n` +
+    `✅ Task created and bound to this session.\n\n` +
+      `- **Title**: ${result.title}\n` +
+      `- **Status**: ${result.status ?? "running"}\n` +
+      `- **Description**: ${trimDesc(result.description)}\n` +
       `- **Task ID**：\`${result.taskId}\`\n\n` +
-      `后续可用 \`mem:update-task\` 追加进度。`,
+      `You can later use \`mem:update-task\` to append progress.`,
     true,
     {
       task_id: result.taskId,

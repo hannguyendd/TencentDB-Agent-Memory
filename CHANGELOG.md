@@ -1,311 +1,311 @@
 # Changelog
 
-本文件记录 **TencentDB Agent Memory** 的显著变更，格式遵循
-[Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循
+This file records notable changes to **TencentDB Agent Memory**. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/)。
 
-覆盖仓库全部开源模块：`MemoryCore` / `MemoryPanel` / `MemoryKnowledge` /
+It covers all open-source modules in the repository: `MemoryCore` / `MemoryPanel` / `MemoryKnowledge` /
 `MemoryProxy` / SDK。
 
 ---
 
 ## [2.0.2] — 2026-10-09
 
-### 🗄️ MongoDB 存储后端（试验特性，可选，默认关闭）
+### 🗄️ MongoDB Storage Backend (Experimental, Optional, Off by Default)
 
-- MongoDB 后端能力进一步补全：新增 memory-prompt 与 generation-ref 两类存储，
-  覆盖更多记忆数据结构
-- 一键入口 `./start-all-mongo.sh` 会把 `STORE_MODE` 持久化写入 `.env`，后续启动
-  保持同一后端，不再每次重复配置
-- 修复索引冲突场景的自愈能力，重复的默认/抽取记录不再导致启动报错
+- Further completed MongoDB backend capabilities: added two new storage types, memory-prompt and generation-ref,
+  covering more memory data structures
+- The one-command entry `./start-all-mongo.sh` persists `STORE_MODE` to `.env`, so later starts
+  keep the same backend without reconfiguring each time
+- Fixed self-healing in index-conflict scenarios; duplicate default/extracted records no longer cause startup errors
 
-### 🔀 更多客户端接入
+### 🔀 More Client Integrations
 
-- **OpenCode** 新增官方 Memory adapter 配置包（含 `opencode.json` 与接入文档），按说明配置即可接入，无需编写插件代码
-- **OpenCode** 支持 2.0 的 v2 provider 配置结构，新版客户端可直接复用官方 `opencode.v2.json`
-- **DeepSeek Harness** 新增dsh桌面端适配，配置方式可参考`./agents/dsh/README.md`中1.6的部分
-- 新增 **Pi** 客户端接入（类似 Codex 的 AI Agent 客户端，走 OpenAI Chat 协议）
+- **OpenCode**: added an official Memory adapter config package (including `opencode.json` and integration docs); configure it as documented to integrate, with no plugin code required
+- **OpenCode**: supports the v2 provider config structure of 2.0; newer clients can reuse the official `opencode.v2.json` directly
+- **DeepSeek Harness**: added dsh desktop adaptation; for configuration, see section 1.6 of `./agents/dsh/README.md`
+- Added **Pi** client integration (an AI Agent client similar to Codex, using the OpenAI Chat protocol)
 
-### 🧠 外部源导入（Wiki / 代码 / 任务）
+### 🧠 External Source Import (Wiki / Code / Tasks)
 
-- 新增从外部任务管理系统导入 Task 的能力，任务卡片直接展示来源、支持 ID 复制
-  与分页
-- 新增外部代码源（私有仓）注册与凭据隔离，各团队持有独立凭据、互不可见
-- 新增 Wiki 外部来源导入，与代码源、任务源一起补齐外部资产导入链路
+- Added the ability to import Tasks from external task management systems; task cards show their source directly and support ID copying
+  and pagination
+- Added registration of external code sources (private repos) with credential isolation; each team holds its own credentials, invisible to others
+- Added Wiki external source import, which together with code sources and task sources completes the external asset import pipeline
 
-### 🧰 技能（Skill）体验优化
+### 🧰 Skill Experience Improvements
 
-- 冷启动批量技能抽取新增严格模式，抽取质量更可控
-- 技能抽取自动跟随用户语言，生成内容更贴合使用习惯
-- 技能列表支持按使用活跃度排序，高频技能更容易被找到
+- Added a strict mode to cold-start batch skill extraction for more controllable extraction quality
+- Skill extraction now automatically follows the user's language, so generated content better fits usage habits
+- The skill list can be sorted by usage activity, making frequently used skills easier to find
 
-### 🎛️ Memory Hub 面板
+### 🎛️ Memory Hub Panel
 
-- 任务卡片支持来源展示、ID 复制与分页优化，批量导入交互更顺畅
-- 手动刷新时自动重置时间筛选，新产生的记忆能即时看到
+- Task cards support source display, ID copying, and improved pagination, making bulk import smoother
+- Manual refresh now resets the time filter, so newly created memories are visible immediately
 
-### 🔄 会话与接入体验
+### 🔄 Session and Integration Experience
 
-- 会话引导在更多客户端下更稳定：自动选中唯一 Agent、资产确认更精准、预设失败时
-  自动绕过而非卡住
-- 修复 WorkBuddy 并行子代理反复弹窗的问题，会话归一更稳健
-- 修复多种客户端下记忆命令、工具结果污染、历史消息重复等影响体验的问题
+- Session onboarding is more stable on more clients: the only Agent is auto-selected, asset confirmation is more precise, and when a preset fails
+  it is bypassed automatically instead of getting stuck
+- Fixed repeated popups with WorkBuddy parallel sub-agents; session normalization is more robust
+- Fixed issues affecting experience across several clients, such as memory commands, tool-result pollution, and duplicated history messages
 
-### 🐛 修复
+### 🐛 Fixes
 
-- 修复无 embedding 场景下 BM25 召回异常、L0 工具结果污染与原文展示问题
-- 修复记忆召回为空、历史消息重复、多团队切换列表截断等问题
-- 修复 Claude Code 的 AGENTS.md 指令丢失等问题
-- 修复部署脚本在部分环境下的兼容性问题
+- Fixed abnormal BM25 recall without embeddings, L0 tool-result pollution, and raw-text display issues
+- Fixed empty memory recall, duplicated history messages, truncated lists when switching between multiple teams, and similar issues
+- Fixed Claude Code AGENTS.md instructions being lost, and similar issues
+- Fixed deployment script compatibility issues in some environments
 
 ---
 
 ## [2.0.2-beta.1] — 2026-09-07
 
-### 🗄️ MongoDB 存储后端（试验特性，可选，默认关闭）
+### 🗄️ MongoDB Storage Backend (Experimental, Optional, Off by Default)
 
-默认存储仍为 sqlite，现有部署无需变更。MongoDB 作为可选后端提供，
-可用于需要 mongot 原生全文检索、或评估非 sqlite 数据面的场景：
+The default storage is still sqlite, and existing deployments need no changes. MongoDB is offered as an optional backend,
+for scenarios that need mongot native full-text search or want to evaluate a non-sqlite data plane:
 
-- 新增一键入口 `./start-all-mongo.sh`；未配置 `MONGODB_ENDPOINT` 时，
-  脚本在本机拉起 `mongodb-atlas-local` 容器（非云上 Atlas）
-- 启用后将 `MEMORY_CORE_STORE_MODE=mongodb` 写入 `.env`，后续启动
-  保持该后端，不会静默回退到 sqlite
-- **切换存储后端不会迁移已有数据。** sqlite 与 MongoDB 使用相互独立的
-  数据目录 / 实例，切换后原数据仍留在原后端。当前版本需自行备份并
-  手工迁移；后续版本将提供官方迁移工具
+- Added the one-command entry `./start-all-mongo.sh`; when `MONGODB_ENDPOINT` is not configured,
+  the script starts a `mongodb-atlas-local` container locally (not cloud Atlas)
+- When enabled, `MEMORY_CORE_STORE_MODE=mongodb` is written to `.env`, and later starts
+  keep that backend and never silently fall back to sqlite
+- **Switching storage backends does not migrate existing data.** sqlite and MongoDB use independent
+  data directories / instances, so after switching the original data stays on the original backend. The current version requires you to back up and
+  migrate manually; an official migration tool will be provided in a later version
 
-用法见 [INSTALL_CN.md](./INSTALL_CN.md)「MongoDB 存储后端（试验特性）」章节。
+For usage, see the "MongoDB storage backend (experimental)" section of [INSTALL.md](./INSTALL.md).
 
-### 🧰 技能（Skill）体验优化
+### 🧰 Skill Experience Improvements
 
-- 技能检索与展示更结构化，信息更清晰、调用更稳定
-- 历史遗留的异常技能数据自动修复，旧资产无缝兼容
+- Skill retrieval and display are more structured, with clearer information and more stable invocation
+- Legacy abnormal skill data is repaired automatically, so old assets remain seamlessly compatible
 
-### 🔄 会话与接入体验
+### 🔄 Session and Integration Experience
 
-- 更多客户端接入更顺畅，文字模式客户端也能开箱即用
-- 团队 / Agent 选择列表完整展示，团队较多时不再漏选
-- 会话重置完成提示更清晰
+- Smoother integration for more clients; text-mode clients also work out of the box
+- The team / Agent selection list is shown in full, so teams are no longer missed when there are many
+- Clearer completion message after a session reset
 
-### 🔐 兼容 OAuth2 · 对接企业内部 OA 登录
+### 🔐 OAuth2 Compatibility · Integrate with Enterprise OA Login
 
-- Panel 登录侧兼容标准 OAuth2 协议，可对接企业内部 OA / SSO 系统
-- 各家 OA 协议细节不同，仓库里提供了对接骨架和配置项，
-  用户按自家 OA 的 `authorize` / `token` / `userinfo` 端点做少量适配即可
-- 完成对接后，团队成员可直接用 OA 账号登录 Panel，用户身份与 `user_key`
-  自动打通，不再需要单独下发/记忆一串 `sk-mem-...`
+- Panel login is compatible with the standard OAuth2 protocol and can integrate with enterprise OA / SSO systems
+- OA protocol details differ between vendors, so the repository provides an integration skeleton and config options;
+  users only need minor adaptation to their own OA's `authorize` / `token` / `userinfo` endpoints
+- After integration, team members can log in to Panel with their OA accounts, and user identity is linked to `user_key`
+  automatically, with no need to distribute or remember a separate `sk-mem-...` string
 
-### 📊 数据分析与可观测性（可选，默认关闭）
+### 📊 Data Analytics and Observability (Optional, Off by Default)
 
-- 全新数据分析页，团队使用情况一目了然，辅助你判断记忆资产的沉淀效果
-- 关键环节补充埋点与可观测数据，运维排查更直观
-- **默认关闭**；开启需要三个服务分别配置 ClickHouse：Proxy / Knowledge
-  负责埋点上报（Proxy 记录 memory / skill 工具调用，Knowledge 记录
-  wiki / code-graph 工具调用），Core 负责查询接口。Panel 会调用
-  Core 与 Knowledge 的配置发现接口判断是否启用，启用后再调查询接口
-  拉取数据。详见 [INSTALL_CN.md](./INSTALL_CN.md) 的
-  「数据分析与可观测性（可选）」章节
+- A brand-new analytics page shows team usage at a glance, helping you judge how well memory assets are accumulating
+- Added instrumentation and observability data at key points, making operations troubleshooting more intuitive
+- **Off by default**; enabling it requires configuring ClickHouse on three services: Proxy / Knowledge
+  handle event reporting (Proxy records memory / skill tool calls, Knowledge records
+  wiki / code-graph tool calls), and Core provides the query interface. Panel calls the
+  config-discovery interfaces of Core and Knowledge to decide whether it is enabled, and then calls the query interface
+  to fetch data. See the
+  "Data analytics and observability (optional)" section of [INSTALL.md](./INSTALL.md) for details
 
-### 🐛 修复
+### 🐛 Fixes
 
-- 修复部分场景下记忆召回为空、检索降级不生效的问题
-- 修复个别情况下记忆解析失败、历史消息重复的问题
-- 修复多团队切换时列表被截断、显示不全的问题
-- 修复部署脚本在部分环境下的兼容性问题
+- Fixed empty memory recall and ineffective retrieval degradation in some scenarios
+- Fixed memory parsing failures and duplicated history messages in some cases
+- Fixed truncated, incomplete lists when switching between multiple teams
+- Fixed deployment script compatibility issues in some environments
 
 ---
 
 ## [2.0.1] — 2026-08-25
 
-### 🚀 支持更多 Agent 客户端
+### 🚀 Support for More Agent Clients
 
-现在无论你用哪款 coding agent，都能直接挂上团队记忆：
+Whichever coding agent you use, you can now attach team memory directly:
 
-- 新增 **OpenCode** 客户端接入
-- 新增 **DeepSeek Harness (dsh)** 接入 —— DeepSeek 官方 agent harness 的
-  Web UI 会话可直接接入 Proxy，自动获得团队记忆 / skill / 知识注入
-- 新增 **Codex CLI** 接入
-- 新增 **WorkBuddy** 客户端接入，开箱即用
-- 多款客户端的首次引导与重置体验保持一致，切换更顺畅
+- Added **OpenCode** client integration
+- Added **DeepSeek Harness (dsh)** integration: the Web UI sessions of DeepSeek's official agent harness
+  can connect to the Proxy directly and automatically get team memory / skill / knowledge injection
+- Added **Codex CLI** integration
+- Added **WorkBuddy** client integration, ready out of the box
+- First-run onboarding and reset behavior are consistent across clients, making switching smoother
 
-### 🤖 会话内直接下指令
+### 🤖 Commands Directly in the Conversation
 
-不用切到面板，在对话里就能完成常用操作：
+Common operations can be done in the conversation without switching to the panel:
 
-- 会话中途一键重置绑定（换团队 / 换 Agent / 换任务）
-- 对话内直接创建 / 更新任务
-- 指令响应更快，减少等待
+- Reset bindings mid-session with one command (switch team / Agent / task)
+- Create / update tasks directly in the conversation
+- Faster command responses with less waiting
 
-### 🧠 冷启动开箱即用
+### 🧠 Cold Start Out of the Box
 
-- 创建团队或用户即自动生成默认 Agent，无需手工配置
-- 管理员可自定义默认 Agent 模板，新用户冷启动自动套用
-- 支持从 IDE 里已有的 Agent 一键导入资产，快速起步
-- 接入后默认绑定任务，即开即用
+- A default Agent is generated automatically when a team or user is created, with no manual configuration
+- Admins can customize the default Agent template, which is applied automatically to new users on cold start
+- Assets can be imported in one click from existing Agents in the IDE for a quick start
+- A task is bound by default after integration, so it works immediately
 
-### 🔄 会话绑定更稳定
+### 🔄 More Stable Session Binding
 
-- 会话绑定持久化保存，重启不丢失
-- 切换 Agent 后记忆与技能正确跟随切换，不再串场
-- 修复部分客户端历史回放被误判的问题
+- Session bindings are persisted and survive restarts
+- After switching Agent, memory and skills follow the switch correctly with no cross-talk
+- Fixed history replay being misjudged on some clients
 
-### 🧰 技能（Skill）体验升级
+### 🧰 Skill Experience Upgrade
 
-- 会话里新建的技能立即可被检索到，不再有"搜索盲区"
-- 恢复技能 ID 的展示与一键复制
-- 技能支持在线编辑
-- 新增接入向导技能：跟着引导一步步配置，或一条命令自动完成 Proxy 接入
+- Skills newly created in a session can be retrieved immediately, with no "search blind spot"
+- Restored skill ID display and one-click copy
+- Skills can be edited online
+- Added an integration wizard skill: configure step by step with guidance, or complete Proxy integration automatically with one command
 
-### 🎛️ Memory Hub 面板
+### 🎛️ Memory Hub Panel
 
-- 全新登录页，加入点阵波纹动效
-- 团队编辑 / 删除入口整合到团队切换器，操作更顺手、修复切换异常
-- 管理员创建账号时可自定义 User_Key
-- 新增对话记忆搜索：跨会话的语义与关键字检索，按权限精确控制可见范围；
-  支持对单层记忆直接覆盖修改
-- 资产 ID 直接展示并可复制；列表完整加载，修复分页截断显示不全的问题
+- New login page with a dot-matrix ripple animation
+- Team edit / delete entries are merged into the team switcher for easier operation, and a switching bug is fixed
+- Admins can customize the User_Key when creating accounts
+- Added conversation memory search: cross-session semantic and keyword retrieval with precise permission-based visibility;
+  a single memory layer can be overwritten directly
+- Asset IDs are shown directly and can be copied; lists load completely, fixing truncated pagination
 
-### ⚙️ 一键部署增强
+### ⚙️ One-Command Deployment Enhancements
 
-- 启动脚本支持交互式配置，自动预检 LLM 通路与端口占用，避免部署踩坑
-- 客户端接入地址一键复制，单机部署下自动解析为宿主机地址，外部客户端可直接连接
+- The start script supports interactive configuration and pre-checks LLM connectivity and port usage to avoid deployment pitfalls
+- Client integration address can be copied in one click; in single-node deployments it resolves to the host address automatically so external clients can connect directly
 
-### ⚡ 性能优化
+### ⚡ Performance Improvements
 
-- 知识库列表加载提速，常用路径更快响应
-- Wiki 页面并发构建，单页失败自动重试，大批量文档导入时间大幅缩短
+- Faster knowledge base list loading and quicker responses on common paths
+- Wiki pages are built concurrently with automatic retry on single-page failure, greatly shortening bulk document import time
 
-### 📚 文档
+### 📚 Documentation
 
-- 按客户端拆分独立接入文档，各 agent 各有一份清晰的接入指南
-- 新增面板与 API 使用文档
-- 补充英文面板截图与 README 更新
+- Integration docs are split per client, so each agent has a clear integration guide
+- Added panel and API usage docs
+- Added English panel screenshots and README updates
 
-### 🐛 修复
+### 🐛 Fixes
 
-- 修复多 Agent 场景下记忆检索为空的问题
-- 修复资产解绑不生效、资产较多时记忆 tab 丢失的问题
-- 修复导入历史会话时间错乱，恢复原始时间线
-- 修复编辑场景时部分内容被重复展开的问题
-- 修复 macOS 下部署脚本的兼容性问题
-- 修复依赖缺失导致的安装报错
-- 修复部分客户端首次引导表单在老版本上的兼容性问题
-- 新增清空对话记忆功能，支持批量删除
+- Fixed empty memory retrieval in multi-Agent scenarios
+- Fixed asset unbinding not taking effect and the memory tab disappearing when there are many assets
+- Fixed scrambled timestamps when importing historical sessions; the original timeline is restored
+- Fixed some content being expanded repeatedly when editing a scene
+- Fixed deployment script compatibility on macOS
+- Fixed installation errors caused by missing dependencies
+- Fixed compatibility of the first-run onboarding form with older versions on some clients
+- Added a clear-conversation-memory feature with bulk deletion
 
 ---
 
 ## [2.0.1-beta.1] — 2026-08-13
 
-### 🧠 冷启动开箱即用 · 默认 Agent + 预置 Skill
+### 🧠 Cold Start Out of the Box · Default Agent + Preset Skills
 
-- 创建团队/用户即自动生成默认 Agent，无需手工配置
-- 客户端接入地址一键复制，支持指向 Memory Proxy
-- 单机部署下接入地址自动解析为宿主机地址，外部客户端可直接连接
+- A default Agent is generated automatically when a team/user is created, with no manual configuration
+- Client integration address can be copied in one click and can point to the Memory Proxy
+- In single-node deployments the integration address resolves to the host address automatically so external clients can connect directly
 
-### ⚡ Wiki 生成加速
+### ⚡ Faster Wiki Generation
 
-- 优化 Wiki 生成，页面并发构建，大幅缩短大批量文档导入时间
-- 单页失败自动重试，不再拖停整个批次
-- 生成进度与单页状态实时可见
+- Optimized Wiki generation with concurrent page builds, greatly shortening bulk document import time
+- A single-page failure is retried automatically and no longer stalls the whole batch
+- Generation progress and per-page status are visible in real time
 
-### 🧰 Skill 生态
+### 🧰 Skill Ecosystem
 
-- 新增 Skill 导出功能
-- 优化 Skill 检索，私有 Skill 可被检索到，结果更精准
-- 优化 Skill 提取能力，捕获范围更广
+- Added Skill export
+- Improved Skill retrieval: private Skills can now be retrieved, with more precise results
+- Improved Skill extraction with broader capture coverage
 
-### 🔀 Memory Proxy · 新增客户端接入
+### 🔀 Memory Proxy · New Client Integrations
 
-- 新增 Codex CLI 接入
-- 新增 WorkBuddy 客户端接入
-- 新增 DeepSeek Harness (dsh) 接入 —— DeepSeek 官方 agent harness 的 Web UI 会话
-  可直接接入 Proxy,拿到团队记忆 / skill / knowledge 注入;支持 aux 请求短路
-  (compaction / title-gen) 与 CLI headless bypass
-- 优化 code-graph 资源与工作区的关联
+- Added Codex CLI integration
+- Added WorkBuddy client integration
+- Added DeepSeek Harness (dsh) integration: Web UI sessions of DeepSeek's official agent harness
+  can connect to the Proxy directly and get team memory / skill / knowledge injection; supports aux request short-circuiting
+  (compaction / title-gen) and CLI headless bypass
+- Improved the association between code-graph resources and workspaces
 
-### 🎛️ Memory Hub 面板
+### 🎛️ Memory Hub Panel
 
-- 重构首次使用引导流程，新增 Agent 绑定步骤
-- 优化面板交互、加载骨架屏与过渡动效
-- 优化 Task 页用户展示名解析
-- 优化资产页面布局与归属/共享规则说明
-- 修复资产较多时记忆 tab 丢失的问题
+- Reworked the first-use onboarding flow, adding an Agent binding step
+- Improved panel interactions, loading skeleton screens, and transitions
+- Improved user display name resolution on the Task page
+- Improved the asset page layout and the explanation of ownership/sharing rules
+- Fixed the memory tab disappearing when there are many assets
 
-### 🐛 修复
+### 🐛 Fixes
 
-- 修复多 Agent 场景下记忆检索为空的问题
-- 修复资产解绑不生效的问题
-- 导入的历史会话保留原始时间，时间线不再错乱
-- 修复某些场景下记忆丢失的问题
-- 新增清空对话记忆功能，支持批量删除
+- Fixed empty memory retrieval in multi-Agent scenarios
+- Fixed asset unbinding not taking effect
+- Imported historical sessions keep their original timestamps, so the timeline is no longer scrambled
+- Fixed memory loss in some scenarios
+- Added a clear-conversation-memory feature with bulk deletion
 
 ---
 
 ## [2.0.0] — 2026-08-03
 
-> **产品定位**：让 Agent 的经验、文档、代码沉淀成可复用资产，让下一位 Agent
-> 直接读档。详见 [README_CN.md](./README_CN.md)。
+> **Product positioning**: turn an Agent's experience, documents, and code into reusable assets, so the next Agent
+> can load them directly. See [README.md](./README.md) for details.
 
-### 🧠 四种记忆资产 · 首次完整开源
+### 🧠 Four Memory Asset Types · First Complete Open-Source Release
 
-四类资产从"对话/工作痕迹"里自动沉淀出来：
+The four asset types are automatically distilled from "conversations / work traces":
 
-- **Chat Memory** — 从对话中逐层提取 L0 原始记录 → L1 事实 → L2 场景 → L3
-  长期认知；跨会话保留偏好、决策、交互历史。
-- **Skill** — 从跑通的任务里提炼可复用 SOP，附版本 / 资源文件 / 触发边界 /
-  执行步骤 / 验证规则。新增 Skill 强制归档功能。
-- **Wiki** — 把文档变成结构化页面 + 链接图谱（灵感来自 Karpathy 的 LLM 知识库
-  实践）。
-- **CodeGraph** — 索引仓库的符号 / 文件 / 调用关系 / 影响路径，Agent 改代码
-  前先做 impact analysis。新增定时自动同步代码库功能。
+- **Chat Memory** — extracts layer by layer from conversations: L0 raw records → L1 facts → L2 scenes → L3
+  long-term understanding; preferences, decisions, and interaction history persist across sessions.
+- **Skill** — distills reusable SOPs from successfully completed tasks, with versions / resource files / trigger boundaries /
+  execution steps / validation rules. Added forced Skill archiving.
+- **Wiki** — turns documents into structured pages + a link graph (inspired by Karpathy's LLM knowledge base
+  practice).
+- **CodeGraph** — indexes a repository's symbols / files / call relationships / impact paths; Agents run impact analysis before
+  changing code. Added scheduled automatic codebase sync.
 
-### 🎛️ Memory Hub · 面向团队的操作台
+### 🎛️ Memory Hub · Team-Oriented Console
 
-管控面板（`agentmemory/memory-hub` 镜像，含 Panel + Knowledge Service）：
+Management panel (`agentmemory/memory-hub` image, including Panel + Knowledge Service):
 
-- 建 Team / Agent，把资产按 Owner / 版本 / 状态 / 可见性统一管理
-- 三级可见性：`private` / `team` / `restricted`（User / Role / Agent ACL），
-  外加 `agent` 定向装配
-- Agent Loadout：给不同 Agent 绑定不同资产、调整优先级和使用方式
-- Wiki + CodeGraph 工坊内置在 Hub，导入代码库/文档就能自动构建
-- 管理员（System Admin）现在也可使用资产管理功能
-- 面板全面支持中英文切换；统一页面设计风格，优化列表交互和分页体验
+- Create Teams / Agents and manage assets uniformly by Owner / version / status / visibility
+- Three visibility levels: `private` / `team` / `restricted` (User / Role / Agent ACL),
+  plus targeted `agent` assembly
+- Agent Loadout: bind different assets to different Agents and adjust priority and usage
+- Wiki + CodeGraph workshops are built into the Hub; import a codebase/documents and they build automatically
+- Administrators (System Admin) can now also use asset management
+- The panel fully supports switching between Chinese and English; unified page design style and improved list interaction and pagination
 
-### 🔀 Memory Proxy · Agent 挂上记忆的通道
+### 🔀 Memory Proxy · The Channel for Attaching Memory to Agents
 
-`agentmemory/memory-proxy` 让 Claude Code 等 coding agent 直接用上团队记忆：
+`agentmemory/memory-proxy` lets coding agents such as Claude Code use team memory directly:
 
-- **Anthropic / OpenAI 双协议**：`/claude-code/<spaceId>/v1/messages` 和
-  `/v1/chat/completions` 都接
-- **首轮引导**：sessionInit 通过 `AskUserQuestion` 让用户选 team / agent /
-  task，proxy 记住绑定
-- **每轮注入**：把该 agent 的 L2/L3 记忆、matched skill、wiki/code-graph
-  拼进 system prompt，转发上游 LLM
-- **鉴权**：`x-tdai-user-key` → 内核 `/v3/meta/auth/verify` 换 `user_id`，
-  按用户维度控制资产可见性
-- Cost Guard 支持为不同 Agent 配置不同模型以降低成本
+- **Anthropic / OpenAI dual protocol**: both `/claude-code/<spaceId>/v1/messages` and
+  `/v1/chat/completions` are accepted
+- **First-turn onboarding**: sessionInit uses `AskUserQuestion` to let the user pick team / agent /
+  task, and the proxy remembers the binding
+- **Per-turn injection**: stitches that agent's L2/L3 memory, matched skills, and wiki/code-graph
+  into the system prompt and forwards to the upstream LLM
+- **Authentication**: `x-tdai-user-key` → exchanged for `user_id` via the kernel's `/v3/meta/auth/verify`,
+  controlling asset visibility per user
+- Cost Guard supports configuring different models for different Agents to reduce cost
 
-### 🚀 一条命令拉起完整三件套
+### 🚀 One Command to Start the Full Trio
 
-三个镜像多架构（`linux/amd64` + `linux/arm64`）已发布到
-[Docker Hub `agentmemory`](https://hub.docker.com/u/agentmemory)，公开可拉、
-无需登录：
+All three images are published as multi-arch (`linux/amd64` + `linux/arm64`) to
+[Docker Hub `agentmemory`](https://hub.docker.com/u/agentmemory), publicly pullable
+without login:
 
 ```bash
 git clone https://github.com/Tencent/TencentDB-Agent-Memory.git
 cd TencentDB-Agent-Memory/deploy/global-images
-cp .env.example .env && $EDITOR .env    # 填入两组 LLM 参数
-./start-all.sh                          # 一键起
+cp .env.example .env && $EDITOR .env    # fill in the two sets of LLM parameters
+./start-all.sh                          # one-command start
 ```
 
-`start-all.sh` 首次启动会自动 `init-admin`、生成 admin `sk-mem-...` 并落盘
-`.admin-key`；自检 `/v3/meta/auth/verify` 后打印可复制的 `claude` 启动命令。
-`stop-all.sh --purge` 彻底清 volume + admin key，方便重置。
+On first start, `start-all.sh` automatically runs `init-admin`, generates the admin `sk-mem-...`, and saves it to
+`.admin-key`; after self-checking `/v3/meta/auth/verify`, it prints a copyable `claude` launch command.
+`stop-all.sh --purge` fully removes the volumes and admin key, making resets easy.
 
-详见 [INSTALL_CN.md](./INSTALL_CN.md) / [INSTALL.md](./INSTALL.md)。
+See [INSTALL.md](./INSTALL.md) for details (Chinese: [INSTALL_CN.md](./INSTALL_CN.md)).
 
-### 🧰 官方 SDK
+### 🧰 Official SDKs
 
 - **TypeScript** — `@tencentdb-agent-memory/memory-sdk-ts-v2`
 
@@ -314,92 +314,92 @@ cp .env.example .env && $EDITOR .env    # 填入两组 LLM 参数
 
   const memory = new MemoryClient({
     endpoint, apiKey, serviceId,
-    teamId, agentId, userId,     // v3 严格 isolation：三项必填
+    teamId, agentId, userId,     // v3 strict isolation: all three required
   });
   ```
 
-  顶级 export 就是 v3 严格 isolation 版本；老代码走 `.../v2/v3` 子路径也
-  能继续用（子路径保留为向后兼容别名）。
+  The top-level export is the v3 strict isolation version; legacy code can keep using the `.../v2/v3` subpath
+  (the subpath is kept as a backward-compatible alias).
 
 - **Python** — `pip install tencentdb-agent-memory-sdk-python`
 
   ```python
-  from tencentdb_agent_memory import MemoryClient                     # 默认（v2 兼容）
+  from tencentdb_agent_memory import MemoryClient                     # default (v2 compatible)
   from tencentdb_agent_memory.v3 import MemoryClient, MetadataClient, SkillClient
   ```
 
-### 📖 文档
+### 📖 Documentation
 
-- 新增 CodeBuddy / Hermes / OpenClaw 接入指南
-- 更新安装指南中的角色权限说明
+- Added CodeBuddy / Hermes / OpenClaw integration guides
+- Updated the role permission notes in the installation guide
 
 ---
 
 ## [2.0.0-beta.1] — 2026-07-21
 
-首次公开发布。SemVer 从 `2.0.0-beta.1` 起步（npm 包名迁移到 `-v2` 后缀：
+First public release. SemVer starts at `2.0.0-beta.1` (npm package names migrate to a `-v2` suffix:
 `@tencentdb-agent-memory/memory-tencentdb-v2`、`memory-sdk-ts-v2`）。
-Docker 镜像 tag 独立于 npm 版本，本次镜像发的是 `:1.0.0-beta.1`。
+Docker image tags are independent of npm versions; this release's image is tagged `:1.0.0-beta.1`.
 
-> **产品定位**：让 Agent 的经验、文档、代码沉淀成可复用资产，让下一位 Agent
-> 直接读档。详见 [README_CN.md](./README_CN.md)。
+> **Product positioning**: turn an Agent's experience, documents, and code into reusable assets, so the next Agent
+> can load them directly. See [README.md](./README.md) for details.
 
-### 🧠 四种记忆资产 · 首次完整开源
+### 🧠 Four Memory Asset Types · First Complete Open-Source Release
 
-四类资产从"对话/工作痕迹"里自动沉淀出来：
+The four asset types are automatically distilled from "conversations / work traces":
 
-- **Chat Memory** — 从对话中逐层提取 L0 原始记录 → L1 事实 → L2 场景 → L3
-  长期认知；跨会话保留偏好、决策、交互历史。
-- **Skill** — 从跑通的任务里提炼可复用 SOP，附版本 / 资源文件 / 触发边界 /
-  执行步骤 / 验证规则。
-- **Wiki** — 把文档变成结构化页面 + 链接图谱（灵感来自 Karpathy 的 LLM 知识库
-  实践）。
-- **CodeGraph** — 索引仓库的符号 / 文件 / 调用关系 / 影响路径，Agent 改代码
-  前先做 impact analysis。
+- **Chat Memory** — extracts layer by layer from conversations: L0 raw records → L1 facts → L2 scenes → L3
+  long-term understanding; preferences, decisions, and interaction history persist across sessions.
+- **Skill** — distills reusable SOPs from successfully completed tasks, with versions / resource files / trigger boundaries /
+  execution steps / validation rules.
+- **Wiki** — turns documents into structured pages + a link graph (inspired by Karpathy's LLM knowledge base
+  practice).
+- **CodeGraph** — indexes a repository's symbols / files / call relationships / impact paths; Agents run impact analysis before
+  changing code.
 
-### 🎛️ Memory Hub · 面向团队的操作台
+### 🎛️ Memory Hub · Team-Oriented Console
 
-管控面板（`agentmemory/memory-hub` 镜像，含 Panel + Knowledge Service）：
+Management panel (`agentmemory/memory-hub` image, including Panel + Knowledge Service):
 
-- 建 Team / Agent，把资产按 Owner / 版本 / 状态 / 可见性统一管理
-- 三级可见性：`private` / `team` / `restricted`（User / Role / Agent ACL），
-  外加 `agent` 定向装配
-- Agent Loadout：给不同 Agent 绑定不同资产、调整优先级和使用方式
-- Wiki + CodeGraph 工坊内置在 Hub，导入代码库/文档就能自动构建
+- Create Teams / Agents and manage assets uniformly by Owner / version / status / visibility
+- Three visibility levels: `private` / `team` / `restricted` (User / Role / Agent ACL),
+  plus targeted `agent` assembly
+- Agent Loadout: bind different assets to different Agents and adjust priority and usage
+- Wiki + CodeGraph workshops are built into the Hub; import a codebase/documents and they build automatically
 
-### 🔀 Memory Proxy · Agent 挂上记忆的通道
+### 🔀 Memory Proxy · The Channel for Attaching Memory to Agents
 
-`agentmemory/memory-proxy` 让 Claude Code 等 coding agent 直接用上团队记忆：
+`agentmemory/memory-proxy` lets coding agents such as Claude Code use team memory directly:
 
-- **Anthropic / OpenAI 双协议**：`/claude-code/<spaceId>/v1/messages` 和
-  `/v1/chat/completions` 都接
-- **首轮引导**：sessionInit 通过 `AskUserQuestion` 让用户选 team / agent /
-  task，proxy 记住绑定
-- **每轮注入**：把该 agent 的 L2/L3 记忆、matched skill、wiki/code-graph
-  拼进 system prompt，转发上游 LLM
-- **鉴权**：`x-tdai-user-key` → 内核 `/v3/meta/auth/verify` 换 `user_id`，
-  按用户维度控制资产可见性
+- **Anthropic / OpenAI dual protocol**: both `/claude-code/<spaceId>/v1/messages` and
+  `/v1/chat/completions` are accepted
+- **First-turn onboarding**: sessionInit uses `AskUserQuestion` to let the user pick team / agent /
+  task, and the proxy remembers the binding
+- **Per-turn injection**: stitches that agent's L2/L3 memory, matched skills, and wiki/code-graph
+  into the system prompt and forwards to the upstream LLM
+- **Authentication**: `x-tdai-user-key` → exchanged for `user_id` via the kernel's `/v3/meta/auth/verify`,
+  controlling asset visibility per user
 
-### 🚀 一条命令拉起完整三件套
+### 🚀 One Command to Start the Full Trio
 
-三个镜像多架构（`linux/amd64` + `linux/arm64`）已发布到
-[Docker Hub `agentmemory`](https://hub.docker.com/u/agentmemory)，公开可拉、
-无需登录：
+All three images are published as multi-arch (`linux/amd64` + `linux/arm64`) to
+[Docker Hub `agentmemory`](https://hub.docker.com/u/agentmemory), publicly pullable
+without login:
 
 ```bash
 git clone https://github.com/Tencent/TencentDB-Agent-Memory.git
 cd TencentDB-Agent-Memory/deploy/global-images
-cp .env.example .env && $EDITOR .env    # 填入两组 LLM 参数
-./start-all.sh                          # 一键起
+cp .env.example .env && $EDITOR .env    # fill in the two sets of LLM parameters
+./start-all.sh                          # one-command start
 ```
 
-`start-all.sh` 首次启动会自动 `init-admin`、生成 admin `sk-mem-...` 并落盘
-`.admin-key`；自检 `/v3/meta/auth/verify` 后打印可复制的 `claude` 启动命令。
-`stop-all.sh --purge` 彻底清 volume + admin key，方便重置。
+On first start, `start-all.sh` automatically runs `init-admin`, generates the admin `sk-mem-...`, and saves it to
+`.admin-key`; after self-checking `/v3/meta/auth/verify`, it prints a copyable `claude` launch command.
+`stop-all.sh --purge` fully removes the volumes and admin key, making resets easy.
 
-详见 [INSTALL_CN.md](./INSTALL_CN.md) / [INSTALL.md](./INSTALL.md)。
+See [INSTALL.md](./INSTALL.md) for details (Chinese: [INSTALL_CN.md](./INSTALL_CN.md)).
 
-### 🧰 官方 SDK
+### 🧰 Official SDKs
 
 - **TypeScript** — `@tencentdb-agent-memory/memory-sdk-ts-v2`
 
@@ -408,16 +408,16 @@ cp .env.example .env && $EDITOR .env    # 填入两组 LLM 参数
 
   const memory = new MemoryClient({
     endpoint, apiKey, serviceId,
-    teamId, agentId, userId,     // v3 严格 isolation：三项必填
+    teamId, agentId, userId,     // v3 strict isolation: all three required
   });
   ```
 
-  顶级 export 就是 v3 严格 isolation 版本；老代码走 `.../v2/v3` 子路径也
-  能继续用（子路径保留为向后兼容别名）。
+  The top-level export is the v3 strict isolation version; legacy code can keep using the `.../v2/v3` subpath
+  (the subpath is kept as a backward-compatible alias).
 
 - **Python** — `pip install tencentdb-agent-memory-sdk-python`
 
   ```python
-  from tencentdb_agent_memory import MemoryClient                     # 默认（v2 兼容）
+  from tencentdb_agent_memory import MemoryClient                     # default (v2 compatible)
   from tencentdb_agent_memory.v3 import MemoryClient, MetadataClient, SkillClient
   ```

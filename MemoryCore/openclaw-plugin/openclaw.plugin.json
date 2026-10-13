@@ -2,7 +2,7 @@
   "id": "memory-tencentdb-client",
   "name": "Memory TencentDB (Client)",
   "version": "1.0.0-beta.1",
-  "description": "长期记忆插件（客户端接入版 /v3）— 通过远端 Memory Gateway 提供四层记忆能力",
+  "description": "Long-term memory plugin (client edition, /v3) — provides four-layer memory via a remote Memory Gateway",
   "author": "TDAI Team",
   "activation": {
     "onStartup": true
@@ -19,7 +19,7 @@
     "properties": {
       "server": {
         "type": "object",
-        "description": "远端 memory server 连接与 v3 isolation 配置",
+        "description": "Remote memory server connection and v3 isolation configuration",
         "properties": {
           "url": {
             "type": "string",
@@ -29,7 +29,7 @@
           "apiKey": {
             "type": "string",
             "default": "local",
-            "description": "API Key（Bearer）；local 模式可用 local"
+            "description": "API Key (Bearer); local mode may use local"
           },
           "instanceId": {
             "type": "string",
@@ -39,7 +39,7 @@
           "teamId": {
             "type": "string",
             "default": "default",
-            "description": "v3 isolation team_id（local 默认与 DEFAULT_ISOLATION_ID 一致）"
+            "description": "v3 isolation team_id (in local mode the default matches DEFAULT_ISOLATION_ID)"
           },
           "agentId": {
             "type": "string",
@@ -54,39 +54,39 @@
           "rejectUnauthorized": {
             "type": "boolean",
             "default": true,
-            "description": "是否校验 HTTPS 证书。默认 true；仅自签证书测试环境需要显式设为 false"
+            "description": "Whether to verify the HTTPS certificate. Defaults to true; set to false explicitly only for self-signed-certificate test environments"
           }
         }
       },
       "recall": {
         "type": "object",
-        "description": "记忆召回设置",
+        "description": "Memory recall settings",
         "properties": {
           "maxResults": {
             "type": "number",
             "default": 5,
-            "description": "每轮最多注入多少条 L1 记忆"
+            "description": "Maximum number of L1 memories injected per turn"
           },
           "includePersona": {
             "type": "boolean",
             "default": true,
-            "description": "是否注入 L3 画像"
+            "description": "Whether to inject the L3 persona"
           },
           "includeSceneNav": {
             "type": "boolean",
             "default": true,
-            "description": "是否注入 L2 场景导航索引"
+            "description": "Whether to inject the L2 scene navigation index"
           }
         }
       },
       "capture": {
         "type": "object",
-        "description": "对话捕获设置",
+        "description": "Conversation capture settings",
         "properties": {
           "enabled": {
             "type": "boolean",
             "default": true,
-            "description": "是否启用自动对话捕获 (L0)"
+            "description": "Whether to enable automatic conversation capture (L0)"
           }
         }
       }

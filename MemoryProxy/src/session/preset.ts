@@ -135,8 +135,8 @@ export function resolvePresetIdentity(
 
   // team + agent resolved → register directly. task_id is OPTIONAL: a
   // missing/stale task yields undefined taskId (broad recall), not a block.
-  // This matches the kernel's own semantics and the interactive "本次不关联
-  // 任务" / defaultTaskId path.
+  // This matches the kernel's own semantics and the interactive "Do not associate
+  // a task this time" / defaultTaskId path.
   res.canRegister = !!res.agentId && !res.hadMismatch;
   return res;
 }

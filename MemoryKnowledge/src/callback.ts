@@ -27,7 +27,7 @@ export interface StatusCallbackPayload {
   summary: string | null;
   sync_error: string | null;
   timestamp: string;
-  /** 与本次 ingest 进度回调同一代际；Panel 用以拒绝 clear 后的迟到 progress */
+  /** Same generation as this ingest's progress callbacks; the Panel uses it to reject late progress after a clear */
   run_id?: string;
 }
 
@@ -37,7 +37,7 @@ export interface IngestProgressCallback {
   team_id: string;
   event: "ingest_progress";
   progress: IngestProgress;
-  /** 单次 ingest 代际 id；与终态 callback 的 run_id 一致 */
+  /** Per-ingest generation id; matches the run_id of the terminal callback */
   run_id?: string;
 }
 
@@ -127,7 +127,7 @@ export function buildProgressFn(
 /**
  * Generate wiki summary via LLM.
  * Reads page titles + descriptions, asks LLM for a ≤100 char Chinese summary.
- * 复用 createLlmClient（自动走正确协议 openai/anthropic + Langfuse 追踪 + 超时处理）。
+ * Reuses createLlmClient (automatically uses the right protocol openai/anthropic + Langfuse tracing + timeout handling).
  */
 import { createLlmClient } from "./engines/wiki/ingest-v2/llm.js";
 
@@ -147,17 +147,17 @@ export async function generateWikiSummary(
     .map((p) => `- ${p.title}${p.description ? `: ${p.description.slice(0, 80)}` : ""}`)
     .join("\n");
 
-  const prompt = `请为以下知识库生成一个不超过100字的中文摘要，描述它的主要内容和用途。只输出摘要文本，不要输出其他内容。
+  const prompt = `Generate a summary of no more than 100 words for the following knowledge base, describing its main content and purpose. Output only the summary text, nothing else.
 
-知识库名称：${name}
-包含的页面：
+Knowledge base name: ${name}
+Included pages:
 ${pageList}`;
 
   console.info(`${TAG} wiki summary LLM call start for ${wikiId} (model=${llm.model}, protocol=${llm.protocol}, pages=${pages.length})`);
   try {
     const client = createLlmClient(llm);
     const text = await client.chat({
-      system: "你是一个知识库摘要生成器。只输出摘要文本，不要输出其他内容。",
+      system: "You are a knowledge base summary generator. Output only the summary text, nothing else.",
       prompt,
       maxOutputTokens: 1024,
       temperature: 0.3,
@@ -174,7 +174,7 @@ ${pageList}`;
 
 /**
  * Generate code-graph summary via template (no LLM call).
- * Format: "{repo_name}（{branch}）- {files} 个文件、{nodes} 个符号节点"
+ * Format: "{repo_name} ({branch}) - {files} files, {nodes} symbol nodes"
  */
 export function generateCodeGraphSummary(
   repoName: string,
@@ -182,7 +182,7 @@ export function generateCodeGraphSummary(
   stats: { files: number; nodes: number; edges: number } | null,
 ): string {
   if (!stats) {
-    return `${repoName}（${branch}）`;
+    return `${repoName} (${branch})`;
   }
-  return `${repoName}（${branch}）- ${stats.files} 个文件、${stats.nodes} 个符号节点`.slice(0, 256);
+  return `${repoName} (${branch}) - ${stats.files} files, ${stats.nodes} symbol nodes`.slice(0, 256);
 }

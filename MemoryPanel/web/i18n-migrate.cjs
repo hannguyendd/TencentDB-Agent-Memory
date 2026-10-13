@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * i18n 迁移脚本 — 将 JSX/TSX 中的中文硬编码文案替换为 t() 调用
+ * i18n migration script — replaces hard-coded Chinese strings in JSX/TSX with t() calls
  * 
- * 此脚本做最小化的 pattern-based 替换，不追求完美。
- * 人工审查后仍需调整。
+ * This script does a minimal pattern-based replacement and does not aim to be perfect.
+ * Manual review and adjustment are still required afterwards.
  */
 const fs = require('fs');
 const path = require('path');
 
-// 递归遍历目录，找出所有 .ts/.tsx 文件
+// Recursively walk the directory and find all .ts/.tsx files
 function walk(dir) {
   let results = [];
   const items = fs.readdirSync(dir);
@@ -38,7 +38,7 @@ for (const file of files) {
   let modified = false;
   let count = 0;
 
-  // 检查文件是否已有 useTranslation import
+  // Check whether the file already imports useTranslation
   const hasChinese = /[\u4e00-\u9fff]/.test(content);
   if (!hasChinese) continue;
 

@@ -1,10 +1,10 @@
 /**
- * clone-url —— URL basic-auth 底层工具 + provider-aware 派发入口。
+ * clone-url -- low-level URL basic-auth utilities + provider-aware dispatch entry.
  *
- * 分层：
- *   - `injectBasicAuth`：纯粹的 `https://<user>:<pass>@host/...` 编码，无业务
- *   - `buildCloneUrl`：入口。provider.applyToCloneUrl 覆盖 → 走 provider；
- *     否则委托给 provider.authMethod.buildCloneUrl（bearer/basic 分别处理）
+ * Layering:
+ *   - `injectBasicAuth`: pure `https://<user>:<pass>@host/...` encoding, no business logic
+ *   - `buildCloneUrl`: entry point. provider.applyToCloneUrl override -> use provider;
+ *     otherwise delegate to provider.authMethod.buildCloneUrl (bearer/basic handle it respectively)
  */
 
 import type { CredentialPayload, ICodeSourceProvider } from "./types.js";
@@ -17,10 +17,10 @@ export class CloneUrlError extends Error {
 }
 
 /**
- * 底层 URL basic-auth 编码工具（无业务，不判 kind）。
+ * Low-level URL basic-auth encoding utility (no business logic, does not branch on kind).
  *
- * 输入 `{user, pass}` 与仓库 URL → 输出 `https://<user>:<pass>@host/...`。
- * user / pass 都做 URL 编码；只放行 https。
+ * Input `{user, pass}` and repo URL -> output `https://<user>:<pass>@host/...`.
+ * Both user and pass are URL-encoded; only https is allowed.
  */
 export function injectBasicAuth(
   repoUrl: string,
@@ -40,8 +40,8 @@ export function injectBasicAuth(
 }
 
 /**
- * 把 URL 里的凭据剥掉（clone 完成后落回 .git/config 用的干净地址）。
- * 幂等：干净地址传进来原样返回。
+ * Strip the credentials out of the URL (the clean address written back to .git/config after clone completes).
+ * Idempotent: a clean address passed in is returned as is.
  */
 export function stripCredentials(repoUrl: string): string {
   const url = tryParse(repoUrl);
@@ -60,11 +60,11 @@ function tryParse(s: string): URL | null {
 }
 
 /**
- * provider-aware 派发入口。
+ * Provider-aware dispatch entry.
  *
- * 优先级：
- *   1. `provider.applyToCloneUrl`（provider 完全接管）
- *   2. `provider.authMethod.buildCloneUrl`（默认，按认证方式分派）
+ * Priority:
+ *   1. `provider.applyToCloneUrl` (provider takes over completely)
+ *   2. `provider.authMethod.buildCloneUrl` (default, dispatched by auth method)
  */
 export function buildCloneUrl(
   provider: ICodeSourceProvider,

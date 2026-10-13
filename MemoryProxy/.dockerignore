@@ -1,20 +1,20 @@
-# 依赖与构建产物
+# Dependencies and build artifacts
 node_modules
 dist
 
-# 不打进镜像的目录
+# Directories excluded from the image
 dashboard
 gateway
 docs
 logs
 
-# 运行期产物
+# Runtime artifacts
 *.log
 *.jsonl
 nohup.out
 context-proxy.pid
 
-# 配置文件（运行时挂载 /data/config.yaml）
+# Config files (mounted at runtime as /data/config.yaml)
 config.yaml
 config-a.yaml
 config-example.yaml
@@ -23,7 +23,7 @@ config.*.local.yaml
 **/.env
 **/.env.*
 
-# 版本控制与编辑器
+# Version control and editors
 .git
 .gitignore
 .gitmodules
@@ -32,10 +32,10 @@ config.*.local.yaml
 .codebuddy
 .claude
 
-# 内部 CI / 内部构建工具（若打进镜像会暴露内部拓扑）
+# Internal CI / build tooling (would expose internal topology if baked into the image)
 .coding-ci.yaml
 
-# E2E / verify / smoke scripts —— 不需要进运行镜像
+# E2E / verify / smoke scripts -- not needed in the runtime image
 scripts/e2e-*
 scripts/verify-*
 scripts/warm-*
@@ -44,6 +44,6 @@ scripts/smoke-*
 scripts/mock-shark-*
 e2e/
 
-# 容器相关自身
+# Container files themselves
 Dockerfile
 .dockerignore

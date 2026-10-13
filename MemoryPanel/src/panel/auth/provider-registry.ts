@@ -19,10 +19,10 @@ export class AuthProviderRegistry {
   }
 
   /**
-   * 按能力形态筛选 Provider。
+   * Filter providers by capability kind.
    *
-   * 用于 ingress 中间件（`header-injected` 类需要按头名匹配）与 callback 路由
-   * （`redirect-oauth2` 类需要用 state → 定位 provider）的场景。
+   * Used by the ingress middleware (`header-injected` kinds are matched by header name) and the callback route
+   * (`redirect-oauth2` kinds locate the provider via state).
    */
   listByKind(kind: 'header-injected'): HeaderInjectedProvider[];
   listByKind(kind: 'redirect-oauth2'): RedirectOAuth2Provider[];

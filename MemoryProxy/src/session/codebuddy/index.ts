@@ -1,11 +1,11 @@
 /**
  * CodeBuddy Session Init — Public API.
  *
- * 独立的 CodeBuddy session-init 实现：
+ * Standalone CodeBuddy session-init implementation:
  *   - Form: `ask_followup_question` tool_call
  *   - Extractor: `<question_answer>` XML
- *   - Cleaner: XML envelope 检测
- *   - 无分页、无选项数限制
+ *   - Cleaner: XML envelope detection
+ *   - No pagination, no option-count limit
  */
 
 export { handleSessionInit } from "./init.js";

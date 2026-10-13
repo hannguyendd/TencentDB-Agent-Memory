@@ -69,8 +69,8 @@ initAuth(config.auth);
 initSystemUsers(config.systemUsers);
 
 // ── Initialize ProxyStorage (dynamic import cost-guard for kernel-sts COS) ──
-// 必须 await —— dynamic import 是 async 的；不 await 直接进 createApp 会
-// 让首个 cos 请求 fallback 到 sqlite（backend 已经拿到但 _kernelStsFactory null）
+// Must await -- the dynamic import is async; going straight into createApp without awaiting would
+// make the first cos request fall back to sqlite (the backend is already obtained but _kernelStsFactory is null)
 await initProxyStorage(config.storage);
 const effectiveStorage = getEffectiveBackend();
 if (config.storage.enabled && config.storage.backend === "cos" && effectiveStorage.effective !== "cos") {
@@ -155,10 +155,10 @@ serve(
 );
 
 // ── Graceful shutdown ────────────────────────────────────────────────────────
-// L0 flush 顺序放在最前：streaming 场景 recordTdaiTurn 是 fire-and-forget，
-// pod rolling update 收到 SIGTERM 时 event loop 里可能还有 in-flight POST
-// 未落到 tdai kernel。先等它们跑完（10s 兜底），再关闭 langfuse/clickhouse/log。
-// k8s 默认 terminationGracePeriodSeconds=30s，10s 留出充足余量。
+// L0 flush comes first: in streaming scenarios recordTdaiTurn is fire-and-forget, and
+// when a pod rolling update receives SIGTERM there may still be in-flight POSTs in the event loop
+// not yet persisted to the tdai kernel. Wait for them to finish first (10s cap), then close langfuse/clickhouse/log.
+// k8s default terminationGracePeriodSeconds=30s; 10s leaves ample margin.
 async function gracefulShutdown(signal: "SIGTERM" | "SIGINT"): Promise<void> {
   log.info("server.shutdown", { signal });
   const pending = pendingWriteCount();

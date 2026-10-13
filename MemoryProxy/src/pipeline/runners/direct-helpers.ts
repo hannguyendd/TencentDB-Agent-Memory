@@ -1,19 +1,19 @@
 /**
  * Direct passthrough pure helpers (Phase 4.1)。
  *
- * 提取自老 directHandler.ts (line 70-113); direct runner + 测试都从这里 import,
- * 保证 helper 无副作用可独立单测。
+ * Extracted from the old directHandler.ts (line 70-113); the direct runner and tests both import from here,
+ * so the helpers stay side-effect free and can be unit-tested independently.
  */
 
-/** 版本号段正则: v 后接一个或多个数字 (v1 / v10 ...)。 */
+/** Version segment regex: "v" followed by one or more digits (v1 / v10 ...). */
 const VERSION_SEGMENT_RE = /^v\d+$/i;
 
-/** 上游协议类型。仅这两种走观测; 其它端点纯透传。 */
+/** Upstream protocol type. Only these two are observed; other endpoints are passed through as-is. */
 export type DirectUpstreamProtocol = "anthropic" | "openai";
 
 /**
- * 从 /direct/... 请求路径解析出 upstream 目标路径。
- * 先去 /direct 前缀, 再去紧跟的 vN 段; 剥离后为空则返回 ""。
+ * Parse the upstream target path from a /direct/... request path.
+ * Strip the /direct prefix, then the immediately following vN segment; return "" if empty after stripping.
  */
 export function stripDirectPrefix(requestPath: string): string {
   const directMatch = requestPath.match(/^\/direct(\/.*)?$/);
@@ -27,7 +27,7 @@ export function stripDirectPrefix(requestPath: string): string {
   return rest;
 }
 
-/** upstream URL 拼接: upstream.url + 剥离后的路径 + query string。 */
+/** Upstream URL assembly: upstream.url + stripped path + query string. */
 export function buildDirectUpstreamUrl(
   upstreamBase: string,
   requestPath: string,
@@ -42,7 +42,7 @@ export function buildDirectUpstreamUrl(
   return `${normalizedBase}${pathPart}${query}`;
 }
 
-/** 根据剥离后的路径判定上游协议。null = 不做观测 (纯透传)。 */
+/** Determine the upstream protocol from the stripped path. null = no observation (pure passthrough). */
 export function detectProtocol(strippedPath: string): DirectUpstreamProtocol | null {
   const p = strippedPath.replace(/\/+$/, "");
   if (p === "/messages") return "anthropic";

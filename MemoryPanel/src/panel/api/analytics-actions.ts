@@ -1,39 +1,39 @@
 /**
- * 内核 /v3/analytics/* 查询面 action 列表（Core 16 条）。
+ * Action list for the kernel /v3/analytics/* query surface (16 Core actions).
  *
- * 对接文档：iwiki 4036925405「团队记忆可观测性 Analytics Query API」。
- * 数据源为 MemoryCore 侧 ClickHouse（database: context_proxy）的四张表：
+ * Reference doc: iwiki 4036925405 "Team Memory Observability Analytics Query API".
+ * The data source is four tables in ClickHouse on the MemoryCore side (database: context_proxy):
  * usage_logs / usage_raw / session_init_logs / tool_call_logs。
  *
- * 与 /v3/meta/*、/v3/skill/* 的差异：
- *   - method 不统一：config / spaces 是 GET，其余 14 条是 POST（用错 method → 405）；
- *   - 除 config 外全部要求 system_admin（内核 authenticateV3 校验），普通成员 → 403；
- *   - CH 未配置时除 config 外全部 503（config 返回 configured:false）；
- *   - 过滤维度是 space_id / user_id（不支持 team_id），时间窗为 days 或 from/to。
+ * Differences from /v3/meta/* and /v3/skill/*:
+ *   - Methods are not uniform: config / spaces are GET, the other 14 are POST (wrong method -> 405);
+ *   - Everything except config requires system_admin (checked by the kernel's authenticateV3); regular members get 403;
+ *   - When CH is not configured, everything except config returns 503 (config returns configured:false);
+ *   - Filter dimensions are space_id / user_id (team_id is not supported); the time window is days or from/to.
  *
- * 本期只接入「指标 + trace」查询面，watermark / detail-fetch 保留在列表内
- * （后续 recall 增量链路复用），页面端不直接调用。
+ * This phase only wires up the "metrics + trace" query surface; watermark / detail-fetch stay in the list
+ * (for the later recall incremental pipeline to reuse) and are not called directly by the page.
  */
 
-/** GET 类 action —— 内核声明为 GET，必须用 GET 转发，否则 405。 */
+/** GET actions -- declared as GET by the kernel; must be forwarded with GET, otherwise 405. */
 export const ANALYTICS_GET_ACTIONS = new Set(['config', 'spaces']);
 
 export const ANALYTICS_ACTIONS = [
-  // 元信息
+  // Meta info
   'config',
   'spaces',
-  // 会话初始化 / 渗透率
+  // Session initialization / penetration rate
   'session-init/summary',
   'session-init/timeseries',
   'session-init/bypass-reasons',
-  // 工具调用行为
+  // Tool-call behavior
   'tool-calls/endpoint-share',
   'tool-calls/top-bodies',
   'tool-calls/timeseries',
   'tool-calls/list',
   'tool-calls/watermark',
   'tool-calls/detail-fetch',
-  // Token / Credit 用量
+  // Token / Credit usage
   'usage/summary',
   'usage/timeseries',
   'usage/by-model',
@@ -49,7 +49,7 @@ export function isAllowedAnalyticsAction(action: string): action is AnalyticsAct
   return ALLOWED_ANALYTICS_ACTIONS.has(action);
 }
 
-/** 该 action 是否走 GET（否则 POST）。 */
+/** Whether this action uses GET (otherwise POST). */
 export function isAnalyticsGetAction(action: string): boolean {
   return ANALYTICS_GET_ACTIONS.has(action);
 }

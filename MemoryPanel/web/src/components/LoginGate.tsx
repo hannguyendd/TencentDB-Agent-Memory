@@ -1,17 +1,17 @@
 /**
- * LoginGate — 进入应用前的登录页面（对接新面板 Control，见 09 设计文档 §3.3）。
+ * LoginGate — Login page shown before entering the app (backed by the new panel Control, see design doc 09 §3.3).
  *
- * 登录流程（无 Cookie、无 OAuth，Header 双凭证鉴权）：
- *   1. GET /api/v1/meta/instances              → 选记忆实例
- *   2. 用户输入自持的 user_key（sk-mem-…）
- *   3. POST /api/v1/meta/auth/verify（Header 仅 X-Tdai-Service-Id，body 带 user_key）
- *      → data.valid === true 登录成功；data.user 写入会话
- *   4. 前端把 { instance_id, user_key, user } 缓存到 localStorage（见 lib/panelSession.ts），
- *      之后每个 meta 请求都从这里读出注入双 Header
+ * Login flow (no cookies, no OAuth, dual-credential header auth):
+ *   1. GET /api/v1/meta/instances              → pick a memory instance
+ *   2. User enters their own user_key (sk-mem-…)
+ *   3. POST /api/v1/meta/auth/verify (header carries only X-Tdai-Service-Id; body carries user_key)
+ *      → data.valid === true login succeeds; data.user is written to the session
+ *   4. The frontend caches { instance_id, user_key, user } in localStorage (see lib/panelSession.ts),
+ *      and every subsequent meta request reads from there to inject both headers Header
  *
- * 设计：单列居中的明亮极简风格 —— 全屏点阵波纹动效背景（ParticleWaveBackground，
- * 纯 Canvas 零依赖，视觉参考 React Bits 的 Particles / DotGrid）+ 居中毛玻璃卡片，
- * 卡片内为「选实例 + 输入 user_key」表单。
+ * Design: single-column centered, bright minimalist style — full-screen dot-matrix wave background (ParticleWaveBackground,
+ * pure Canvas, zero dependencies, visually inspired by React Bits' Particles / DotGrid) + a centered frosted-glass card,
+ * The card contains a "pick instance + enter user_key" form.
  */
 
 import { useEffect, useState } from 'react';
@@ -31,31 +31,31 @@ import ParticleWaveBackground from './ParticleWaveBackground';
 import './login-gate.css';
 
 export interface AuthState {
-  /** 展示用用户名（display_name || username），沿用旧字段名保持下游组件兼容 */
+  /** Display username (display_name || username); keeps the old field name for downstream component compatibility */
   user: string;
-  /** 后端 ULID —— 一切归属判定（owner_user_id / creator_user_id / team_members.user_id）的真正 key */
+  /** Backend ULID — the real key for all ownership checks (owner_user_id / creator_user_id / team_members.user_id) key */
   user_id: string;
   instance_id: string;
   instance_name: string;
   loggedInAt: number;
   /**
-   * 是否是全局 admin —— 来自 auth/verify 响应 data.user.user_type === 'system_admin'。
-   * admin 是全局角色，与是否创建/加入任何 team 无关（管团队，不管资源）；
-   * 非 admin 的普通用户（user_type !== 'system_admin'）才需要按 team.members 表查角色。
+   * Whether the user is a global admin — from the auth/verify response data.user.user_type === 'system_admin'.
+   * admin admin is a global role, independent of creating/joining any team (manages teams, not resources);
+   * only non-admin regular users (user_type !== 'system_admin') need a role lookup in the team.members table.
    */
   isAdmin: boolean;
 }
 
-// 内存缓存 —— 真正的持久化交给 localStorage（lib/panelSession.ts，跨 tab 共享）。
-// 这里只是给「无 prop、直接 readAuth() 取身份」的老组件（ChatMemoryPanel / WikiSourcesPanel /
-// CodeSourcesPanel 等）提供一个同步读取的镜像缓存。
+// In-memory cache — real persistence is delegated to localStorage (lib/panelSession.ts, shared across tabs).
+// This only provides a synchronous mirror cache for legacy components that read identity via readAuth() with no props (ChatMemoryPanel / WikiSourcesPanel /ChatMemoryPanel / WikiSourcesPanel /
+// CodeSourcesPanel etc.).
 let _authCache: AuthState | null = null;
 
 export function readAuth(): AuthState | null {
   return _authCache;
 }
 
-/** 登出 / 401 兜底：同时清内存镜像缓存与 localStorage 里的 instance_id+user_key。 */
+/** Logout / 401 fallback: clears both the in-memory mirror cache and the instance_id+user_key in localStorage. */
 export function clearAuth(): void {
   _authCache = null;
   clearPanelSession();
@@ -77,27 +77,27 @@ function toAuthState(user: PublicUser, instanceId: string, instanceName: string)
 }
 
 /**
- * 尝试用 localStorage 里缓存的 { instance_id, user_key, user } 恢复登录态。
- * 新面板无 Cookie，凭证由前端自持；但缓存是持久的（跨 tab、关 tab 不失效），
- * 若只信本地缓存，实例被删除 / user_key 失效后仍会判定「已登录」，导致假登录。
- * 因此恢复前必须打一次 auth/verify 向后端验活：
- *   - valid === true  → 用后端返回的最新 user 恢复（顺带刷新 user 信息与 admin 判定）；
- *   - valid !== true 或请求抛错（实例已删 / 凭证失效 / 业务错）→ 清缓存，返回 null，回登录页。
- * App 启动时调用；成功则写入内存镜像缓存并返回，失败（未登录/缓存不全/验活未过）返回 null。
+ * Try to restore the login state from the { instance_id, user_key, user } cached in localStorage.
+ * The new panel has no cookies; the frontend holds the credentials itself. But the cache is persistent (shared across tabs, survives closing tabs),
+ * so trusting only the local cache would still report "logged in" after the instance is deleted / the user_key expires, causing a fake login.
+ * Therefore auth/verify must be called against the backend as a liveness check before restoring:
+ *   - valid === true  → restore with the latest user returned by the backend (also refreshing user info and the admin flag);
+ *   - valid !== true or the request throws (instance deleted / credentials invalid / business error) → clear the cache, return null, go back to the login page.
+ * App is called on startup; on success it writes the in-memory mirror cache and returns the result; on failure (not logged in / incomplete cache / liveness check failed) it returns null.
  *
- * 竞态兜底：verify 是异步的，其 RTT 窗口内本地会话可能被并发操作改变
- * （如其他 tab 登出触发 storage 事件清了缓存、或切换了实例）。若返回后
- * localStorage 里的 { instanceId, userKey } 已与发起时不一致，说明本次恢复
- * 的结果已过期，直接丢弃、不写缓存，避免把已被清掉/换掉的登录态又写回。
+ * Race-condition guard: verify is async, and the local session may be changed by concurrent operations during its RTT window
+ * (e.g. another tab logging out and clearing the cache via a storage event, or switching instances). If, after it returns,
+ * localStorage in { instanceId, userKey } no longer matches the value at the start, this means this restore's
+ * result is stale: discard it without writing the cache, to avoid writing back a login state that has been cleared or replaced.
  */
 export async function resumeSession(): Promise<AuthState | null> {
   const session = getPanelSession();
-  // 路径一：本地有 user_key 缓存（旧登录方式）——向后端验活后恢复。
+  // Path 1: a local user_key cache exists (legacy login) — restore after a backend liveness check.
   if (session?.user && session.instanceId && session.userKey) {
     try {
       const res = await authVerifyApi.verify(session.instanceId, session.userKey);
 
-      // verify RTT 期间本地会话若被并发登出/切换，本次结果作废。
+      // During the verify RTT, if the local session is concurrently logged out/switched, this result is discarded.
       const latest = getPanelSession();
       if (
         !latest ||
@@ -108,24 +108,24 @@ export async function resumeSession(): Promise<AuthState | null> {
       }
 
       if (!res.valid) {
-        // 验活未过：实例被删 / user_key 失效，清掉过期登录态。
+        // Liveness check failed: instance deleted / user_key invalid, clear the stale login state.
         clearAuth();
         return null;
       }
-      // 优先用后端刚返回的最新 user；缺失时回退到缓存的 user。
+      // Prefer the latest user just returned by the backend; fall back to the cached user if missing.
       const user = res.user ?? session.user;
       const auth = toAuthState(user, session.instanceId, session.instanceName ?? '');
       writeAuthCache(auth);
       return auth;
     } catch {
-      // 请求抛错（实例不存在 / 后端拒绝 / 网络不可达）：按登录态失效处理，清缓存回登录页。
+      // Request threw (instance missing / backend rejected / network unreachable): treat the login state as invalid, clear the cache and go back to the login page.
       clearAuth();
       return null;
     }
   }
 
-  // 路径二：IdP（WOA）Session 使用 HttpOnly Cookie，不能从 localStorage 恢复；
-  // 向后端查询当前会话。本地 session 缺失/无 userKey（IdP 登录不落 userKey）时才走这里。
+  // Path 2: the IdP (WOA) session uses an HttpOnly cookie and cannot be restored from localStorage;
+  // query the backend for the current session. Only taken when the local session is missing / has no userKey (IdP login does not persist userKey).
   try {
     const idp = await authMethodsApi.session();
     if (!idp.authenticated || !idp.instance_id || !idp.user) return null;
@@ -163,9 +163,9 @@ export default function LoginGate({
     loginName?: string;
   } | null>(null);
   const [pendingUsername, setPendingUsername] = useState('');
-  // 首次外部认证登录：用户提供的 user_key（必填）。
+  // First external-auth login: the user_key provided by the user (required).
   const [pendingUserKey, setPendingUserKey] = useState('');
-  // 预览结果：null=未预览；exists=true 表示该 key 已属于系统内某账号（可绑定）。
+  // Preview result: null = not previewed; exists=true means the key already belongs to an account in the system (can be bound).
   const [pendingPreview, setPendingPreview] = useState<{
     exists: boolean;
     user_id?: string;
@@ -177,16 +177,16 @@ export default function LoginGate({
   const [pendingSubmitting, setPendingSubmitting] = useState(false);
   const [dismissingWoa, setDismissingWoa] = useState(false);
   const [resumingWoa, setResumingWoa] = useState(false);
-  // 建号成功后一次性展示自动生成的 user_key（供用户复制到客户端连 proxy）。
+  // After account creation, show the auto-generated user_key once (for the user to copy into the client to connect to the proxy).
   const [createdKey, setCreatedKey] = useState<{ userKey: string; user: PublicUser; instanceId: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const hasUserKeyMethod = authMethods.some((method) => method.type === 'user_key');
   const showWoaLogin = authMethodsLoaded && authMethods.some((method) => method.type === 'woa');
   /**
-   * user_key 表单始终直接展示 —— 没有"登录方式选择页"这一层。
+   * user_key form is always shown directly — there is no "login method selection page" layer.
    *
-   * 开启 iOA 也不再改变默认页：登录页就是 user_key 表单，iOA 只是表单下方的一个
-   * 跳转链接（"使用 iOA 登录"）。两个登录面各自内嵌一条通往对方的链接，点一下直达。
+   * Enabling iOA no longer changes the default page either: the login page is the user_key form, with iOA being just a
+   * jump link ("Sign in with iOA") below the form. Each of the two login surfaces embeds a link to the other, one click away.
    */
   const showUserKeyLogin = authMethodsLoaded && hasUserKeyMethod;
 
@@ -221,7 +221,7 @@ export default function LoginGate({
       })
       .catch(() => {
         if (cancelled) return;
-        // 配置接口不可用时保守回退到旧 user_key 登录，避免登录页空白。
+        // When the config endpoint is unavailable, conservatively fall back to the legacy user_key login to avoid a blank login page.
         setAuthMethods([{ id: 'user_key', type: 'user_key', display_name: 'user_key', enabled: true }]);
         setAuthMethodsLoaded(true);
       });
@@ -243,7 +243,7 @@ export default function LoginGate({
     };
   }, [t]);
 
-  /** 提交 user_key：验活通过后直接登录，无效 key 报错（不自动建号）。 */
+  /** Submit user_key: log in directly after the liveness check passes; an invalid key reports an error (no automatic account creation). */
   async function submit(e?: React.FormEvent) {
     e?.preventDefault();
     if (!instanceId) {
@@ -293,10 +293,10 @@ export default function LoginGate({
   }
 
   /**
-   * 第一步（预览）：查询用户填的 user_key 在系统内是否已有账号。
-   * exists=true → 展示该账号信息让用户确认绑定（老数据完整保留）；
-   * exists=false → 让用户确认用这把 key 新建账号。
-   * 用户改 key 时必须清掉旧预览，避免拿 A 的预览结果去提交 B。
+   * Step 1 (preview): check whether the user_key entered already has an account in the system.
+   * exists=true → show the account info for the user to confirm binding (existing data is fully preserved);
+   * exists=false → let the user confirm creating a new account with this key.
+   * When the user changes the key, the old preview must be cleared, to avoid submitting B with A's preview result.
    */
   async function previewPendingKey() {
     const key = pendingUserKey.trim();
@@ -316,7 +316,7 @@ export default function LoginGate({
     }
   }
 
-  // 第二步（确认）：按预览结果绑定存量账号或新建。
+  // Step 2 (confirm): bind the existing account or create a new one based on the preview result.
   async function completePendingWoa() {
     if (!/^[A-Za-z0-9_-]+$/.test(pendingUsername.trim())) {
       setError(t('login.woa.invalidUsername'));
@@ -326,7 +326,7 @@ export default function LoginGate({
       setError(t('login.woa.userKeyRequired'));
       return;
     }
-    // 必须先看预览再提交，确保用户是在知情（绑定 vs 新建）的情况下确认的。
+    // Preview must come before submit, ensuring the user confirms knowingly (bind vs. create).
     if (!pendingPreview) {
       await previewPendingKey();
       return;
@@ -340,8 +340,8 @@ export default function LoginGate({
       });
       if (!result.user) throw new Error(t('login.error.noUser'));
       const user = result.user;
-      // 自动生成的 key：先一次性展示让用户复制保存，再进面板；
-      // 自定义 key：用户本就知道，直接进。
+      // Auto-generated key: show it once for the user to copy and save, then enter the panel;
+      // Custom key: the user already knows it, enter directly.
       if (result.user_key_autogenerated && result.user_key) {
         setCreatedKey({ userKey: result.user_key, user, instanceId: result.instance_id });
         setPendingSubmitting(false);
@@ -359,10 +359,10 @@ export default function LoginGate({
   }
 
   /**
-   * WOA 确认页 → 改用 user_key 登录。
+   * WOA confirmation page → switch to user_key login.
    *
-   * 必须先调后端 dismiss：WOA 网关对每个请求都注入身份头，只清前端状态的话
-   * 刷新页面会被立刻弹回确认页。后端会清 pending Cookie 并下发抑制标记。
+   * Must call the backend dismiss first: the WOA gateway injects identity headers into every request, so clearing only frontend state
+   * would bounce back to the confirmation page immediately on refresh. The backend clears the pending cookie and issues a suppression flag.
    */
   async function switchToUserKeyFromWoa() {
     setDismissingWoa(true);
@@ -380,13 +380,13 @@ export default function LoginGate({
   }
 
   /**
-   * 点 iOA 相关按钮：撤销抑制标记 + 走回原有行为。
+   * Clicking iOA-related buttons: revoke the suppression flag + resume the original behavior.
    *
-   * 必须与 switchToUserKeyFromWoa 成对：撤销之前落下的抑制标记，
-   * 否则 WOA ingress 中间件会直接放行，用户点 iOA 后仍停在 user_key 表单。
+   * Must be paired with switchToUserKeyFromWoa: revoke the suppression flag set earlier,
+   * otherwise the WOA ingress middleware lets requests through directly, and after clicking iOA the user would still be stuck on the user_key form.
    *
-   * 后端调用失败不阻断：抑制标记是会话级的，关掉浏览器即失效；
-   * 且相比"点 iOA 没反应"，"慢一点"是可以接受的降级。
+   * Backend call failure does not block: the suppression flag is session-scoped and expires when the browser is closed;
+   * and compared with "clicking iOA does nothing", "a bit slower" is an acceptable degradation.
    */
   async function switchToWoa() {
     setResumingWoa(true);
@@ -394,7 +394,7 @@ export default function LoginGate({
     try {
       await authMethodsApi.resumeWoa();
     } catch {
-      // 忽略：见上方说明，失败不阻断。
+      // Ignored: see the note above; failure does not block.
     }
     setResumingWoa(false);
     if (instanceId) authMethodsApi.loginWoa(instanceId);
@@ -402,7 +402,7 @@ export default function LoginGate({
 
   return (
     <div className="_tdai-login">
-      {/* 明亮点阵波纹动效背景（纯 Canvas，零外部依赖） */}
+      {/* Bright dot-matrix wave animated background (pure Canvas, zero external dependencies) */}
       <div className="_tdai-login-bg" aria-hidden="true">
         <ParticleWaveBackground
           className="_tdai-login-bg-canvas"
@@ -412,7 +412,7 @@ export default function LoginGate({
         />
       </div>
 
-      {/* 居中内容区 */}
+      {/* Centered content area */}
       <main className="_tdai-login-main">
         <div className="_tdai-login-card">
           <img src="/logo.png" alt="Memory Hub" className="_tdai-login-logo" />
@@ -483,7 +483,7 @@ export default function LoginGate({
                   value={pendingUserKey}
                   onChange={(value) => {
                     setPendingUserKey(value);
-                    // key 变了，旧预览立即作废——否则会拿 A 的预览结果去提交 B。
+                    // key changed, the old preview is invalidated immediately — otherwise B would be submitted with A's preview result.
                     setPendingPreview(null);
                     setError(null);
                   }}
@@ -493,7 +493,7 @@ export default function LoginGate({
                 <p className="_tdai-login-hint">{t('login.woa.userKeyHint')}</p>
               </div>
 
-              {/* 预览结果：让用户看清这把 key 属于谁，再决定绑定还是新建 */}
+              {/* Preview result: let the user see who this key belongs to before deciding to bind or create */}
               {pendingPreview && (
                 <div className="_tdai-login-alert">
                   {pendingPreview.exists ? (
@@ -521,7 +521,7 @@ export default function LoginGate({
                 loading={pendingSubmitting || pendingPreviewing}
                 disabled={pendingSubmitting || pendingPreviewing || !pendingUsername.trim() || !pendingUserKey.trim()}
               >
-                {/* 未预览=下一步（先看清 key 归属）；已预览=明确告知是绑定还是新建 */}
+                {/* Not previewed = Next (see the key's owner first); previewed = clearly tell whether this is a bind or a create */}
                 {!pendingPreview
                   ? t('login.woa.previewNext')
                   : pendingPreview.exists
@@ -529,7 +529,7 @@ export default function LoginGate({
                     : t('login.woa.confirmCreate')}
               </Button>
 
-              {/* 已有 user_key 的老用户不该被强制建号：提供切回 user_key 登录的出口 */}
+              {/* Existing users who already have a user_key should not be forced to create an account: provide a way back to user_key login */}
               {hasUserKeyMethod && (
                 <div className="_tdai-login-switch">
                   <Button
@@ -548,7 +548,7 @@ export default function LoginGate({
 
           {!pendingWoa && showUserKeyLogin && (
             <form onSubmit={submit} className="_tdai-login-form">
-            {/* 记忆实例选择 — GET /api/v1/meta/instances */}
+            {/* Memory instance selection — GET /api/v1/meta/instances */}
             <div className="_tdai-login-field">
               <label className="_tdai-login-label" htmlFor="tdai-login-instance">
                 {t('login.field.instance')}
@@ -570,7 +570,7 @@ export default function LoginGate({
               />
             </div>
 
-            {/* user_key（sk-mem-…），经 auth/verify 验活后写入前端会话 */}
+            {/* user_key (sk-mem-…), written to the frontend session after the auth/verify liveness check */}
             <div className="_tdai-login-field">
               <label className="_tdai-login-label" htmlFor="tdai-login-key">
                 {t('login.field.userKey')}
@@ -609,7 +609,7 @@ export default function LoginGate({
             </form>
           )}
 
-          {/* user_key 表单下方的 iOA 跳转入口：开启 iOA 时直接跳过去，不经选择页 */}
+          {/* user_key form: iOA jump entry below it; when iOA is enabled, jump straight there without a selection page */}
           {!pendingWoa && showWoaLogin && showUserKeyLogin && instanceId && (
             <div className="_tdai-login-switch">
               <Button

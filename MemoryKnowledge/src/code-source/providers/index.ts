@@ -1,17 +1,17 @@
 /**
- * 内置 provider 注册入口。
+ * Built-in provider registration entry.
  *
- * 新接入平台的**唯一改动点**：
- *   1. 在同目录建 `<id>.ts`，导出 `<id>Provider: ICodeSourceProvider`
- *   2. 在下面 BUILTIN_PROVIDERS 数组加一行
+ * The **only change point** for onboarding a new platform:
+ *   1. Create `<id>.ts` in the same directory, exporting `<id>Provider: ICodeSourceProvider`
+ *   2. Add one line to the BUILTIN_PROVIDERS array below
  *
- * 是否启用某平台由部署环境 `CODE_SOURCE_ENABLED` 决定，与本表解耦。
+ * Whether a platform is enabled is decided by the deployment env `CODE_SOURCE_ENABLED`, decoupled from this table.
  */
 
 import type { ICodeSourceProvider } from "../types.js";
 import { gongfengProvider } from "./gongfeng.js";
 
-/** 全部内置 provider（是否启用由 CODE_SOURCE_ENABLED 过滤，不代表全部会展示给用户）。 */
+/** All built-in providers (whether enabled is filtered by CODE_SOURCE_ENABLED; not all of them are shown to users). */
 export const BUILTIN_PROVIDERS: readonly ICodeSourceProvider[] = [
   gongfengProvider,
 ];

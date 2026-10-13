@@ -54,17 +54,17 @@ function isLowSurrogate(code: number): boolean {
   return code >= 0xDC00 && code <= 0xDFFF;
 }
 
-// ── 共享工厂 (Phase 0.4, 2026-09-28) ─────────────────────────────────────
+// ── Shared factory (Phase 0.4, 2026-09-28) ─────────────────────────────────────
 /**
- * 建 per-request TdaiClient。原本 handler / anthropicHandler / codexHandler /
- * workbuddyHandler 各写一遍完全相同的 factory (workbuddy 版漏传 spaceId 是
- * 已知 bug, 见 handler-audit §2.2)。
+ * Builds a per-request TdaiClient. Previously handler / anthropicHandler / codexHandler /
+ * workbuddyHandler each wrote the exact same factory (the workbuddy version forgetting to pass spaceId was a
+ * known bug, see handler-audit §2.2).
  *
- * `spaceId` (来自 URL `/{agent}/{spaceId}/...`) 覆盖 config.tdai.serviceId,
- * 让多租户请求写到正确的 kernel tenant; 不传 spaceId 时回退全局默认 (兼容
- * 老单租户部署)。
+ * `spaceId` (from the URL `/{agent}/{spaceId}/...`) overrides config.tdai.serviceId,
+ * so multi-tenant requests write to the correct kernel tenant; without spaceId it falls back to the global default (compatible with
+ * legacy single-tenant deployments).
  *
- * memory 未启用时返 null, 调用侧靠 `if (client)` 短路。
+ * Returns null when memory is not enabled; callers short-circuit with `if (client)`.
  */
 export function buildTdaiClientForRequest(
   config: {
@@ -88,8 +88,8 @@ export function buildTdaiClientForRequest(
 ): TdaiClient | null {
   const t = config.tdai;
   if (!t?.enabled || !t.memory?.enabled || !t.endpoint) return null;
-  // 与 handler/anthropic 的 createTdaiClient 完全一致的字段透传;
-  // 老 factory 也没做 defaults — 依赖 config 加载器 fillDefaults 已经填过。
+  // Fields are passed through exactly as in createTdaiClient in handler/anthropic;
+  // the old factory did not apply defaults either - it relies on the config loader's fillDefaults having filled them.
   return new TdaiClient({
     enabled: t.enabled && t.memory.enabled,
     endpoint: t.endpoint,
@@ -109,20 +109,20 @@ export type AclAction = "read" | "write" | "delete" | "grant";
 
 export interface AclCheckParams {
   /**
-   * 请求发起者的 user_key（原始 `sk-mem-...`）。
+   * User key of the request initiator (raw `sk-mem-...`).
    *
-   * tdai `/v3/meta/*` 路由要求 `x-tdai-user-key` header 才能通过 Layer 3
-   * 用户鉴权（否则 401 missing_user_key）。这里传入的 user_key 会：
-   *   1. 作为 `x-tdai-user-key` header 走鉴权（"你是谁"）
-   *   2. tdai 服务端会用它解析出 user_id，用于 checkAssetPermission 判定
+   * tdai `/v3/meta/*` routes require the `x-tdai-user-key` header to pass Layer 3
+   * user auth (otherwise 401 missing_user_key). The user_key passed here will:
+   *   1. be used as the `x-tdai-user-key` header for authentication ("who you are")
+   *   2. be used by the tdai server to resolve user_id, which is used by checkAssetPermission
    *
-   * 因此 body 里**不再需要** user_id —— tdai 从 header 自解析。
+   * So the body **no longer needs** user_id - tdai resolves it from the header.
    */
   user_key: string;
-  /** 目标资产 id，如 `chat_memory-{team}-{agent}`。 */
+  /** Target asset id, e.g. `chat_memory-{team}-{agent}`. */
   asset_id: string;
   action: AclAction;
-  /** 可选：显式限定检查作用于哪个 agent。 */
+  /** Optional: explicitly restrict which agent the check applies to. */
   agent_id?: string;
 }
 
@@ -185,8 +185,8 @@ export class TdaiClient {
   /**
    * Multi-agent variant: search L1 against a specific (team, user, agent)
    * triplet, while keeping the caller's session/task on the wire.
-   *   - 用于"自有 + 借入"召回中的某一个 agent
-   *   - 不带 query 直接返空（与原行为一致）
+   *   - used for one agent in "own + borrowed" recall
+   *   - returns empty directly without a query (same as the original behavior)
    */
   async searchL1ForCtx(
     ctx: TdaiAgentCtx,
@@ -360,23 +360,23 @@ export class TdaiClient {
 
   // ── ACL check ──────────────────────────────────────────────────────────
   //
-  // 与 memory 读取调用（postForCtx 默认模式）**语义相反**：
-  //   - postForCtx 读取失败返回空，让注入路径降级；L0 写入开启 throwOnError
-  //   - checkAcl 网络/HTTP/envelope 错要抛出 —— 让上层 fail-closed 拒绝注入
-  //     并打 error 日志（否则 acl 服务挂了会静默变成"全部允许"，越权）
+  // **Opposite semantics** to memory read calls (postForCtx default mode):
+  //   - postForCtx returns empty on read failure so the injection path degrades; L0 writes enable throwOnError
+  //   - checkAcl must throw on network/HTTP/envelope errors - so the caller fails closed and rejects injection
+  //     and logs an error (otherwise an ACL service outage would silently become "allow all", a privilege escalation)
   //
-  // 因此本方法不复用 postForCtx，独立实现 —— 但仍然复用同一份 config
+  // So this method does not reuse postForCtx and is implemented independently - but still reuses the same config
   // （endpoint / apiKey / serviceId / timeoutMs）。
 
   /**
-   * 校验 user_id 对某 asset 的权限。
+   * Checks a user_id's permission on an asset.
    *
-   * 抛错场景（fetch/超时/HTTP 非 2xx/envelope code≠0/data.allowed 非 boolean）
-   * 应当由调用方 catch 后按业务需要处理 —— 注入路径请用 checkAclOrDeny 便捷函数。
+   * Throw scenarios (fetch/timeout/HTTP non-2xx/envelope code≠0/data.allowed not boolean)
+   * should be caught by the caller and handled as the business requires - injection paths should use the checkAclOrDeny helper.
    */
   async checkAcl(params: AclCheckParams): Promise<AclCheckResult> {
     if (!this.isEnabled()) {
-      // 未启用 tdai 时按"通过"处理，与其他 memory 方法在 disabled 下的返回一致。
+      // When tdai is not enabled, treat as "allowed", consistent with other memory methods' returns when disabled.
       return { allowed: true, reason: "tdai_disabled" };
     }
     const base = this.config.endpoint.replace(/\/$/, "");
@@ -390,15 +390,15 @@ export class TdaiClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.config.apiKey || "local-proxy"}`,
           "x-tdai-service-id": this.config.serviceId || "default",
-          // Layer 3 用户鉴权：tdai v3 meta 路由要求此 header 才能通过，否则
-          // 401 missing_user_key。Proxy 侧的当前请求发起者 user_key 直接用作
-          // 调用者身份。
+          // Layer 3 user auth: tdai v3 meta routes require this header to pass, otherwise
+          // 401 missing_user_key. The Proxy side uses the current request initiator's user_key directly as
+          // the caller identity.
           "x-tdai-user-key": params.user_key,
         },
         body: JSON.stringify({
-          // body user_key = 要**检查权限的目标用户**（这里跟调用者是同一个人 —— proxy
-          // 场景下永远是自己给自己校验）。schema (userIdOrKeyFields.refine)
-          // 要求 user_id 或 user_key 至少一个 —— 我们复用 header 那个 key。
+          // body user_key = the **target user whose permission is checked** (same person as the caller here - in the proxy
+          // scenario it is always checking oneself). The schema (userIdOrKeyFields.refine)
+          // requires at least one of user_id or user_key - we reuse the header's key.
           user_key: params.user_key,
           asset_id: params.asset_id,
           action: params.action,
@@ -425,15 +425,15 @@ export class TdaiClient {
 }
 
 /**
- * 注入路径便捷函数：包一层 try/catch + error 日志。
+ * Injection-path helper: wraps a try/catch + error logging.
  *
- * 语义：
- *   - allowed=true                  → 放行
- *   - allowed=false                 → 拒绝（正常，由调用方决定是否 warn）
- *   - 底层调用抛错                  → 拒绝 + error 日志（fail-closed）
+ * Semantics:
+ *   - allowed=true                  -> allow
+ *   - allowed=false                 -> deny (normal; the caller decides whether to warn)
+ *   - underlying call throws        -> deny + error log (fail-closed)
  *
- * 使用场景：resolveFixedAssetCtxs 里逐个 ctx 过滤时，不希望一次网络错就
- * 让整个注入路径抛异常，用这个便捷函数把异常转成"拒绝"信号即可。
+ * Use case: when filtering ctxs one by one in resolveFixedAssetCtxs, we don't want a single network error to
+ * make the whole injection path throw; this helper converts the exception into a "deny" signal.
  */
 export async function checkAclOrDeny(
   client: TdaiClient,
@@ -455,7 +455,7 @@ function stripUndefined(body: Record<string, unknown>): Record<string, unknown> 
   return Object.fromEntries(Object.entries(body).filter(([, value]) => value !== undefined));
 }
 
-/** 打印敏感 userKey 时脱敏：只保留前 6 位 + 后 4 位。 */
+/** Mask the sensitive userKey when printing: keep only the first 6 and last 4 chars. */
 function maskUserKey(key: string | undefined): string {
   if (!key) return "";
   if (key.length <= 12) return "***";

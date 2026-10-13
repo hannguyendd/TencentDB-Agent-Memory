@@ -1,35 +1,35 @@
 /**
- * Client Capabilities Detection — 客户端能力探测.
+ * Client Capabilities Detection.
  *
- * 目的：不同客户端对"proxy 侧发起 fake ask tool_call"的支持情况不同。
- *   - workbuddy 老版本：body.tools 里含 `AskUserQuestion` → 支持卡片表单（tool_calls SSE）
- *   - workbuddy 新版本：body.tools 里**不含** `AskUserQuestion` → 不支持卡片，需降级为纯文字回复
- *   - 其他客户端：本模块不做判定（保持原路径）
+ * Purpose: different clients differ in their support for "proxy-initiated fake ask tool_calls".
+ *   - workbuddy old versions: body.tools contains `AskUserQuestion` → card forms supported (tool_calls SSE)
+ *   - workbuddy new versions: body.tools does **not** contain `AskUserQuestion` → cards unsupported, must degrade to plain-text replies
+ *   - other clients: this module makes no determination (original path is kept)
  *
- * 判定信号：agentSource + body.tools[]。**每次请求实时算**，不缓存，
- * 所以同一 sessionKey 下次带上 ask 工具会自动切回卡片模式。
+ * Detection signals: agentSource + body.tools[]. **Computed live on every request**, not cached,
+ * so if the same sessionKey carries the ask tool next time it automatically switches back to card mode.
  *
- * Scope（当前迭代）：只判定 workbuddy 有没有 `AskUserQuestion` 工具。
- * 其他客户端一律 `askUserQuestion: true`（走原逻辑），避免误伤 dsh / codebuddy /
- * claude-code / codex / opencode / hermes / openclaw 的既有分支。
+ * Scope (current iteration): only determines whether workbuddy has the `AskUserQuestion` tool.
+ * All other clients always get `askUserQuestion: true` (original logic), to avoid breaking existing branches of dsh / codebuddy /
+ * claude-code / codex / opencode / hermes / openclaw.
  */
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/** WorkBuddy 侧用来弹卡片表单的工具名。跟 workbuddy/form.ts 里的 TOOL_NAME 保持一致。 */
+/** Tool name WorkBuddy uses to pop up card forms. Keep consistent with TOOL_NAME in workbuddy/form.ts. */
 export const WB_ASK_TOOL_NAME = "AskUserQuestion";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface ClientCapabilities {
   /**
-   * 客户端是否支持 proxy 发起"询问用户"的卡片工具调用。
+   * Whether the client supports proxy-initiated "ask the user" card tool calls.
    *
-   * - `true`  → 走原有卡片模式（tool_calls SSE + form 渲染）
-   * - `false` → 走文字模式（content chunk + markdown 渲染 + 纯文字解析）
+   * - `true`  → use the existing card mode (tool_calls SSE + form rendering)
+   * - `false` → use text mode (content chunk + markdown rendering + plain-text parsing)
    *
-   * 目前仅 workbuddy 会返 false（body.tools 不含 AskUserQuestion 时）；
-   * 其他客户端一律 true（保持既有行为）。
+   * Currently only workbuddy returns false (when body.tools has no AskUserQuestion);
+   * all other clients always return true (existing behavior preserved).
    */
   askUserQuestion: boolean;
 }
@@ -37,13 +37,13 @@ export interface ClientCapabilities {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * 从 body.tools[] 里检查是否包含指定名称的工具。
+ * Check whether body.tools[] contains a tool with the given name.
  *
- * 兼容两种 shape:
+ * Compatible with two shapes:
  *   - OpenAI:    `{ type: "function", function: { name: "..." } }`
  *   - flat:      `{ name: "..." }`
  *
- * tools 为空数组 / 非数组 / undefined 时返 false。
+ * Returns false when tools is an empty array / not an array / undefined.
  */
 function toolsContain(tools: unknown, name: string): boolean {
   if (!Array.isArray(tools) || tools.length === 0) return false;
@@ -59,25 +59,25 @@ function toolsContain(tools: unknown, name: string): boolean {
 // ── Detection ──────────────────────────────────────────────────────────────────
 
 /**
- * 探测当前请求的客户端能力。
+ * Detect the capabilities of the client making the current request.
  *
- * @param agentSource - 客户端类型，如 "workbuddy" / "codebuddy" / "dsh" / ...
- * @param body        - 原始请求 body（含 tools[]）
- * @returns 能力标记
+ * @param agentSource - client type, e.g. "workbuddy" / "codebuddy" / "dsh" / ...
+ * @param body        - raw request body (including tools[])
+ * @returns capability flags
  */
 export function detectClientCapabilities(
   agentSource: string,
   body: unknown,
 ): ClientCapabilities {
-  // 仅对 workbuddy 做能力判定；其他客户端一律走原路径。
+  // Only workbuddy gets capability detection; all other clients take the original path.
   if (agentSource !== "workbuddy") {
     return { askUserQuestion: true };
   }
 
-  // workbuddy：检查 body.tools[] 是否含 AskUserQuestion。
-  // - tools 非数组 / 空数组 / 缺失 → 视为**无能力**（新版 WB 就是这个形态）
-  //   这样处理更保守：宁可走文字模式（体验较差但能走通），
-  //   也不要走卡片模式（客户端不识别 tool → 卡死）。
+  // workbuddy: check whether body.tools[] contains AskUserQuestion.
+  // - tools not an array / empty array / missing → treated as **no capability** (this is the shape of new WB)
+  //   This is the more conservative choice: better to use text mode (worse UX but works),
+  //   than card mode (client does not recognize the tool → hangs).
   const tools = (body as { tools?: unknown } | null | undefined)?.tools;
   const hasAskTool = toolsContain(tools, WB_ASK_TOOL_NAME);
   return { askUserQuestion: hasAskTool };

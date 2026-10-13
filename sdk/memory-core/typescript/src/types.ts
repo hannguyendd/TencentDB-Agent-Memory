@@ -1,13 +1,13 @@
 /**
- * v2 API 请求/响应类型 — 从 docs/team-api-仅memory.yaml 提取。
+ * v2 API request/response types -- extracted from docs/team-api-仅memory.yaml.
  *
- * 团队记忆契约扩展：在 offload.yaml 13 个接口基础上叠加可选 IdFields
- * (team_id / agent_id / user_id / task_id)，用于服务化模式的身份隔离。
- * 旧客户端不传 IdFields 时按原 offload 语义工作。
+ * Team-memory contract extension: optional IdFields layered on top of the 13 endpoints in offload.yaml
+ * (team_id / agent_id / user_id / task_id) for identity isolation in service mode.
+ * Old clients that do not send IdFields keep the original offload semantics.
  */
 
 // ---------------------------------------------------------------------------
-// 公共
+// Common
 // ---------------------------------------------------------------------------
 
 export interface ApiResponseEnvelope<T = unknown> {
@@ -18,19 +18,19 @@ export interface ApiResponseEnvelope<T = unknown> {
 }
 
 /**
- * 团队记忆 4 ID 隔离字段，全部可选；接口 schema 层不做必填校验。
- * 服务端 resolveIsolation 优先取 body 字段，缺失时回退 x-tdai-* header。
+ * Team-memory 4-ID isolation fields, all optional; the endpoint schema layer does no required-field validation.
+ * The server's resolveIsolation prefers body fields and falls back to x-tdai-* headers when they are missing.
  *
- * 详见 docs/team-api-仅memory.yaml 中的 IdFields 组件。
+ * See the IdFields component in docs/team-api-仅memory.yaml.
  */
 export interface IdFields {
-  /** 团队 ID（PRD §3.2）。 */
+  /** Team ID (PRD §3.2). */
   team_id?: string;
-  /** Agent ID（PRD §3.2）；与 team_id 组成复合唯一键。 */
+  /** Agent ID (PRD §3.2); forms a composite unique key with team_id. */
   agent_id?: string;
-  /** 用户 ID（PRD §3.2，太湖账号映射）。 */
+  /** User ID (PRD §3.2, Taihu account mapping). */
   user_id?: string;
-  /** 任务 ID（PRD §3.2）；归属由 (team_id, task_id) 校验。 */
+  /** Task ID (PRD §3.2); ownership is validated by (team_id, task_id). */
   task_id?: string;
 }
 

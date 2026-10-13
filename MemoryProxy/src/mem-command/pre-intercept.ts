@@ -1,37 +1,36 @@
 /**
- * mem:session-reset 的前置拦截判定.
+ * Pre-intercept check for mem:session-reset.
  *
- * 背景:所有 mem 命令原本在各 handler 里 session-init 段**之后**才被识别
- * (`anthropicHandler.ts:869-1000` / `handler.ts:922-1000` /
- * `codexHandler.ts:609-680` / `workbuddyHandler.ts:1111-1180`)。这套顺序
- * 对 sync / create-skill 是合理的 —— 它们依赖 sessionInfo。但 session-reset
- * 需要在 **uninitialized / pending_* / initialized / bypassed** 四种起始状态
- * 都能生效:
+ * Background: all mem commands were originally recognized in each handler only **after** the session-init
+ * section (`anthropicHandler.ts:869-1000` / `handler.ts:922-1000` /
+ * `codexHandler.ts:609-680` / `workbuddyHandler.ts:1111-1180`). That order is reasonable for
+ * sync / create-skill, which depend on sessionInfo. But session-reset must work from all four
+ * starting states **uninitialized / pending_* / initialized / bypassed**:
  *
- *   - uninitialized:state machine 会把 "mem:session-reset" 当成"用户第一句"
- *     用作 form 反射数据的 asset_confirm 分支不适用,但至少会先弹一次 form,
- *     用户看到 form 反而困惑
- *   - pending_*:state machine 会把它当成"用户对 form 的答复",走 parseFormAnswer
- *     → unrecognized → session bypass,reset 命令永远拦不到
- *   - initialized / bypassed:老 mem-command 拦截段能识别,但拿掉 "会话未初始化
- *     命令不可用" gate 后行为一致。这两种也走前置拦截更简洁
+ *   - uninitialized: the state machine would treat "mem:session-reset" as the "user's first message";
+ *     the asset_confirm branch that reflects form data does not apply, but a form would still be shown first,
+ *     which confuses the user
+ *   - pending_*: the state machine would treat it as "the user's answer to the form" and go through parseFormAnswer
+ *     -> unrecognized -> session bypass, so the reset command is never intercepted
+ *   - initialized / bypassed: the old mem-command interception section can recognize it, but once the
+ *     "session not initialized, command unavailable" gate is removed the behavior is the same. Pre-intercepting these two is simpler too
  *
- * 折中方案:只对 session-reset 加前置拦截 —— 其他 mem 命令不动。这个函数
- * 就是判"这个请求是不是 session-reset",handler 里前置一句 if 决定要不要
- * 短路。
+ * Compromise: add pre-interception only for session-reset -- other mem commands are untouched. This function
+ * just decides "is this request a session-reset"; the handler puts a single if in front to decide
+ * whether to short-circuit.
  */
 
 import { parseCommandFromText } from "./parser.js";
 import { resolveAgentAdapter } from "../agent-adapters/index.js";
 
 /**
- * 判断请求 body 里最后一条 user 消息是不是 `mem:session-reset`.
+ * Determine whether the last user message in the request body is `mem:session-reset`.
  *
- * 兼容 body.messages[] (CC/CB/dsh) 和 body.input[] (Codex/WB) 两种形态。
- * 内部用对应 adapter 的 `extractUserText` 提取纯文本,与既有 mem-command
- * 拦截段保持一致的文本提取语义。
+ * Supports both body.messages[] (CC/CB/dsh) and body.input[] (Codex/WB) shapes.
+ * Internally uses the corresponding adapter's `extractUserText` to extract plain text, keeping the same
+ * text-extraction semantics as the existing mem-command interception section.
  *
- * 不抛错:任何异常 / 缺字段一律 false,让原链路继续跑。
+ * Never throws: any exception / missing field returns false so the original path keeps running.
  */
 export function isSessionResetCommand(
   body: Record<string, unknown> | null | undefined,
@@ -43,18 +42,18 @@ export function isSessionResetCommand(
     const adapter = resolveAgentAdapter(agentSource);
     let text: string | null = null;
 
-    // Codex / WorkBuddy 用 body.input[] (Responses API)
+    // Codex / WorkBuddy use body.input[] (Responses API)
     if (Array.isArray((body as any).input)) {
       const input = (body as any).input as any[];
       if (input.length === 0) return false;
-      // 只识别"最新一条 input item 是 role=user message"的情况;
-      // 若最新一条是 function_call_output 说明当前是 form 交互中,
-      // codex 客户端 replay 整个历史 input 包括最早的 mem:session-reset —
-      // 此时不应重复触发 pre-hook, 否则 state 会被无限打回 uninitialized 死循环。
+      // Only recognize the case where the latest input item is a role=user message;
+      // if the latest is a function_call_output, a form interaction is in progress,
+      // and the codex client replays the whole input history including the earliest mem:session-reset --
+      // the pre-hook must not fire again then, otherwise state is reset to uninitialized in an endless loop.
       const lastItem = input[input.length - 1] as Record<string, unknown> | null | undefined;
       if (!lastItem || typeof lastItem !== "object") return false;
       if (lastItem.type !== "message" || lastItem.role !== "user") return false;
-      // 直接从最后一条 message 抽 text, 不复用 extractUserText (它会向前扫)
+      // Extract text directly from the last message; do not reuse extractUserText (it scans backwards)
       const content = lastItem.content;
       if (!Array.isArray(content)) return false;
       const texts: string[] = [];
@@ -66,10 +65,10 @@ export function isSessionResetCommand(
       }
       text = texts.length > 0 ? texts.join("\n") : null;
     } else if (Array.isArray((body as any).messages)) {
-      // CC/CB/dsh 用 body.messages[]
+      // CC/CB/dsh use body.messages[]
       const messages = (body as any).messages as any[];
       if (messages.length === 0) return false;
-      // 最后一条 user
+      // Last user message
       const last = messages[messages.length - 1];
       if (!last || last.role !== "user") return false;
       text = adapter.extractUserText(last.content);

@@ -1,11 +1,11 @@
 /**
- * stages/resolve-user-id.ts — userId 4 层 fallback + debugForceUserId 覆盖。
+ * stages/resolve-user-id.ts — 4-layer userId fallback + debugForceUserId override.
  *
- * 提取自 openai-chat + anthropic runner ~15 行 相同的 userId resolve 块。
- * 语义:
- *   1. 优先 earlyVerify.userId (auth service 已解出)
- *   2. 回退 header: x-user-id / x-cb-user-id / x-tdai-user-token
- *   3. debugForceUserId 强制覆盖 (本地联调)
+ * Extracted from the identical ~15-line userId resolve block in the openai-chat + anthropic runners.
+ * Semantics:
+ *   1. Prefer earlyVerify.userId (already resolved by the auth service)
+ *   2. Fall back to headers: x-user-id / x-cb-user-id / x-tdai-user-token
+ *   3. debugForceUserId forces an override (local integration debugging)
  */
 
 import type { Context } from "hono";

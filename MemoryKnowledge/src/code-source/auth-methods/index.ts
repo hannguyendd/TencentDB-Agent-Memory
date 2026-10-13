@@ -1,5 +1,5 @@
 /**
- * 内置认证方式集合 —— 新增一种就在这里加一行。
+ * Built-in set of authentication methods -- to add a new one, add a line here.
  */
 
 import type { AuthMethod, AuthMethodKind } from "./types.js";
@@ -11,7 +11,7 @@ export const AUTH_METHODS: Readonly<Record<AuthMethodKind, AuthMethod>> = Object
   basic: basicAuthMethod,
 });
 
-/** 按 kind 拿实现；未收录 → undefined。 */
+/** Look up an implementation by kind; not registered -> undefined. */
 export function getAuthMethod(kind: string): AuthMethod | undefined {
   return AUTH_METHODS[kind as AuthMethodKind];
 }

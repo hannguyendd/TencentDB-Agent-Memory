@@ -2,18 +2,18 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # setup-claude-code.sh
 #
-# 一键将 tdai context-proxy 的接入信息注入到 Claude Code 的 settings.json。
-# 写入 env.ANTHROPIC_BASE_URL 与 env.ANTHROPIC_CUSTOM_HEADERS，永久生效。
+# Inject the tdai context-proxy connection info into Claude Code's settings.json with one command.
+# Writes env.ANTHROPIC_BASE_URL and env.ANTHROPIC_CUSTOM_HEADERS, taking effect permanently.
 #
-# 用法:
+# Usage:
 #   bash scripts/setup-claude-code.sh --endpoint <URL> --token <TOKEN>
 #   bash scripts/setup-claude-code.sh --config /path/to/tdai-claude-code.json
 #   bash scripts/setup-claude-code.sh --uninstall
 #   bash scripts/setup-claude-code.sh --help
 #
-# 也支持环境变量：TDAI_ENDPOINT / TDAI_TOKEN / TDAI_HEADER_NAME
+# Environment variables are also supported:TDAI_ENDPOINT / TDAI_TOKEN / TDAI_HEADER_NAME
 #
-# 配置文件格式（面板下载）:
+# Config file format (downloaded from the panel):
 #   {
 #     "endpoint":   "https://proxy.xxx/claude-code",
 #     "token":      "tdai_xxxxxxxxxxxxxxxxxxxxxxxx",

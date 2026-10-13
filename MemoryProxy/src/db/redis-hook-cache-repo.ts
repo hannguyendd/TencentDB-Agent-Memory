@@ -4,7 +4,7 @@
  * Implements the HookCacheRepo interface. Uses Redis Hash:
  *   inj:hook:{spaceId}:{userId}:{agentSource}:{sessionId}  Hash  field=hookId  value=ContextBlock[] JSON
  *
- * spaceId 是 P4 kernel-sts 新增的隔离段。老 caller 传空字符串时用 `_default` 兜底。
+ * spaceId is the isolation segment added by P4 kernel-sts. Old callers passing an empty string fall back to `_default`.
  *
  * TTL follows session lifetime (default 30min).
  * All errors degrade silently — callers treat null/no-cache as equivalent

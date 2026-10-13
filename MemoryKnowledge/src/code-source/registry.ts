@@ -1,14 +1,14 @@
 /**
- * CodeSourceRegistry —— provider 注册中心。
+ * CodeSourceRegistry -- provider registry.
  *
- * 职责：
- *   1. 按 `CODE_SOURCE_ENABLED` 从内置 provider 集合中挑选启用的
- *   2. 提供 `get(id)` 让业务层拿到 provider 实例
- *   3. 提供 `list()` 生成前端下拉 + 表单驱动用的元数据（含认证方式的表单字段清单）
+ * Responsibilities:
+ *   1. Pick the enabled ones from the built-in provider set according to `CODE_SOURCE_ENABLED`
+ *   2. Provide `get(id)` so the business layer can obtain a provider instance
+ *   3. Provide `list()` to generate the metadata driving the frontend dropdown + form (including the auth method's form field list)
  *
- * **注册中心不感知任何具体平台或认证方式**——两者都只在各自目录里。
+ * **The registry is unaware of any concrete platform or auth method** -- both live only in their own directories.
  *
- * 部署配置：
+ * Deployment config:
  *   CODE_SOURCE_ENABLED=<id1>,<id2>
  *   CODE_SOURCE_<UPPER_ID>_SITE_BASE_URL=...
  */
@@ -40,10 +40,10 @@ function enabledIds(): string[] {
 }
 
 /**
- * 由 provider + 部署配置生成前端表单驱动元数据。
+ * Generate the frontend form-driving metadata from the provider + deployment config.
  *
- * 令牌页 URL = 部署配的站点根 + provider 内置的站内路径。
- * 站点根未配置 → 不展示「如何获取令牌？」入口。
+ * Token page URL = site root from deployment config + the provider's built-in in-site path.
+ * Site root not configured -> the "How do I get a token?" entry is not shown.
  */
 function toMeta(provider: ICodeSourceProvider): CodeSourceMeta {
   const siteBase = env(envKey(provider.id, "SITE_BASE_URL"));
@@ -62,15 +62,15 @@ export class CodeSourceRegistry {
   private readonly providers = new Map<string, ICodeSourceProvider>();
 
   /**
-   * @param ids 显式启用列表（测试注入用）；不传 → 从 `CODE_SOURCE_ENABLED` 读
-   * @param builtins 内置 provider（测试注入用）；不传 → 用 BUILTIN_PROVIDERS
+   * @param ids Explicit enabled list (for test injection); omitted -> read from `CODE_SOURCE_ENABLED`
+   * @param builtins Built-in providers (for test injection); omitted -> use BUILTIN_PROVIDERS
    */
   constructor(ids?: string[], builtins: readonly ICodeSourceProvider[] = BUILTIN_PROVIDERS) {
     const enabledSet = new Set(ids ?? enabledIds());
     for (const p of builtins) {
       if (enabledSet.has(p.id)) this.providers.set(p.id, p);
     }
-    // 声明启用但未内置 → 占位（bearer 默认，需 register() 补齐真正实现）
+    // Declared enabled but not built in -> placeholder (bearer by default; register() must supply the real implementation)
     for (const id of enabledSet) {
       if (!this.providers.has(id)) {
         this.providers.set(id, {

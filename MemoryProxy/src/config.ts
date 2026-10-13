@@ -61,7 +61,7 @@ export const DEFAULT_CONFIG: ProxyConfig = {
       },
     },
     sqlite: { dbPath: "" },
-    fs: { fsRoot: "" },  // 空串 → ensureBindingRepoPersistent 用 ~/.memory-tencentdb/proxy-state/
+    fs: { fsRoot: "" },  // empty string -> ensureBindingRepoPersistent uses ~/.memory-tencentdb/proxy-state/
   },
   costGuard: {
     enabled: false,
@@ -77,9 +77,9 @@ export const DEFAULT_CONFIG: ProxyConfig = {
   injection: {
     enabled: false,
     injectors: ["skill", "knowledge", "tdai-memory"],
-    // markerOptIn 默认 true —— 未配置时也开启 `/analyse` URL marker，让
-    // AssetReflectionInjector 被注册。marker 仍是 opt-in（不带 `/analyse/` 段
-    // 的请求完全无感），只是把「必须显式开启」的负担从运营侧移除。
+    // markerOptIn defaults to true -- the `/analyse` URL marker is enabled even when unconfigured, so that
+    // AssetReflectionInjector gets registered. The marker is still opt-in (requests without an `/analyse/` segment
+    // are completely unaffected); this just removes the "must be explicitly enabled" burden from operations.
     assetReflection: { markerOptIn: true },
   },
   // Extraction (write-side) defaults to fully permissive so that a config
@@ -378,17 +378,17 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
     creditPricing: {
       models: (yaml.creditPricing?.models ?? []).map((m) => ({
         name: m.name ?? "",
-        // Display name / alias — 显式加载。缺失时 `resolveModelName` 回落 `name`，
-        // 但 `resolveModelId` 依赖此字段做 client-facing alias → real model_id 反查
-        // （§13.15），漏加载会让 alias 永远查不到，客户端发 alias 直接 400。
+        // Display name / alias -- loaded explicitly. When missing, `resolveModelName` falls back to `name`,
+        // but `resolveModelId` relies on this field for the client-facing alias -> real model_id reverse lookup
+        // (§13.15); if omitted, the alias can never be found and a client sending an alias gets a 400.
         modelName: m.modelName,
         input: m.input ?? 0,
         output: m.output ?? 0,
         cacheRead: m.cacheRead ?? 0,
         cacheWrite5m: m.cacheWrite5m ?? 0,
         cacheWrite1h: m.cacheWrite1h ?? 0,
-        // 分档定价：按 input token 总量 (nonCacheInput + cacheRead) 分档。
-        // 不配置时 undefined，computeCreditDelta 回落顶层 flat 单价。
+        // Tiered pricing: tiers by total input tokens (nonCacheInput + cacheRead).
+        // undefined when not configured; computeCreditDelta falls back to the top-level flat unit price.
         tiers: Array.isArray(m.tiers)
           ? m.tiers.map((t) => ({
               maxInputTokens: typeof t.maxInputTokens === "number" ? t.maxInputTokens : null,
@@ -433,8 +433,8 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       externalGatewayUrl: typeof yaml.injection?.externalGatewayUrl === "string" && yaml.injection.externalGatewayUrl.trim() !== ""
         ? yaml.injection.externalGatewayUrl.trim().replace(/\/$/, "")
         : undefined,
-      // 只接受 boolean；yaml 缺省或类型错走 default（关）。跟 costGuard.markerOptIn
-      // 同姿势，保证线上未配 assetReflection: 段的 yaml 完全无感。
+      // Only booleans are accepted; a missing or wrongly typed yaml value falls back to the default (off). Same approach as costGuard.markerOptIn,
+      // ensuring yaml files in production without an assetReflection: section are completely unaffected.
       assetReflection: {
         markerOptIn: typeof yaml.injection?.assetReflection?.markerOptIn === "boolean"
           ? yaml.injection.assetReflection.markerOptIn
@@ -542,18 +542,18 @@ export function buildConfig(overrides: CliOverrides = {}): ProxyConfig {
       }))
       .filter((u) => u.userId !== ""),
     admin: {
-      // Precedence: env > yaml > default("")。跟 core `TDAI_GATEWAY_API_KEY`
-      // 的运维习惯对齐；空字符串表示鉴权关闭（默认公开可访问，启动时告警）。
+      // Precedence: env > yaml > default(""). Aligned with the ops convention of core `TDAI_GATEWAY_API_KEY`;
+      // an empty string means auth is disabled (publicly accessible by default, with a startup warning).
       apiKey:
         (process.env.TDAI_PROXY_ADMIN_API_KEY ?? "").trim() ||
         yaml.admin?.apiKey ||
         DEFAULT_CONFIG.admin.apiKey,
     },
     memCommand: {
-      // taskDraft 是可选段。仅当 yaml 里显式提供时才注入 —— 未配置时字段缺席，
-      // task 命令族会返回明确的 "未配置" 错误（见 task-draft-generator.ts）。
-      // 环境变量兜底：TDAI_TASK_DRAFT_API_KEY 覆盖 yaml.apiKey，方便部署时不落
-      // 秘钥到配置文件（对齐 admin.apiKey 的 env 优先做法）。
+      // taskDraft is an optional section. Injected only when explicitly provided in yaml -- when not configured the field is absent,
+      // and the task command family returns an explicit "not configured" error (see task-draft-generator.ts).
+      // Env var fallback: TDAI_TASK_DRAFT_API_KEY overrides yaml.apiKey, so that deployments need not put
+      // secrets into config files (aligned with the env-first approach of admin.apiKey).
       ...(yaml.memCommand?.taskDraft
         ? {
             taskDraft: {

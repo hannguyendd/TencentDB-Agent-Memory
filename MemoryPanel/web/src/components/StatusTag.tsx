@@ -1,9 +1,9 @@
 /**
- * StatusTag —— 通用「状态标签」组件。
+ * StatusTag —— Generic "status tag" component.
  *
- * 此前 Wiki（WikiStatusBadge）与 Code（statusLabel）各自实现 status → Tea Tag
- * 的渲染（theme + variant="soft" + 可选 hint），结构完全一致。这里统一收口，
- * 各资产页只负责提供「status → label/theme」的业务映射。
+ * Previously Wiki (WikiStatusBadge) and Code (statusLabel) each implemented the status → Tea Tag status → Tea Tag
+ * rendering (theme + variant="soft" + optional hint) with identical structure. This consolidates them,
+ * so each asset page only supplies the business mapping "status → label/theme".
  */
 import { Tag } from 'tea-component';
 
@@ -15,13 +15,13 @@ export function StatusTag({
   hint,
   className,
 }: {
-  /** 已翻译的状态文案（或原始 status 兜底） */
+  /** Translated status text (or the raw status as fallback) */
   label: string;
-  /** Tea Tag 语义主题（soft 变体） */
+  /** Tea Tag semantic theme (soft variant) */
   theme?: StatusTheme;
-  /** 可选的状态补充说明（如 processing 时的“处理中，可能需要几分钟”） */
+  /** Optional supplementary status note (e.g. "Processing, may take a few minutes" while processing) */
   hint?: string;
-  /** 外层容器 class（默认 _asset-status） */
+  /** Outer container class (default _asset-status) */
   className?: string;
 }) {
   return (

@@ -1,9 +1,9 @@
 /**
- * basic —— 用户名 + 密码 认证。
+ * basic -- username + password authentication.
  *
- * 用户填两个字段（用户名+密码）；不使用 provider.cloneUsername。
+ * The user fills in two fields (username + password); provider.cloneUsername is not used.
  *
- * URL 形态：`https://<username>:<password>@host/repo.git`
+ * URL form: `https://<username>:<password>@host/repo.git`
  */
 
 import { injectBasicAuth } from "../clone-url.js";

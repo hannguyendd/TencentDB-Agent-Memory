@@ -1,12 +1,12 @@
 /**
- * cascade.ts — 删除级联（raw/rm 与 page/rm 的下游清理）。
+ * cascade.ts — deletion cascade (downstream cleanup for raw/rm and page/rm).
  *
- * 行为契约见 PRD §3.7-3 与 wiki-service.ts 的调用签名。
+ * Behavior contract: see PRD §3.7-3 and the call signatures in wiki-service.ts.
  *
- *  - deleteSourceFiles：删 raw 源文件，并按各 page 的 frontmatter `sources` 级联——
- *      独占该源的 page → 删除；共享的 page → 重写去掉该源。
- *  - cascadeDeleteWikiPagesWithRefs：删 wiki page 文件，并清理其它 page 正文中
- *      指向已删页的 [[wikilink]]（悬空链接）。
+ *  - deleteSourceFiles: deletes raw source files and cascades by each page's frontmatter `sources` --
+ *      pages that exclusively depend on the source -> deleted; shared pages -> rewritten with the source removed.
+ *  - cascadeDeleteWikiPagesWithRefs: deletes wiki page files and cleans up the [[wikilink]]s in other
+ *      pages' bodies that point to the deleted pages (dangling links).
  */
 
 import { readFileSync, writeFileSync, existsSync, rmSync, readdirSync, statSync } from "node:fs";
@@ -15,18 +15,18 @@ import { parseFrontmatter, buildPage } from "./frontmatter.js";
 import { slugify } from "./slug.js";
 
 export interface DeleteSourceFilesResult {
-  /** 被级联删除的 wiki page 绝对路径。 */
+  /** Absolute paths of wiki pages deleted by the cascade. */
   deletedWikiPaths: string[];
-  /** 被重写（去掉某源）的 wiki page 数量。 */
+  /** Number of wiki pages rewritten (with a source removed). */
   rewrittenSourcePages: number;
 }
 
 export interface DeleteSourceFilesOptions {
-  /** 仅用于日志标记，便于审计。 */
+  /** For log labeling only, to ease auditing. */
   logReason?: string;
 }
 
-/** 递归收集 wiki/ 下所有 .md 页的绝对路径（跳过 media 目录）。 */
+/** Recursively collect the absolute paths of all .md pages under wiki/ (skipping the media directory). */
 function collectWikiPages(wikiDir: string): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
@@ -55,30 +55,30 @@ function collectWikiPages(wikiDir: string): string[] {
   return out;
 }
 
-/** 结构性文件不参与级联删除/重写。 */
+/** Structural files do not take part in cascade deletion/rewriting. */
 function isStructural(relFromWiki: string): boolean {
   return relFromWiki === "index.md" || relFromWiki === "schema.md" || relFromWiki === "purpose.md";
 }
 
 /**
- * 删除 raw 源文件并级联清理引用它们的 wiki page。
+ * Delete raw source files and cascade-clean the wiki pages that reference them.
  *
- * @param projectPath wiki 项目根
- * @param sourceFullPaths 要删除的 raw 源文件绝对路径列表
+ * @param projectPath wiki project root
+ * @param sourceFullPaths list of absolute paths of raw source files to delete
  */
 export async function deleteSourceFiles(
   projectPath: string,
   sourceFullPaths: string[],
   _opts: DeleteSourceFilesOptions = {},
 ): Promise<DeleteSourceFilesResult> {
-  // 待删源的文件名集合（page 的 sources 里记的是文件名）。
+  // Set of file names of the sources to delete (a page's sources records file names).
   const deletedNames = new Set<string>();
   for (const p of sourceFullPaths) {
     deletedNames.add(basename(p));
     try {
       if (existsSync(p)) rmSync(p, { force: true });
     } catch {
-      /* 删除失败忽略：可能已被删 */
+      /* ignore deletion failure: may already be deleted */
     }
   }
 
@@ -103,10 +103,10 @@ export async function deleteSourceFiles(
     if (sources.length === 0) continue;
 
     const remaining = sources.filter((s) => !deletedNames.has(s));
-    if (remaining.length === sources.length) continue; // 本页不引用被删源
+    if (remaining.length === sources.length) continue; // this page does not reference the deleted sources
 
     if (remaining.length === 0) {
-      // 独占被删源 → 删页
+      // exclusive to the deleted sources -> delete the page
       try {
         rmSync(pagePath, { force: true });
         deletedWikiPaths.push(pagePath);
@@ -114,7 +114,7 @@ export async function deleteSourceFiles(
         /* ignore */
       }
     } else {
-      // 共享 → 重写去掉被删源
+      // shared -> rewrite with the deleted sources removed
       try {
         const rewritten = buildPage({ ...parsed.frontmatter, sources: remaining }, parsed.body);
         writeFileSync(pagePath, rewritten, "utf-8");
@@ -129,13 +129,13 @@ export async function deleteSourceFiles(
 }
 
 export interface CascadeDeletePagesResult {
-  /** 实际删除的 wiki page 绝对路径。 */
+  /** Absolute paths of wiki pages actually deleted. */
   deletedPaths: string[];
-  /** 被重写（清理悬空 wikilink）的 page 数量。 */
+  /** Number of pages rewritten (dangling wikilinks cleaned). */
   rewrittenFiles: number;
 }
 
-/** 从一个页路径与内容推导出它可能被 [[wikilink]] 引用的标识符（小写归一）。 */
+/** From a page path and content, derive the identifiers by which it may be referenced via [[wikilink]] (lowercase-normalized). */
 function linkAliasesFor(pagePath: string, content: string): Set<string> {
   const aliases = new Set<string>();
   const base = basename(pagePath, ".md");
@@ -149,17 +149,17 @@ function linkAliasesFor(pagePath: string, content: string): Set<string> {
   return aliases;
 }
 
-/** 归一化一个 wikilink 目标（去 |label、trim、小写）。 */
+/** Normalize a wikilink target (strip |label, trim, lowercase). */
 function normalizeLinkTarget(raw: string): string {
   const target = raw.split("|")[0].trim();
   return target.toLowerCase();
 }
 
 /**
- * 删除 wiki page 文件，并清理其它 page 正文中指向已删页的 [[wikilink]]。
+ * Delete wiki page files and clean up the [[wikilink]]s in other pages' bodies that point to the deleted pages.
  *
- * @param projectPath wiki 项目根
- * @param pageFullPaths 要删除的 wiki page 绝对路径列表
+ * @param projectPath wiki project root
+ * @param pageFullPaths list of absolute paths of wiki pages to delete
  */
 export async function cascadeDeleteWikiPagesWithRefs(
   projectPath: string,
@@ -167,7 +167,7 @@ export async function cascadeDeleteWikiPagesWithRefs(
 ): Promise<CascadeDeletePagesResult> {
   const wikiDir = join(projectPath, "wiki");
 
-  // 删除前先收集被删页的 wikilink 别名，用于后续悬空链接清理。
+  // Before deleting, collect the wikilink aliases of the deleted pages for the later dangling link cleanup.
   const deletedAliases = new Set<string>();
   const toDelete = new Set(pageFullPaths.map((p) => p));
   for (const p of pageFullPaths) {
@@ -175,12 +175,12 @@ export async function cascadeDeleteWikiPagesWithRefs(
     try {
       content = readFileSync(p, "utf-8");
     } catch {
-      /* 可能不存在 */
+      /* may not exist */
     }
     for (const a of linkAliasesFor(p, content)) deletedAliases.add(a);
   }
 
-  // 执行删除。
+  // Perform the deletion.
   const deletedPaths: string[] = [];
   for (const p of pageFullPaths) {
     try {
@@ -193,7 +193,7 @@ export async function cascadeDeleteWikiPagesWithRefs(
     }
   }
 
-  // 清理剩余 page 中指向已删页的 [[wikilink]]：把 [[X]] / [[X|label]] 替换为其展示文本。
+  // Clean up [[wikilink]]s in the remaining pages pointing to deleted pages: replace [[X]] / [[X|label]] with their display text.
   let rewrittenFiles = 0;
   const linkRe = /\[\[([^\]]+?)\]\]/g;
   for (const pagePath of collectWikiPages(wikiDir)) {
@@ -209,7 +209,7 @@ export async function cascadeDeleteWikiPagesWithRefs(
       const target = normalizeLinkTarget(inner);
       if (deletedAliases.has(target)) {
         changed = true;
-        // 保留可读文本：有 |label 用 label，否则用原目标名。
+        // Keep readable text: use label if there is a |label, otherwise the original target name.
         const parts = String(inner).split("|");
         return (parts[1] ?? parts[0]).trim();
       }

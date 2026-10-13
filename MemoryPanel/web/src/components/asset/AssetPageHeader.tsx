@@ -11,10 +11,10 @@ interface AssetPageHeaderProps {
 }
 
 /**
- * 资产页共用头部。
+ * Shared header for asset pages.
  *
- * 仅负责统一标题、资产范围、Agent 筛选与操作栏的视觉编排；各资产页面仍自行维护
- * 数据请求、权限判断和按钮可用状态，避免把不同资产的业务语义耦合到通用组件中。
+ * Only responsible for the visual layout of the title, asset scope, Agent filter and action bar; each asset page still maintains its own
+ * data fetching, permission checks and button enabled state, to avoid coupling the business semantics of different assets into the generic component.
  */
 export function AssetPageHeader({ title, scope, agent, actions, subtitle }: AssetPageHeaderProps) {
   return (

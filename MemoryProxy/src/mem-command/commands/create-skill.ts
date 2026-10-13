@@ -1,8 +1,8 @@
 /**
- * mem:create-skill — 手动强制归档当前 session buffer
+ * mem:create-skill - manually force-archive the current session buffer
  *
- * 文案约定：只告知用户"归档已触发 / Skill 提取中"这类概念，不暴露内部
- * task_id、archive_key、文件路径等。想排障时看 `data` 字段或后端日志。
+ * Copy convention: only tell the user concepts like "archive triggered / Skill extraction in progress";
+ * do not expose internal task_id, archive_key, file paths, etc. For troubleshooting, see the `data` field or backend logs.
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
@@ -23,11 +23,11 @@ export async function executeCreateSkill(ctx: MemCommandContext): Promise<MemCom
   let messageText: string;
 
   if (!result.success) {
-    messageText = `❌ 本次对话归档失败：${result.error ?? "未知错误"}`;
+    messageText = `❌ Failed to archive this conversation: ${result.error ?? "unknown error"}`;
   } else if (result.status === "empty") {
-    messageText = `⚠️ 本次对话暂无可归档内容，请继续对话后再试`;
+    messageText = `⚠️ Nothing to archive in this conversation yet. Please continue the conversation and try again`;
   } else {
-    messageText = `✅ 本次对话已归档成功，Skill 提取中`;
+    messageText = `✅ Conversation archived successfully, extracting Skill`;
   }
 
   const response = buildMemResponse(messageText, {
@@ -40,8 +40,8 @@ export async function executeCreateSkill(ctx: MemCommandContext): Promise<MemCom
   return {
     success: result.success,
     messageText,
-    // task_id / archive_key 仍保留在结构化数据里 —— 面板 / 日志 / e2e 可读，
-    // 只是不再拼进用户可见文案。
+    // task_id / archive_key are still kept in the structured data (readable by the panel / logs / e2e),
+    // they are just no longer included in the user-visible text.
     data: result.success
       ? { status: result.status, task_id: result.taskId, archive_key: result.archiveKey }
       : undefined,

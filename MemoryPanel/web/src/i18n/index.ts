@@ -1,9 +1,9 @@
 /**
- * i18n 初始化模块
+ * i18n initialization module
  *
- * - 首次访问读取 navigator.language（zh 开头 → 中文，其他 → 英文）
- * - 用户手动切换后持久化到 localStorage
- * - react-i18next 的 useTranslation 会自动触发组件重渲染
+ * - On first visit read navigator.language (starts with zh → Chinese, otherwise → English)
+ * - After a manual switch by the user, persist to localStorage
+ * - useTranslation of react-i18next automatically triggers component re-rendering
  */
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';

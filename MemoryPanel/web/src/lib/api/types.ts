@@ -1,10 +1,10 @@
 /**
- * api/types.ts — 跨模块共享的类型定义。
+ * api/types.ts - type definitions shared across modules.
  *
- * 只放被 2 个以上 API 模块引用的类型；单一模块专属类型就近放在对应模块文件里。
+ * Only types referenced by 2 or more API modules go here; types specific to a single module live next to it in that module's file.
  */
 
-/** meta / control 信封格式 */
+/** meta / control envelope format */
 export interface MetaEnvelope<T> {
   code: number;
   message: string;
@@ -12,7 +12,7 @@ export interface MetaEnvelope<T> {
   data: T | null;
 }
 
-/** 内核分页响应（task/list、agent/list 等） */
+/** Kernel paginated response (task/list, agent/list, etc.) */
 export interface PaginatedResult<T> {
   items: T[];
   total: number;
@@ -21,8 +21,8 @@ export interface PaginatedResult<T> {
 }
 
 /**
- * auth/verify、user/get、user/list 均会返回的公共用户结构。
- * `user_type === 'system_admin'` 是判断"当前登录用户是不是 admin"的唯一权威字段。
+ * Common user structure returned by auth/verify, user/get and user/list.
+ * `user_type === 'system_admin'` is the only authoritative field for judging "whether the current logged-in user is admin".
  */
 export interface PublicUser {
   user_id: string;
@@ -35,9 +35,9 @@ export interface PublicUser {
   created_at: string;
   updated_at: string;
   /**
-   * 全局用户类型（auth/verify、user/get、user/list 均会返回），
-   * 'system_admin' = 全局唯一的 admin 身份，与 team 无关；其余（如 'user'）都是普通用户。
-   * 这是判断"当前登录用户是不是 admin"的唯一权威字段——不要再用 username === 'admin' 兜底猜。
+   * Global user type (returned by auth/verify, user/get and user/list),
+   * 'system_admin' = the globally unique admin identity, unrelated to team; the others (e.g. 'user') are all regular users.
+   * This is the only authoritative field for judging "whether the current logged-in user is admin" - do not fall back to guessing by username === 'admin'.
    */
   user_type?: 'system_admin' | 'user' | string;
 }
@@ -60,7 +60,7 @@ export interface TeamMember {
   role: 'admin' | 'member' | 'reviewer';
   joined_at: string;
   status: 'active' | 'removed';
-  /** team-member/list · get 响应附带（读时 JOIN） */
+  /** Attached to team-member/list · get responses (JOIN at read time) */
   username?: string;
 }
 

@@ -1,12 +1,12 @@
 /**
- * TeamSwitcher — 全局顶栏内嵌的 Team 切换器
+ * TeamSwitcher - Team switcher embedded in the global top bar
  *
- * 从侧边栏迁移到顶栏后的行内 pill 样式版本：使用 Tea `Dropdown` 承载弹出面板
- * （自带定位、遮罩点击关闭、滚动关闭等能力），面板内部用 `List`/`Input`/`Button` 组装。
+ * Inline pill-style version after migrating from the sidebar to the top bar: uses Tea `Dropdown` to host the popup panel
+ * (with built-in positioning, close on mask click, close on scroll, etc.); inside the panel it is assembled with `List`/`Input`/`Button`.
  *
- * 团队编辑入口：当前 active team 行右侧（owner / admin 可见）提供「编辑」「删除」
- * 图标按钮，复用 EditTeamDialog + tea.confirm 二级确认。这把 TeamManagementPanel
- * Header 上的「编辑 Team / 删除当前 Team」入口迁到了此处统一收纳。
+ * Team edit entry: on the right of the current active team row (visible to owner / admin) there are "Edit" and "Delete"
+ * icon buttons, reusing EditTeamDialog + tea.confirm secondary confirmation. This consolidates the "Edit Team / Delete current Team" entries
+ * from the TeamManagementPanel Header here.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -36,14 +36,14 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
   const [newTeamName, setNewTeamName] = useState('');
   const [newTeamDesc, setNewTeamDesc] = useState('');
   const [creating, setCreating] = useState(false);
-  // 编辑弹窗可见状态
+  // Edit dialog visibility state
   const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
 
   const myTeams = teams;
   const active = myTeams.find((tm) => tm.team_id === activeTeamId) ?? null;
-  // 当前用户 user_id（panelSession 同步可读）
+  // Current user's user_id (panelSession is synchronously readable)
   const currentUserId = getPanelSession()?.user?.user_id ?? '';
-  // 是否可编辑 / 删除当前 active team：全局 admin 或当前 team 的 owner / admin
+  // Whether the current active team can be edited / deleted: global admin or owner / admin of the current team
   const canManageActiveTeam =
     !!active && (userRole === 'admin' || isTeamAdmin(active, currentUserId));
 
@@ -54,14 +54,14 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
   }
 
   function pick(team_id: string, close: () => void) {
-    // 只切换 activeTeamId，不 invalidateTeamCache：
-    //  - useAgents/useTasks 按 teamId 分桶缓存，切到目标 team 时若已有缓存（之前看过）
-    //    会直接秒开，无需重新 loading；无缓存才走 fetch —— 这才是"自动刷新"而不是
-    //    "整页重刷"。
-    //  - invalidateTeamCache 会删目标 team 缓存 + 广播 BACKEND_REFRESH_EVENT，
-    //    导致切 team 后所有页面（含 counts/participation 等无关数据）连带重新拉取，
-    //    表现为"切换一次 = 全部重新刷新一次"。写操作后的 invalidateBackendCache
-    //    已经保证数据新鲜度，切换本身不需要再强刷。
+    // Only switch activeTeamId, without invalidateTeamCache:
+    //  - useAgents/useTasks cache by teamId bucket; when switching to a target team that already has a cache (seen before)
+    //    it opens instantly without re-loading; only without a cache does it fetch - this is "auto refresh", not
+    //    "whole-page refresh".
+    //  - invalidateTeamCache would delete the target team cache + broadcast BACKEND_REFRESH_EVENT,
+    //    causing all pages (including unrelated data such as counts/participation) to refetch after switching team,
+    //    appearing as "one switch = everything refreshes once". invalidateBackendCache after write operations
+    //    already guarantees data freshness, so switching itself needs no forced refresh.
     writeActiveTeamId(team_id);
     close();
   }
@@ -95,13 +95,13 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
   }
 
   async function handleDeleteTeam(teamId: string, teamName: string, memberCount: number) {
-    // 取一次 agent 数（用于级联展示）—— 走 store 缓存避免额外请求
+    // Fetch the agent count once (for cascade display) - goes through the store cache to avoid extra requests
     let agentCount = 0;
     try {
       const cached = useBackendStore.getState().agentsByTeam[teamId];
       if (cached) agentCount = cached.length;
     } catch {
-      /* 静默：仅用于展示级联范围，拿不到不影响删除 */
+      /* Silent: only used to show the cascade scope; failing to get it does not affect deletion */
     }
     const ok = await tea.confirm({
       message: t('teamSwitcher.delete.confirm', { name: teamName }),
@@ -114,8 +114,8 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
     if (!ok) return;
     try {
       await teamsApi.delete(teamId);
-      // 删除当前 active team 时清空 activeTeamId，让 ensureValidActiveTeamId
-      // 在 store 刷新后自动落到剩余的第一个 team（或空态）。
+      // When deleting the current active team, clear activeTeamId so ensureValidActiveTeamId
+      // automatically lands on the first remaining team (or the empty state) after the store refreshes.
       if (teamId === activeTeamId) writeActiveTeamId(null);
       invalidateBackendCache();
     } catch (err) {
@@ -133,9 +133,9 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
         matchButtonWidth={false}
         className="_memory-team-switcher-dropdown"
         boxClassName="_memory-team-switcher-box"
-        // 静默刷新：仅让下拉框里的 team 列表保新鲜，不翻转 teamsLoading，
-        // 否则 TeamManagementPanel 等消费方会整体进入 loading 占位（表现为
-        // "点开选择 team 的选项框，成员/Agents 管理页面就刷新一下"）。
+        // Silent refresh: only keeps the team list in the dropdown fresh, does not flip teamsLoading,
+        // otherwise consumers such as TeamManagementPanel would all enter the loading placeholder (appearing as
+        // "opening the select-team dropdown makes the members/Agents management page refresh once").
         onOpen={() => { void refreshTeams({ silent: true }); }}
         onClose={resetCreateForm}
         button={
@@ -174,14 +174,14 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
                     : t('teamSwitcher.empty.member')}
                 </div>
               ) : (
-                // 用原生 ul/li 而非 Tea List：Tea 的 List.Item selected 会自动渲染 ✓
-                // 并改变内边距，split="divide" 又会注入 padding/border-top，与自定义
-                // 卡片式行样式（圆角 + 描边 + 间距）反复冲突（表现为选中行左侧被裁切、
-                // 行分割线被上一行压住）。这里自己掌控全部样式，行为更可控。
+                // Use native ul/li instead of Tea List: Tea's List.Item selected automatically renders ✓
+                // and changes the padding, and split="divide" injects padding/border-top, repeatedly conflicting with the custom
+                // card-style row styles (rounded corners + outline + spacing) (showing as the selected row's left side being clipped,
+                // the row divider being covered by the previous row). Here we control all styles ourselves, so behavior is more controllable.
                 <ul className="_memory-team-switcher-list">
                   {myTeams.map((tm) => {
                     const isActive = tm.team_id === activeTeamId;
-                    // 仅当前 active team 行显示编辑/删除按钮，且仅 owner/admin 可操作
+                    // Only the current active team row shows the edit/delete buttons, and only owner/admin can operate
                     const showOps = isActive && canManageActiveTeam;
                     return (
                       <li key={tm.team_id} className="_memory-team-switcher-row">
@@ -200,8 +200,8 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
                               {t('teamSwitcher.memberCount', { count: tm.members.length })}
                             </span>
                           </span>
-                          {/* 选中态由背景色 + 描边传达，不再额外显示 ✓ —— 避免与右侧
-                              操作按钮挤在一起。操作按钮为绝对定位浮层，不占行内布局宽度。 */}
+                          {/* The selected state is conveyed by background color + outline, no extra ✓ shown - avoids crowding with the right-side
+                              action buttons. The action buttons are an absolutely positioned overlay and do not take row layout width. */}
                         </button>
                         {showOps && (
                           <span className="_memory-team-switcher-item-ops">
@@ -275,7 +275,7 @@ export function TeamSwitcher({ userRole }: { userRole: TeamRole | null }) {
         )}
       </Dropdown>
 
-      {/* 编辑弹窗挂在 Dropdown 之外：避免 Dropdown clickClose 干扰 Modal 可见性 */}
+      {/* The edit dialog is mounted outside the Dropdown: avoids Dropdown clickClose interfering with Modal visibility */}
       {editingTeam && (
         <EditTeamDialog
           team={editingTeam}

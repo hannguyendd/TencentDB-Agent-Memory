@@ -1,77 +1,77 @@
-# 部署与集成指南（开源单机 / 云服务化）
+# Deployment and Integration Guide (Open-Source Standalone / Cloud Service)
 
-> 📖 **本文档专门讲解部署形态、Hermes 集成与端到端验证。**
-> 想了解插件的核心能力、配置参数、CLI 工具，请回到 **[主 README](README.md)**。
+> 📖 **This document covers deployment modes, Hermes integration, and end-to-end verification.**
+> For the plugin's core capabilities, configuration parameters, and CLI tools, see the **[main README](README.md)**.
 
-`memory-tencentdb` 提供 **两种独立部署形态**，两种形态都能被外部 Agent（典型为 Hermes）通过 HTTP API 调用，并各自适配不同的部署规模与运维要求：
+`memory-tencentdb` provides **two independent deployment modes**. Both can be called by external Agents (typically Hermes) over the HTTP API, and each fits a different deployment scale and operations requirement:
 
-| 形态 | 后端存储 | 状态后端 | 多租户 | 适用场景 |
+| Mode | Storage backend | State backend | Multi-tenancy | Use case |
 |------|----------|----------|--------|----------|
-| **Standalone（开源单机版）** | SQLite + 本地文件 | 进程内 Map / Timer | 单空间 | 本地开发、单 Agent sidecar、Docker 一体化、离线部署 |
-| **Service（云服务化版）** | TCVDB + COS | Redis（分布式锁 + 任务队列） | 多空间 per-`service_id` | K8s 多副本、多租户 SaaS、多 Agent 共享记忆 |
+| **Standalone (open-source single-node)** | SQLite + local files | In-process Map / Timer | Single space | Local development, single-Agent sidecar, all-in-one Docker, offline deployment |
+| **Service (cloud service)** | TCVDB + COS | Redis (distributed lock + task queue) | Multi-space, per-`service_id` | K8s multi-replica, multi-tenant SaaS, shared memory across Agents |
 
 ```
-L0  对话原始记录 (Conversation)    ← 自动写入
-L1  原子化结构记忆 (Atomic Memory)  ← LLM 提取 + 去重
-L2  场景块 (Scene Blocks)           ← LLM 场景抽取
-L3  用户画像 (Persona)              ← LLM 人格合成
+L0  Raw conversation records (Conversation)  ← written automatically
+L1  Atomic structured memory (Atomic Memory) ← LLM extraction + dedup
+L2  Scene blocks (Scene Blocks)              ← LLM scene extraction
+L3  User profile (Persona)                   ← LLM persona synthesis
 ```
 
-两种形态共享同一份 Gateway 二进制和同一套 v1/v2 HTTP API，只是配置和后端不同。切换形态只需调整 `TDAI_DEPLOY_MODE` 环境变量。
+Both modes share the same Gateway binary and the same v1/v2 HTTP API; only the configuration and backends differ. To switch modes, just change the `TDAI_DEPLOY_MODE` environment variable.
 
 ---
 
-## 快速开始（3 步）
+## Quick Start (3 Steps)
 
 ```bash
-# 1. 进入 MemoryCore 并安装依赖
+# 1. Enter MemoryCore and install dependencies
 cd MemoryCore
 npm install
 
-# 2. 配置 LLM
+# 2. Configure the LLM
 export TDAI_LLM_API_KEY="your-api-key"
 export TDAI_LLM_BASE_URL="https://api.deepseek.com/v1"
 export TDAI_LLM_MODEL="deepseek-chat"
 
-# 3. 启动 Gateway
+# 3. Start the Gateway
 npx tsx src/gateway/server.ts
 ```
 
-Gateway 默认监听 `http://127.0.0.1:8420`，数据存储在 `~/.memory-tencentdb/memory-tdai/`。
+The Gateway listens on `http://127.0.0.1:8420` by default, and data is stored in `~/.memory-tencentdb/memory-tdai/`.
 
 ---
 
-## 部署模式
+## Deployment Modes
 
-### Standalone 模式（单机）
+### Standalone Mode (Single Node)
 
-零外部依赖，所有数据本地存储。适用于：本地开发、单 Agent sidecar、Docker 一体化部署。
+Zero external dependencies; all data is stored locally. Suitable for: local development, single-Agent sidecar, all-in-one Docker deployment.
 
-**存储**：SQLite（向量 + 记录） + 本地文件系统（L2/L3 文档）
-**状态管理**：进程内 Map/Timer
+**Storage**: SQLite (vectors + records) + local filesystem (L2/L3 documents)
+**State management**: in-process Map/Timer
 
-#### 环境变量配置
+#### Environment Variables
 
 ```bash
-# 必须 — LLM 配置
+# Required — LLM configuration
 export TDAI_LLM_API_KEY="sk-xxx"
-export TDAI_LLM_BASE_URL="https://api.deepseek.com/v1"   # 默认 https://api.openai.com/v1
-export TDAI_LLM_MODEL="deepseek-chat"                     # 默认 gpt-4o
+export TDAI_LLM_BASE_URL="https://api.deepseek.com/v1"   # default https://api.openai.com/v1
+export TDAI_LLM_MODEL="deepseek-chat"                     # default gpt-4o
 export TDAI_LLM_MAX_TOKENS=4096
 export TDAI_LLM_TIMEOUT_MS=120000
 
-# 可选 — 服务配置
-export TDAI_GATEWAY_PORT=8420            # 监听端口，默认 8420
-export TDAI_GATEWAY_HOST="127.0.0.1"    # 监听地址，默认 127.0.0.1
-export TDAI_DATA_DIR="~/.memory-tencentdb/memory-tdai"  # 数据目录
+# Optional — server configuration
+export TDAI_GATEWAY_PORT=8420            # listen port, default 8420
+export TDAI_GATEWAY_HOST="127.0.0.1"    # listen address, default 127.0.0.1
+export TDAI_DATA_DIR="~/.memory-tencentdb/memory-tdai"  # data directory
 ```
 
-#### YAML 配置文件（可选）
+#### YAML Config File (Optional)
 
-配置文件搜索顺序：`$TDAI_GATEWAY_CONFIG` → `./tdai-gateway.yaml` → `<dataDir>/tdai-gateway.yaml`
+Config file search order: `$TDAI_GATEWAY_CONFIG` → `./tdai-gateway.yaml` → `<dataDir>/tdai-gateway.yaml`
 
 ```yaml
-# tdai-gateway.yaml — Standalone 模式
+# tdai-gateway.yaml — Standalone mode
 server:
   port: 8420
   host: "127.0.0.1"
@@ -86,7 +86,7 @@ llm:
   maxTokens: 4096
   timeoutMs: 120000
 
-# memory 配置（可选，都有合理默认值）
+# memory config (optional; all have sensible defaults)
 memory:
   capture:
     enabled: true
@@ -105,7 +105,7 @@ memory:
   bm25:
     enabled: true
     language: "zh"
-  storeBackend: "sqlite"          # sqlite（standalone） 或 tcvdb（service）
+  storeBackend: "sqlite"          # sqlite (standalone) or tcvdb (service)
   pipeline:
     everyNConversations: 5
     enableWarmup: true
@@ -114,10 +114,10 @@ memory:
     l3IntervalMs: 600000
 ```
 
-#### Docker 部署
+#### Docker Deployment
 
 ```bash
-# 纯 Gateway
+# Gateway only
 docker run -d \
   -e TDAI_LLM_API_KEY="sk-xxx" \
   -e TDAI_LLM_BASE_URL="https://api.deepseek.com/v1" \
@@ -128,79 +128,79 @@ docker run -d \
   agentmemory/hermes-memory:latest
 ```
 
-#### 数据目录结构
+#### Data Directory Layout
 
 ```
 ~/.memory-tencentdb/memory-tdai/
-  ├── vectors.db              # SQLite 向量数据库 (L0 + L1)
-  ├── conversations/          # L0 对话原始 JSONL
-  ├── records/                # L1 结构化记忆
-  ├── scene_blocks/           # L2 场景 Markdown 文件
-  ├── persona.md              # L3 用户画像
-  └── checkpoint.json         # Pipeline 进度
+  ├── vectors.db              # SQLite vector database (L0 + L1)
+  ├── conversations/          # L0 raw conversation JSONL
+  ├── records/                # L1 structured memory
+  ├── scene_blocks/           # L2 scene Markdown files
+  ├── persona.md              # L3 user profile
+  └── checkpoint.json         # Pipeline progress
 ```
 
 ---
 
-### Service 模式（服务化）
+### Service Mode
 
-使用外部存储（TCVDB 向量数据库 + COS 对象存储），支持多副本水平扩展。适用于：K8s 集群、多租户 SaaS、多 Agent 共享记忆。
+Uses external storage (TCVDB vector database + COS object storage) and supports horizontal scaling with multiple replicas. Suitable for: K8s clusters, multi-tenant SaaS, shared memory across Agents.
 
-**存储**：TCVDB（向量搜索） + COS（L2/L3 文档，per-serviceId 路径隔离）
-**状态管理**：Redis（分布式锁 + 任务队列）
-**配置源**：Shark 服务（动态 VDB/COS 凭证）或环境变量（静态凭证）
+**Storage**: TCVDB (vector search) + COS (L2/L3 documents, path-isolated per serviceId)
+**State management**: Redis (distributed lock + task queue)
+**Config source**: Shark service (dynamic VDB/COS credentials) or environment variables (static credentials)
 
-#### 环境变量配置
+#### Environment Variables
 
 ```bash
-# ── 部署模式 ──
-export TDAI_DEPLOY_MODE="service"           # 关键：启用 service 模式
+# ── Deployment mode ──
+export TDAI_DEPLOY_MODE="service"           # Key: enables service mode
 
-# ── LLM（同 standalone） ──
+# ── LLM (same as standalone) ──
 export TDAI_LLM_API_KEY="sk-xxx"
 export TDAI_LLM_BASE_URL="https://api.deepseek.com/v1"
 export TDAI_LLM_MODEL="deepseek-chat"
 
-# ── 服务端口 ──
+# ── Server port ──
 export TDAI_GATEWAY_PORT=3100
 export TDAI_GATEWAY_HOST="0.0.0.0"
 
-# ── Redis（分布式状态后端） ──
-export STATE_BACKEND="redis"                # redis 或 local（单机测试）
+# ── Redis (distributed state backend) ──
+export STATE_BACKEND="redis"                # redis or local (single-node testing)
 export REDIS_HOST="redis.example.com"
 export REDIS_PORT=6379
 export REDIS_PASSWORD="your-password"
 export REDIS_KEY_PREFIX="tdai_memory"
 
-# ── VDB 向量数据库（直连模式） ──
+# ── VDB vector database (direct mode) ──
 export VDB_ENDPOINT="http://vdb.example.com:8100"
 export VDB_USER="root"
 export VDB_API_KEY="your-vdb-api-key"
 export VDB_DATABASE="memory-production"
 
-# ── COS 对象存储（直连模式） ──
+# ── COS object storage (direct mode) ──
 export COS_SECRET_ID="AKIDxxxx"
 export COS_SECRET_KEY="xxxxx"
-export COS_TOKEN=""                         # STS 临时凭证时填写
+export COS_TOKEN=""                         # fill in when using STS temporary credentials
 export COS_URL="https://your-bucket.cos.ap-guangzhou.myqcloud.com"
 export COS_PATH_PREFIX="tenants/prod/"
 
-# ── 或使用 Shark 配置服务（生产推荐） ──
+# ── Or use the Shark config service (recommended for production) ──
 export SHARK_BASE_URL="http://shark.example.com:8080"
-# Shark 会自动提供 per-instance 的 VDB 和 COS 配置
+# Shark automatically provides per-instance VDB and COS configuration
 
-# ── 可选调优 ──
-export CONFIG_VDB_TTL_MS=300000             # VDB 配置缓存 TTL，默认 5 分钟
-export CONFIG_COS_BUFFER_MS=120000          # COS 凭证提前刷新时间
-export CONFIG_MAX_INSTANCES=1000            # 最大缓存实例数
-export SCANNER_SPACES="space1,space2"       # Timer Scanner 扫描的空间列表
-export TDAI_SPACE_ID="default"              # 当前实例空间 ID
+# ── Optional tuning ──
+export CONFIG_VDB_TTL_MS=300000             # VDB config cache TTL, default 5 minutes
+export CONFIG_COS_BUFFER_MS=120000          # how early to refresh COS credentials
+export CONFIG_MAX_INSTANCES=1000            # max cached instances
+export SCANNER_SPACES="space1,space2"       # list of spaces scanned by the Timer Scanner
+export TDAI_SPACE_ID="default"              # space ID of the current instance
 ```
 
-#### YAML 配置文件
+#### YAML Config File
 
 ```yaml
-# tdai-gateway.yaml — Service 模式
+# tdai-gateway.yaml — Service mode
 deployMode: service
 
 server:
@@ -218,10 +218,10 @@ llm:
 memory:
   storeBackend: "tcvdb"
   tcvdb:
-    embeddingModel: "bge-large-zh"    # VDB 服务端 embedding 模型
+    embeddingModel: "bge-large-zh"    # VDB server-side embedding model
     timeout: 10000
   embedding:
-    enabled: false                     # TCVDB 服务端自带 embedding，客户端无需
+    enabled: false                     # TCVDB provides embedding server-side; not needed on the client
     provider: "none"
   bm25:
     enabled: true
@@ -231,10 +231,10 @@ memory:
     maxResults: 10
 ```
 
-#### K8s 部署
+#### K8s Deployment
 
 ```yaml
-# 核心环境变量（通过 ConfigMap/Secret 注入）
+# Core environment variables (injected via ConfigMap/Secret)
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -277,7 +277,7 @@ spec:
       targetPort: 3100
 ```
 
-#### 多副本架构
+#### Multi-Replica Architecture
 
 ```
                     ┌─────────────┐
@@ -285,210 +285,210 @@ spec:
                     └─────────────┘ │
                     ┌─────────────┐ │    ┌──────────────────┐    ┌──────────┐
                     │  Hermes #2  │─┼───→│  TDAI Gateway    │───→│  TCVDB   │
-                    └─────────────┘ │    │  (N replicas)    │    │  向量库   │
+                    └─────────────┘ │    │  (N replicas)    │    │  vector DB │
                     ┌─────────────┐ │    │                  │───→│          │
                     │  Hermes #3  │─┘    │  ┌─ Scanner ─┐   │    └──────────┘
                     └─────────────┘      │  │  Worker   │   │    ┌──────────┐
                                          │  └───────────┘   │───→│   COS    │
-  每个 Hermes 使用唯一                    └──────────────────┘    │  对象存储 │
-  x-tdai-service-id                              │               └──────────┘
-  实现数据隔离                            ┌──────────────┐
+  Each Hermes uses a unique                └──────────────────┘    │  obj store │
+  x-tdai-service-id for                          │               └──────────┘
+  data isolation                         ┌──────────────┐
                                          │    Redis     │
-                                         │  状态 + 任务  │
+                                         │  state + tasks│
                                          └──────────────┘
 ```
 
 ---
 
-## Hermes 插件配置
+## Hermes Plugin Configuration
 
-提供两种 Hermes 插件，对应不同部署场景。
+Two Hermes plugins are provided, one for each deployment scenario.
 
-### v1 插件：`memory_tencentdb`（单机自管理）
+### v1 Plugin: `memory_tencentdb` (Self-Managed Single Node)
 
-自动启动并管理 Gateway 子进程，无需手动部署 Gateway。适用于单 Agent 本地/Docker 部署。
+Automatically starts and manages the Gateway subprocess, so no manual Gateway deployment is needed. Suitable for single-Agent local/Docker deployments.
 
-**安装插件**：
+**Install the plugin**:
 
 ```bash
-# 软链接（开发环境推荐）
+# Symlink (recommended for development)
 ln -s "$(pwd)/MemoryCore/hermes-plugin/memory/memory_tencentdb" \
       <hermes-agent>/plugins/memory/memory_tencentdb
 
-# 复制（生产部署）
+# Copy (production deployment)
 cp -r MemoryCore/hermes-plugin/memory/memory_tencentdb \
       <hermes-agent>/plugins/memory/memory_tencentdb
 ```
 
-**Hermes 配置** (`~/.hermes/config.yaml`)：
+**Hermes configuration** (`~/.hermes/config.yaml`):
 
 ```yaml
 memory:
   provider: memory_tencentdb
 ```
 
-**环境变量**：
+**Environment variables**:
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |------|--------|------|
-| `TDAI_LLM_API_KEY` | (必填) | LLM API Key |
-| `TDAI_LLM_BASE_URL` | `https://api.openai.com/v1` | LLM API 地址 |
-| `TDAI_LLM_MODEL` | `gpt-4o` | LLM 模型名 |
-| `MEMORY_TENCENTDB_GATEWAY_PORT` | `8420` | Gateway 监听端口 |
-| `MEMORY_TENCENTDB_GATEWAY_HOST` | `127.0.0.1` | Gateway 监听地址 |
-| `MEMORY_TENCENTDB_GATEWAY_CMD` | (自动检测) | 自定义 Gateway 启动命令 |
+| `TDAI_LLM_API_KEY` | (required) | LLM API Key |
+| `TDAI_LLM_BASE_URL` | `https://api.openai.com/v1` | LLM API URL |
+| `TDAI_LLM_MODEL` | `gpt-4o` | LLM model name |
+| `MEMORY_TENCENTDB_GATEWAY_PORT` | `8420` | Gateway listen port |
+| `MEMORY_TENCENTDB_GATEWAY_HOST` | `127.0.0.1` | Gateway listen address |
+| `MEMORY_TENCENTDB_GATEWAY_CMD` | (auto-detected) | Custom Gateway start command |
 
-**工具列表**：
+**Tools**:
 
-| 工具 | 用途 |
+| Tool | Purpose |
 |------|------|
-| `memory_tencentdb_memory_search` | 搜索 L1 结构化记忆 |
-| `memory_tencentdb_conversation_search` | 搜索 L0 原始对话 |
+| `memory_tencentdb_memory_search` | Search L1 structured memory |
+| `memory_tencentdb_conversation_search` | Search L0 raw conversations |
 
-**特性**：自动启动 Gateway 子进程、健康检查看门狗（10s 间隔）、自动恢复、熔断保护、后台 sync 线程。
+**Features**: automatic Gateway subprocess startup, health-check watchdog (10s interval), automatic recovery, circuit breaker, background sync thread.
 
 ---
 
-### v2 插件：`memory_tencentdb_v2`（外部 Gateway）
+### v2 Plugin: `memory_tencentdb_v2` (External Gateway)
 
-连接已运行的 Gateway 服务（本地或远程），通过 v2 REST API 通信。适用于多 Agent 共享 Gateway、K8s 集群部署。
+Connects to an already-running Gateway service (local or remote) and communicates over the v2 REST API. Suitable for multiple Agents sharing a Gateway and K8s cluster deployments.
 
-**安装插件**：
+**Install the plugin**:
 
 ```bash
 ln -s "$(pwd)/MemoryCore/hermes-plugin/memory/memory_tencentdb_v2" \
       <hermes-agent>/plugins/memory/memory_tencentdb_v2
 ```
 
-**安装 Python SDK**：
+**Install the Python SDK**:
 
 ```bash
 pip install tdai-memory
 ```
 
-**Hermes 配置** (`~/.hermes/config.yaml`)：
+**Hermes configuration** (`~/.hermes/config.yaml`):
 
 ```yaml
 memory:
   provider: memory_tencentdb_v2
 ```
 
-**环境变量**：
+**Environment variables**:
 
-| 变量 | 默认值 | 说明 |
+| Variable | Default | Description |
 |------|--------|------|
-| `TDAI_MEMORY_ENDPOINT` | `http://127.0.0.1:8420` | Gateway 服务地址 |
-| `TDAI_MEMORY_API_KEY` | `""` | Bearer Token（service 模式必填） |
-| `TDAI_MEMORY_SERVICE_ID` | `""` | 实例/空间 ID（多租户隔离键） |
+| `TDAI_MEMORY_ENDPOINT` | `http://127.0.0.1:8420` | Gateway service URL |
+| `TDAI_MEMORY_API_KEY` | `""` | Bearer Token (required in service mode) |
+| `TDAI_MEMORY_SERVICE_ID` | `""` | Instance/space ID (multi-tenant isolation key) |
 
-**工具列表**：
+**Tools**:
 
-| 工具 | 用途 | 参数 |
+| Tool | Purpose | Parameters |
 |------|------|------|
-| `tdai_memory_search` | 搜索 L1 结构化记忆 | `query`(必填), `limit`(默认 5) |
-| `tdai_conversation_search` | 搜索 L0 原始对话 | `query`(必填), `limit`(默认 5) |
-| `tdai_read_scene` | 读取 L2 场景内容 | `scene_id`(必填) |
+| `tdai_memory_search` | Search L1 structured memory | `query` (required), `limit` (default 5) |
+| `tdai_conversation_search` | Search L0 raw conversations | `query` (required), `limit` (default 5) |
+| `tdai_read_scene` | Read L2 scene content | `scene_id` (required) |
 
-**特性**：基于 `tdai_memory` Python SDK (httpx)、Bearer Token 认证、多租户隔离、熔断器（5 次失败 → 60s 冷却）、线程安全。
+**Features**: built on the `tdai_memory` Python SDK (httpx), Bearer Token authentication, multi-tenant isolation, circuit breaker (5 failures → 60s cooldown), thread-safe.
 
 ---
 
-### 选择建议
+### Recommendations
 
-| 场景 | 推荐插件 | 部署模式 | Gateway |
+| Scenario | Recommended plugin | Deployment mode | Gateway |
 |------|----------|----------|---------|
-| 本地开发 / 单 Agent | `memory_tencentdb` (v1) | standalone | 插件自动管理 |
-| Docker 单容器 | `memory_tencentdb` (v1) | standalone | 插件自动管理 |
-| 多 Agent 共享记忆 | `memory_tencentdb_v2` (v2) | service | 独立部署 |
-| K8s 集群 | `memory_tencentdb_v2` (v2) | service | K8s Service |
-| 多租户 SaaS | `memory_tencentdb_v2` (v2) | service | 多副本 + Redis |
+| Local development / single Agent | `memory_tencentdb` (v1) | standalone | Managed by plugin |
+| Single Docker container | `memory_tencentdb` (v1) | standalone | Managed by plugin |
+| Shared memory across Agents | `memory_tencentdb_v2` (v2) | service | Deployed separately |
+| K8s cluster | `memory_tencentdb_v2` (v2) | service | K8s Service |
+| Multi-tenant SaaS | `memory_tencentdb_v2` (v2) | service | Multi-replica + Redis |
 
 ---
 
-## API 概览
+## API Overview
 
-### v1 API（Standalone 兼容）
+### v1 API (Standalone-Compatible)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| GET | `/health` | 健康检查 |
-| POST | `/recall` | 记忆召回（prefetch） |
-| POST | `/capture` | 对话捕获（sync_turn） |
-| POST | `/search/memories` | L1 记忆搜索 |
-| POST | `/search/conversations` | L0 对话搜索 |
-| POST | `/session/end` | 会话结束 + 刷新 |
-| POST | `/seed` | 批量导入历史对话 |
+| GET | `/health` | Health check |
+| POST | `/recall` | Memory recall (prefetch) |
+| POST | `/capture` | Conversation capture (sync_turn) |
+| POST | `/search/memories` | L1 memory search |
+| POST | `/search/conversations` | L0 conversation search |
+| POST | `/session/end` | End session + flush |
+| POST | `/seed` | Bulk import of historical conversations |
 
-### v2 API（多租户，需 Bearer Token + x-tdai-service-id）
+### v2 API (Multi-Tenant, Requires Bearer Token + x-tdai-service-id)
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| POST | `/v2/conversation/add` | L0 添加对话 |
-| POST | `/v2/conversation/query` | L0 查询对话 |
-| POST | `/v2/conversation/search` | L0 搜索对话 |
-| POST | `/v2/conversation/delete` | L0 删除对话 |
-| POST | `/v2/atomic/add` | L1 添加记忆 |
-| POST | `/v2/atomic/query` | L1 查询记忆 |
-| POST | `/v2/atomic/search` | L1 搜索记忆 |
-| POST | `/v2/atomic/delete` | L1 删除记忆 |
-| POST | `/v2/scenario/ls` | L2 列出场景 |
-| POST | `/v2/scenario/read` | L2 读取场景 |
-| POST | `/v2/scenario/write` | L2 写入场景 |
-| POST | `/v2/scenario/rm` | L2 删除场景 |
-| POST | `/v2/persona/read` | L3 读取画像 |
-| POST | `/v2/persona/write` | L3 写入画像 |
+| POST | `/v2/conversation/add` | L0 add conversation |
+| POST | `/v2/conversation/query` | L0 query conversations |
+| POST | `/v2/conversation/search` | L0 search conversations |
+| POST | `/v2/conversation/delete` | L0 delete conversation |
+| POST | `/v2/atomic/add` | L1 add memory |
+| POST | `/v2/atomic/query` | L1 query memories |
+| POST | `/v2/atomic/search` | L1 search memories |
+| POST | `/v2/atomic/delete` | L1 delete memory |
+| POST | `/v2/scenario/ls` | L2 list scenes |
+| POST | `/v2/scenario/read` | L2 read scene |
+| POST | `/v2/scenario/write` | L2 write scene |
+| POST | `/v2/scenario/rm` | L2 delete scene |
+| POST | `/v2/persona/read` | L3 read profile |
+| POST | `/v2/persona/write` | L3 write profile |
 
 ---
 
-## 配置参考
+## Configuration Reference
 
-### 全部环境变量
+### All Environment Variables
 
-| 变量 | 默认值 | 适用模式 | 说明 |
+| Variable | Default | Applies to | Description |
 |------|--------|----------|------|
-| **Gateway 基础** |
-| `TDAI_DEPLOY_MODE` | `standalone` | 全部 | `standalone` 或 `service` |
-| `TDAI_GATEWAY_PORT` | `8420` | 全部 | 监听端口 |
-| `TDAI_GATEWAY_HOST` | `127.0.0.1` | 全部 | 监听地址 |
-| `TDAI_DATA_DIR` | `~/.memory-tencentdb/memory-tdai` | 全部 | 数据目录 |
-| `TDAI_GATEWAY_CONFIG` | (搜索) | 全部 | 配置文件路径 |
+| **Gateway basics** |
+| `TDAI_DEPLOY_MODE` | `standalone` | all | `standalone` or `service` |
+| `TDAI_GATEWAY_PORT` | `8420` | all | Listen port |
+| `TDAI_GATEWAY_HOST` | `127.0.0.1` | all | Listen address |
+| `TDAI_DATA_DIR` | `~/.memory-tencentdb/memory-tdai` | all | Data directory |
+| `TDAI_GATEWAY_CONFIG` | (searched) | all | Config file path |
 | **LLM** |
-| `TDAI_LLM_API_KEY` | `""` | 全部 | LLM API Key |
-| `TDAI_LLM_BASE_URL` | `https://api.openai.com/v1` | 全部 | LLM API 地址 |
-| `TDAI_LLM_MODEL` | `gpt-4o` | 全部 | 模型名称 |
-| `TDAI_LLM_MAX_TOKENS` | `4096` | 全部 | 最大输出 token |
-| `TDAI_LLM_TIMEOUT_MS` | `120000` | 全部 | LLM 请求超时 |
-| **Service 模式** |
-| `STATE_BACKEND` | (auto) | service | `redis` 或 `local` |
-| `REDIS_HOST` | `127.0.0.1` | service | Redis 地址 |
-| `REDIS_PORT` | `6379` | service | Redis 端口 |
-| `REDIS_PASSWORD` | (无) | service | Redis 密码 |
-| `REDIS_KEY_PREFIX` | `tdai_memory` | service | Redis key 前缀 |
-| **VDB（直连模式）** |
-| `VDB_ENDPOINT` | `""` | service | VDB 地址 |
-| `VDB_USER` | `root` | service | VDB 用户名 |
+| `TDAI_LLM_API_KEY` | `""` | all | LLM API Key |
+| `TDAI_LLM_BASE_URL` | `https://api.openai.com/v1` | all | LLM API URL |
+| `TDAI_LLM_MODEL` | `gpt-4o` | all | Model name |
+| `TDAI_LLM_MAX_TOKENS` | `4096` | all | Max output tokens |
+| `TDAI_LLM_TIMEOUT_MS` | `120000` | all | LLM request timeout |
+| **Service mode** |
+| `STATE_BACKEND` | (auto) | service | `redis` or `local` |
+| `REDIS_HOST` | `127.0.0.1` | service | Redis host |
+| `REDIS_PORT` | `6379` | service | Redis port |
+| `REDIS_PASSWORD` | (none) | service | Redis password |
+| `REDIS_KEY_PREFIX` | `tdai_memory` | service | Redis key prefix |
+| **VDB (direct mode)** |
+| `VDB_ENDPOINT` | `""` | service | VDB endpoint |
+| `VDB_USER` | `root` | service | VDB username |
 | `VDB_API_KEY` | `""` | service | VDB API Key |
-| `VDB_DATABASE` | `default` | service | VDB 数据库名 |
-| **COS（直连模式）** |
-| `COS_SECRET_ID` | (无) | service | COS AK |
-| `COS_SECRET_KEY` | (无) | service | COS SK |
-| `COS_TOKEN` | (无) | service | COS STS Token |
-| `COS_URL` | (无) | service | COS Bucket URL |
-| `COS_PATH_PREFIX` | (无) | service | COS 路径前缀 |
-| **Shark（生产模式）** |
-| `SHARK_BASE_URL` | (无) | service | Shark 配置服务地址 |
-| **调优** |
-| `CONFIG_VDB_TTL_MS` | `300000` | service | VDB 配置缓存 TTL |
-| `CONFIG_COS_BUFFER_MS` | `120000` | service | COS 凭证提前刷新 |
-| `CONFIG_MAX_INSTANCES` | `1000` | service | 最大缓存实例数 |
-| `SCANNER_SPACES` | `default` | service | Scanner 扫描空间列表 |
-| `TDAI_SPACE_ID` | `default` | service | 当前空间 ID |
+| `VDB_DATABASE` | `default` | service | VDB database name |
+| **COS (direct mode)** |
+| `COS_SECRET_ID` | (none) | service | COS AK |
+| `COS_SECRET_KEY` | (none) | service | COS SK |
+| `COS_TOKEN` | (none) | service | COS STS Token |
+| `COS_URL` | (none) | service | COS Bucket URL |
+| `COS_PATH_PREFIX` | (none) | service | COS path prefix |
+| **Shark (production mode)** |
+| `SHARK_BASE_URL` | (none) | service | Shark config service URL |
+| **Tuning** |
+| `CONFIG_VDB_TTL_MS` | `300000` | service | VDB config cache TTL |
+| `CONFIG_COS_BUFFER_MS` | `120000` | service | Early COS credential refresh |
+| `CONFIG_MAX_INSTANCES` | `1000` | service | Max cached instances |
+| `SCANNER_SPACES` | `default` | service | Spaces scanned by the Scanner |
+| `TDAI_SPACE_ID` | `default` | service | Current space ID |
 
 ---
 
-## 典型部署示例
+## Typical Deployment Examples
 
-### 示例 1：本地开发（最简）
+### Example 1: Local Development (Simplest)
 
 ```bash
 export TDAI_LLM_API_KEY="sk-xxx"
@@ -497,7 +497,7 @@ export TDAI_LLM_MODEL="deepseek-chat"
 npx tsx src/gateway/server.ts
 ```
 
-### 示例 2：Docker All-in-One（Hermes + Gateway）
+### Example 2: Docker All-in-One (Hermes + Gateway)
 
 ```bash
 docker run -d \
@@ -509,10 +509,10 @@ docker run -d \
   agentmemory/hermes-memory:latest
 ```
 
-### 示例 3：多 Agent + 共享 Gateway
+### Example 3: Multiple Agents + Shared Gateway
 
 ```bash
-# 1. 启动 Gateway（service 模式）
+# 1. Start the Gateway (service mode)
 cd MemoryCore
 TDAI_DEPLOY_MODE=service \
 TDAI_GATEWAY_PORT=3100 \
@@ -523,7 +523,7 @@ VDB_API_KEY="your-key" \
 VDB_DATABASE="memory-shared" \
 npx tsx src/gateway/server.ts
 
-# 2. 每个 Hermes Agent 配置不同的 service_id
+# 2. Configure a different service_id for each Hermes Agent
 # Agent A:
 export TDAI_MEMORY_ENDPOINT="http://gateway-host:3100"
 export TDAI_MEMORY_API_KEY="shared-key"
@@ -535,73 +535,73 @@ export TDAI_MEMORY_API_KEY="shared-key"
 export TDAI_MEMORY_SERVICE_ID="agent-customer-support"
 ```
 
-### 示例 4：K8s 生产部署
+### Example 4: K8s Production Deployment
 
-本仓库当前未提交可直接应用的 Kubernetes manifests；请使用本节的 Deployment、ConfigMap 和 Secret 示例作为配置模板，并按实际镜像、域名和集群环境调整。
+This repository does not currently include ready-to-apply Kubernetes manifests; use the Deployment, ConfigMap, and Secret examples in this section as configuration templates, and adjust them for your actual image, domain, and cluster environment.
 
 ---
 
-## 端到端验证（E2E）
+## End-to-End Verification (E2E)
 
-仓库提供两份开箱即用的 E2E 脚本，分别覆盖两种部署形态。它们都基于真实的 Hermes API Server + 真实 LLM + 真实 Gateway 进程，跑通整条链路。
+The repository provides two ready-to-use E2E scripts, one for each deployment mode. Both run the full pipeline against a real Hermes API Server, a real LLM, and a real Gateway process.
 
-### Standalone E2E：`__tests__/e2e/test_hermes_standalone_e2e.py`
+### Standalone E2E: `__tests__/e2e/test_hermes_standalone_e2e.py`
 
-验证开源单机部署链路：
+Verifies the open-source standalone deployment pipeline:
 
 ```
-Hermes API Server → memory_tencentdb (v1 plugin) → 自管理 Gateway 子进程 → SQLite + 本地 FS
+Hermes API Server → memory_tencentdb (v1 plugin) → self-managed Gateway subprocess → SQLite + local FS
 ```
 
-覆盖项：
-- Hermes API Server 启动、`/health` 通过
-- 首次 chat 触发 v1 插件 `initialize()`，自动 `pnpm exec tsx src/gateway/server.ts` 拉起 Node 子进程
-- Gateway `/health` 报告 `vectorStore: true`
-- 3 轮对话：植入 marker → 模型回忆并回显 → 跨 session 通过 v1 plugin prefetch 召回
-- Side-channel：直连 Gateway `/search/conversations` 查到本次 run 的 marker
-- 工具层：`/search/conversations` / `/search/memories` 正常响应
+Coverage:
+- Hermes API Server starts and `/health` passes
+- The first chat triggers the v1 plugin's `initialize()`, which automatically launches a Node subprocess via `pnpm exec tsx src/gateway/server.ts`
+- Gateway `/health` reports `vectorStore: true`
+- 3 conversation turns: plant a marker → the model recalls and echoes it → recalled across sessions via v1 plugin prefetch
+- Side-channel: querying the Gateway `/search/conversations` directly finds this run's marker
+- Tool layer: `/search/conversations` / `/search/memories` respond normally
 
 ```bash
 hermes-agent/.venv/bin/python MemoryCore/__tests__/e2e/test_hermes_standalone_e2e.py
 ```
 
-实测结果：**16 / 16 passed**。
+Measured result: **16 / 16 passed**.
 
-### Service E2E：`MemoryCore/__tests__/e2e/test_hermes_service_e2e.py`
+### Service E2E: `MemoryCore/__tests__/e2e/test_hermes_service_e2e.py`
 
-验证云服务化多副本部署链路：
+Verifies the cloud-service multi-replica deployment pipeline:
 
 ```
-mock-shark (Shark stub: 提供 VDB/COS 配置)
-2 个 Gateway 进程（service mode，共享 TCVDB）
+mock-shark (Shark stub: provides VDB/COS config)
+2 Gateway processes (service mode, sharing TCVDB)
 Hermes → memory_tencentdb_v2 (v2 plugin, tdai_memory SDK) → Gateway-1 → TCVDB
-Side-channel 在 Gateway-2 验证 → 证明 TCVDB 真共享
+Side-channel check on Gateway-2 → proves TCVDB is truly shared
 ```
 
-覆盖项：
-- mock-shark + GW1 + GW2 + Hermes 全部就绪
-- 两个 Gateway 都是 service 模式（`stateBackend=connected` + `timerScanner` 运行中）
-- Hermes `/v1/models` 返回 200，v2 plugin 加载成功
-- 3 轮对话通过 v2 plugin 写入 GW1 → 真实 TCVDB
-- **跨 Gateway 一致性**：GW2 search 能找到 GW1 写入的 marker
-- GW2 `/conversation/query` 拉到主 session 的全部消息
-- 跨 session prefetch：模型在新 session 中通过 v2 plugin 召回 marker
-- L1 add on GW1 → GW2 `/atomic/query` 立即可见（证明 TCVDB 共享读写）
-- 自动备份/还原 `~/.hermes/config.yaml` 的 `memory.provider` 字段
+Coverage:
+- mock-shark + GW1 + GW2 + Hermes are all ready
+- Both Gateways are in service mode (`stateBackend=connected` + `timerScanner` running)
+- Hermes `/v1/models` returns 200 and the v2 plugin loads successfully
+- 3 conversation turns are written to GW1 via the v2 plugin → real TCVDB
+- **Cross-Gateway consistency**: GW2 search finds the marker written by GW1
+- GW2 `/conversation/query` retrieves all messages of the main session
+- Cross-session prefetch: in a new session the model recalls the marker via the v2 plugin
+- L1 add on GW1 → immediately visible via GW2 `/atomic/query` (proves TCVDB shared reads and writes)
+- Automatically backs up/restores the `memory.provider` field of `~/.hermes/config.yaml`
 
 ```bash
-# 前置：安装 SDK 到 Hermes venv（一次性）
+# Prerequisite: install the SDK into the Hermes venv (one-time)
 hermes-agent/.venv/bin/python -m pip install -e sdk/memory-core/python/
 
-# 运行
+# Run
 hermes-agent/.venv/bin/python __tests__/e2e/test_hermes_service_e2e.py
 ```
 
-实测结果：**23 / 23 passed**（跨 Gateway 一致性、跨 session 召回、L1 跨 GW 共享全部通过）。
+Measured result: **23 / 23 passed** (cross-Gateway consistency, cross-session recall, and L1 sharing across GWs all pass).
 
-### 两个脚本的共同前置条件
+### Common Prerequisites for Both Scripts
 
-1. `hermes` CLI 已安装（默认路径 `~/.hermes/bin/hermes`）
-2. `~/.hermes/config.yaml` 中 `model.api_key` / `model.base_url` / `model.default` 配置了可用的 LLM
-3. v1 / v2 插件已链接到 `hermes-agent/plugins/memory/`（默认已安装）
-4. Service 模式额外需要：`pnpm add cos-nodejs-sdk-v5`（Gateway 依赖）+ `pip install -e sdk/memory-core/python/`（Hermes 用 SDK）
+1. The `hermes` CLI is installed (default path `~/.hermes/bin/hermes`)
+2. `model.api_key` / `model.base_url` / `model.default` in `~/.hermes/config.yaml` are configured with a working LLM
+3. The v1 / v2 plugins are linked into `hermes-agent/plugins/memory/` (installed by default)
+4. Service mode additionally requires: `pnpm add cos-nodejs-sdk-v5` (Gateway dependency) + `pip install -e sdk/memory-core/python/` (SDK used by Hermes)

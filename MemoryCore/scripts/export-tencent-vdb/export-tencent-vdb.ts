@@ -1,37 +1,37 @@
 #!/usr/bin/env node
 /**
- * 腾讯云 VDB (Tencent VectorDB) 数据导出脚本
+ * Tencent Cloud VDB (Tencent VectorDB) data export script
  *
- * 连接腾讯云向量数据库实例，查询指定数据库下 collection 的文档，导出为 .jsonl 文件。
- * 仅支持腾讯云向量数据库（Tencent VectorDB），不支持其他厂商的向量数据库。
+ * Connects to a Tencent Cloud VectorDB instance, queries the documents of the collections in a given database, and exports them to .jsonl files.
+ * Only Tencent Cloud VectorDB (Tencent VectorDB) is supported; vector databases from other vendors are not.
  *
- * 所有连接参数通过 CLI 传入，无需 .env 文件。
+ * All connection parameters are passed via CLI; no .env file is needed.
  *
- * 用法：
- *   node ./bin/export-tencent-vdb.mjs --url <地址> --username <用户名> --api-key <密钥> --database <库名>
- *   node ./bin/export-tencent-vdb.mjs --url <地址> --username <用户名> --api-key <密钥> --database <库名> --probe
- *   node ./bin/export-tencent-vdb.mjs --url <地址> --username <用户名> --api-key <密钥> --database <库名> -c <collection> -o /tmp/backup
+ * Usage:
+ *   node ./bin/export-tencent-vdb.mjs --url <url> --username <username> --api-key <key> --database <db>
+ *   node ./bin/export-tencent-vdb.mjs --url <url> --username <username> --api-key <key> --database <db> --probe
+ *   node ./bin/export-tencent-vdb.mjs --url <url> --username <username> --api-key <key> --database <db> -c <collection> -o /tmp/backup
  *
- * 输出：
- *   默认输出到当前工作目录下的 ./vdb-export-YYYY-MM-DD/，可通过 -o 指定。
+ * Output:
+ *   Defaults to ./vdb-export-YYYY-MM-DD/ under the current working directory; use -o to override.
  *   <outputDir>/
- *   ├── <collection>.jsonl    — 每行一个 JSON 文档
- *   ├── schemas.json          — 导出的 collection 表结构（索引、embedding 配置等）
- *   └── export-meta.json      — 导出元信息
+ *   ├── <collection>.jsonl    — one JSON document per line
+ *   ├── schemas.json          — exported collection schemas (indexes, embedding config, etc.)
+ *   └── export-meta.json      — export metadata
  *
- * 导出字段说明：
- *   默认行为：导出所有字段，但跳过 vector（稠密向量，1024维浮点数组，体积大）。
- *   加 --include-vectors：导出全部字段，包括 vector，不跳过任何内容。
- *   注：sparse_vector（BM25 稀疏向量）始终导出，不受此开关影响。
+ * Exported fields:
+ *   Default: exports all fields but skips vector (dense vector, 1024-dim float array, large).
+ *   With --include-vectors: exports all fields, including vector, skipping nothing.
+ *   Note: sparse_vector (BM25 sparse vector) is always exported, regardless of this switch.
  *
- * 依赖：Node.js >= 18（内置 fetch）
+ * Requires: Node.js >= 18 (built-in fetch)
  */
 
 import fs from "node:fs";
 import path from "node:path";
 
 // ============================================================
-// CLI 参数解析（含 VDB 连接信息）
+// CLI argument parsing (including VDB connection info)
 // ============================================================
 
 interface VDBConfig {
@@ -43,13 +43,13 @@ interface VDBConfig {
 }
 
 interface CliArgs {
-  // 连接参数
+  // Connection parameters
   url?: string;
   username?: string;
   apiKey?: string;
   database?: string;
   timeout: number;
-  // 导出参数
+  // Export parameters
   output: string;
   collection?: string;
   filter?: string;
@@ -106,7 +106,7 @@ function parseArgs(): CliArgs {
       case "-l": {
         const v = parseInt(args[++i], 10);
         if (isNaN(v) || v < 1) {
-          console.error(`❌ --limit 必须 >= 1，收到: ${args[i]}`);
+          console.error(`❌ --limit must be >= 1, got: ${args[i]}`);
           process.exit(1);
         }
         result.limit = v;
@@ -115,7 +115,7 @@ function parseArgs(): CliArgs {
       case "--offset": {
         const v = parseInt(args[++i], 10);
         if (isNaN(v) || v < 0) {
-          console.error(`❌ --offset 必须 >= 0，收到: ${args[i]}`);
+          console.error(`❌ --offset must be >= 0, got: ${args[i]}`);
           process.exit(1);
         }
         result.offset = v;
@@ -145,12 +145,12 @@ function validateConfig(args: CliArgs): VDBConfig {
   if (!args.database) missing.push("--database");
 
   if (missing.length > 0) {
-    console.error("❌ 缺少必填参数：");
+    console.error("❌ Missing required parameters:");
     for (const k of missing) {
       console.error(`   - ${k}`);
     }
     console.error();
-    console.error("示例：");
+    console.error("Example:");
     console.error();
     console.error('  node ./bin/export-tencent-vdb.mjs \\');
     console.error('    --url "http://your-vdb-host:8100" \\');
@@ -158,7 +158,7 @@ function validateConfig(args: CliArgs): VDBConfig {
     console.error('    --api-key "your-api-key" \\');
     console.error('    --database "your-database"');
     console.error();
-    console.error("使用 --help 查看完整参数说明。");
+    console.error("Use --help to see the full parameter reference.");
     process.exit(1);
   }
 
@@ -173,54 +173,54 @@ function validateConfig(args: CliArgs): VDBConfig {
 
 function printHelp(): void {
   console.log(`
-腾讯云 VDB (Tencent VectorDB) 数据导出脚本
+Tencent Cloud VDB (Tencent VectorDB) data export script
 
-用法：
-  node ./bin/export-tencent-vdb.mjs [连接参数] [选项]
+Usage:
+  node ./bin/export-tencent-vdb.mjs [connection params] [options]
 
-连接参数（必填）：
-      --url <地址>               VDB 实例 HTTP 地址（如 http://your-vdb-host:8100）
-      --username <用户名>        认证用户名（如 root）
-      --api-key <密钥>           认证密钥
-      --database <库名>          数据库名称
+Connection parameters (required):
+      --url <url>                VDB instance HTTP address (e.g. http://your-vdb-host:8100)
+      --username <username>      Auth username (e.g. root)
+      --api-key <key>            Auth key
+      --database <name>          Database name
 
-选项：
-      --timeout <毫秒>           单次请求超时（默认: 30000）
-  -o, --output <目录>            输出目录（默认: ./vdb-export-YYYY-MM-DD）
-  -c, --collection <全名>        只导出指定 collection（全名匹配，不指定则导出所有）
-  -f, --filter <表达式>          VDB Filter 过滤条件（如 'agent_id = "xxx"'）
-  -l, --limit <数量>             最多导出多少条（不指定则导出全部）
-      --offset <偏移>            从第几条开始（默认: 0），须为分页大小的整数倍
-      --include-vectors          保留 vector 稠密向量字段（默认跳过）
-      --probe                    仅测试连通性，列出 collection 信息后退出
-  -h, --help                     显示帮助
+Options:
+      --timeout <ms>             Per-request timeout (default: 30000)
+  -o, --output <dir>             Output directory (default: ./vdb-export-YYYY-MM-DD)
+  -c, --collection <name>        Export only the given collection (exact full-name match; exports all if omitted)
+  -f, --filter <expr>            VDB filter expression (e.g. 'agent_id = "xxx"')
+  -l, --limit <count>            Maximum number of documents to export (exports all if omitted)
+      --offset <n>               Start from the n-th document (default: 0), must be a multiple of the page size
+      --include-vectors          Keep the vector dense-vector field (skipped by default)
+      --probe                    Only test connectivity, list collection info, then exit
+  -h, --help                     Show help
 
-输出：
+Output:
   <outputDir>/
-  ├── <collection全名>.jsonl     每行一个 JSON 文档
-  ├── schemas.json               表结构
-  └── export-meta.json           导出元信息
+  ├── <collection-full-name>.jsonl  One JSON document per line
+  ├── schemas.json               Collection schemas
+  └── export-meta.json           Export metadata
 
-导出字段说明：
-  默认跳过 vector（稠密向量），保留 sparse_vector（BM25）。
-  加 --include-vectors 导出全部字段。
+Exported fields:
+  Skips vector (dense vector) by default, keeps sparse_vector (BM25).
+  Add --include-vectors to export all fields.
 
-示例：
-  # 测试连通性
+Examples:
+  # Test connectivity
   node ./bin/export-tencent-vdb.mjs \\
     --url "http://gz-vdb-xxx:8100" --username root --api-key "xxx" --database mydb \\
     --probe
 
-  # 全量导出
+  # Full export
   node ./bin/export-tencent-vdb.mjs \\
     --url "http://gz-vdb-xxx:8100" --username root --api-key "xxx" --database mydb
 
-  # 导出指定 collection 到指定目录
+  # Export a specific collection to a specific directory
   node ./bin/export-tencent-vdb.mjs \\
     --url "http://gz-vdb-xxx:8100" --username root --api-key "xxx" --database mydb \\
     -c mydb_l0_conversations -o /tmp/backup
 
-  # 带过滤条件
+  # With a filter
   node ./bin/export-tencent-vdb.mjs \\
     --url "http://gz-vdb-xxx:8100" --username root --api-key "xxx" --database mydb \\
     -f 'role = "user"'
@@ -338,7 +338,7 @@ class VDBClient {
 }
 
 // ============================================================
-// 导出逻辑
+// Export logic
 // ============================================================
 
 interface ExportOptions {
@@ -368,13 +368,13 @@ async function exportCollection(
 
   console.log(`  📦 ${collection}`);
   if (options.expectedTotal !== undefined) {
-    console.log(`     文档总数: ${options.expectedTotal}`);
+    console.log(`     Total documents: ${options.expectedTotal}`);
   }
   if (options.filter) {
-    console.log(`     过滤条件: ${options.filter}`);
+    console.log(`     Filter: ${options.filter}`);
   }
   if (isRangeMode) {
-    console.log(`     导出范围: offset=${options.offset}, limit=${options.limit}`);
+    console.log(`     Export range: offset=${options.offset}, limit=${options.limit}`);
   }
 
   while (hasMore && totalExported < maxDocs) {
@@ -412,10 +412,10 @@ async function exportCollection(
           Math.round((totalExported / options.expectedTotal) * 100),
         );
         process.stdout.write(
-          `\r     进度: ${totalExported}/${options.expectedTotal} (${pct}%)`,
+          `\r     Progress: ${totalExported}/${options.expectedTotal} (${pct}%)`,
         );
       } else {
-        process.stdout.write(`\r     已导出: ${totalExported} 条`);
+        process.stdout.write(`\r     Exported: ${totalExported}`);
       }
 
       if (docs.length < thisPageSize) {
@@ -423,7 +423,7 @@ async function exportCollection(
       }
     } catch (err) {
       console.error(
-        `\n     ❌ 查询失败 (offset=${currentOffset}): ${err instanceof Error ? err.message : String(err)}`,
+        `\n     ❌ Query failed (offset=${currentOffset}): ${err instanceof Error ? err.message : String(err)}`,
       );
       hasMore = false;
     }
@@ -433,7 +433,7 @@ async function exportCollection(
   await new Promise<void>((resolve) => writeStream.on("finish", resolve));
 
   console.log(
-    `\n     ✅ 完成: ${totalExported} 条 → ${path.basename(filePath)}`,
+    `\n     ✅ Done: ${totalExported} docs → ${path.basename(filePath)}`,
   );
 
   return { docCount: totalExported, filePath };
@@ -454,26 +454,26 @@ async function main(): Promise<void> {
   const config = validateConfig(args);
 
   console.log("╔═══════════════════════════════════════════════════╗");
-  console.log("║   腾讯云 VDB (Tencent VectorDB) 数据导出工具        ║");
+  console.log("║   Tencent Cloud VDB (Tencent VectorDB) Export Tool  ║");
   console.log("╚═══════════════════════════════════════════════════╝");
   console.log();
-  console.log(`📌 VDB 地址:     ${config.url}`);
-  console.log(`📌 数据库:       ${config.database}`);
-  console.log(`📌 输出目录:     ${args.output}`);
+  console.log(`📌 VDB URL:      ${config.url}`);
+  console.log(`📌 Database:     ${config.database}`);
+  console.log(`📌 Output dir:   ${args.output}`);
   if (args.collection) {
-    console.log(`📌 指定导出:     ${args.collection}`);
+    console.log(`📌 Collection:   ${args.collection}`);
   }
   if (args.filter) {
-    console.log(`📌 过滤条件:     ${args.filter}`);
+    console.log(`📌 Filter:       ${args.filter}`);
   }
   if (args.limit !== undefined) {
-    console.log(`📌 导出上限:     ${args.limit} 条`);
+    console.log(`📌 Export limit: ${args.limit}`);
   }
   if (args.offset > 0) {
-    console.log(`📌 起始偏移:     ${args.offset}`);
+    console.log(`📌 Start offset: ${args.offset}`);
   }
   if (args.includeVectors) {
-    console.log(`📌 包含向量:     是`);
+    console.log(`📌 Vectors:      included`);
   }
   console.log();
 
@@ -486,7 +486,7 @@ async function main(): Promise<void> {
     allCollections = await client.listCollections();
   } catch (err) {
     console.error(
-      `❌ 列出 collection 失败: ${err instanceof Error ? err.message : String(err)}`,
+      `❌ Failed to list collections: ${err instanceof Error ? err.message : String(err)}`,
     );
     process.exit(1);
   }
@@ -496,10 +496,10 @@ async function main(): Promise<void> {
     const found = allCollections.find((c) => c.collection === args.collection);
     if (!found) {
       console.error(
-        `❌ Collection "${args.collection}" 不存在。可用的 collection：`,
+        `❌ Collection "${args.collection}" does not exist. Available collections:`,
       );
       for (const c of allCollections) {
-        console.error(`   - ${c.collection} (${c.documentCount} 条)`);
+        console.error(`   - ${c.collection} (${c.documentCount} docs)`);
       }
       process.exit(1);
     }
@@ -507,31 +507,31 @@ async function main(): Promise<void> {
   } else {
     targetCollections = allCollections;
     console.log(
-      `🔍 找到 ${targetCollections.length} 个 collection：`,
+      `🔍 Found ${targetCollections.length} collections:`,
     );
     for (const c of targetCollections) {
-      console.log(`   - ${c.collection} (${c.documentCount} 条)`);
+      console.log(`   - ${c.collection} (${c.documentCount} docs)`);
     }
   }
 
   if (targetCollections.length === 0) {
-    console.log("⚠️  数据库中没有 collection，无数据可导出");
+    console.log("⚠️  No collections in the database, nothing to export");
     process.exit(0);
   }
 
-  // --probe 模式：只测试连通性，列出信息后退出
+  // --probe mode: only test connectivity, list info, then exit
   if (args.probe) {
     console.log();
-    console.log("✅ 连通性测试通过");
+    console.log("✅ Connectivity test passed");
     console.log();
-    console.log(`  VDB 地址:   ${config.url}`);
-    console.log(`  数据库:     ${config.database}`);
-    console.log(`  Collection: ${targetCollections.length} 个`);
+    console.log(`  VDB URL:    ${config.url}`);
+    console.log(`  Database:   ${config.database}`);
+    console.log(`  Collection: ${targetCollections.length}`);
     const totalDocs = targetCollections.reduce((s, c) => s + c.documentCount, 0);
-    console.log(`  总文档数:   ${totalDocs}`);
+    console.log(`  Total docs: ${totalDocs}`);
     console.log();
     for (const c of targetCollections) {
-      console.log(`    - ${c.collection} (${c.documentCount} 条)`);
+      console.log(`    - ${c.collection} (${c.documentCount} docs)`);
     }
     console.log();
     process.exit(0);
@@ -539,20 +539,20 @@ async function main(): Promise<void> {
 
   console.log();
 
-  // 获取并保存表结构
+  // Fetch and save schemas
   const schemas: Record<string, Record<string, unknown>> = {};
-  console.log("📐 获取表结构...");
+  console.log("📐 Fetching schemas...");
   for (const col of targetCollections) {
     try {
       const schema = await client.describeCollection(col.collection);
       schemas[col.collection] = schema;
       const indexCount = Array.isArray(schema.indexes) ? schema.indexes.length : 0;
       const emb = schema.embedding as Record<string, unknown> | undefined;
-      const embInfo = emb ? `embedding=${emb.field}→${emb.model}` : "无 embedding";
-      console.log(`   ✅ ${col.collection} (${indexCount} 个索引, ${embInfo})`);
+      const embInfo = emb ? `embedding=${emb.field}→${emb.model}` : "no embedding";
+      console.log(`   ✅ ${col.collection} (${indexCount} indexes, ${embInfo})`);
     } catch (err) {
       console.error(
-        `   ⚠️ ${col.collection} 表结构获取失败: ${err instanceof Error ? err.message : String(err)}`,
+        `   ⚠️ ${col.collection} failed to fetch schema: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -579,7 +579,7 @@ async function main(): Promise<void> {
       exportResults.push({ collection: col.collection, ...result });
     } catch (err) {
       console.error(
-        `❌ 导出 ${col.collection} 失败: ${err instanceof Error ? err.message : String(err)}`,
+        `❌ Export of ${col.collection} failed: ${err instanceof Error ? err.message : String(err)}`,
       );
       exportResults.push({
         collection: col.collection,
@@ -610,25 +610,25 @@ async function main(): Promise<void> {
   fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2) + "\n");
 
   console.log("═══════════════════════════════════════════════════");
-  console.log("  ✅ 导出完成");
+  console.log("  ✅ Export complete");
   console.log("═══════════════════════════════════════════════════");
   console.log();
-  console.log(`  📁 输出目录: ${args.output}`);
-  console.log(`  📊 总文档数: ${meta.totalDocuments}`);
+  console.log(`  📁 Output dir:  ${args.output}`);
+  console.log(`  📊 Total docs:  ${meta.totalDocuments}`);
   for (const r of exportResults) {
     const status = r.docCount > 0 ? "✅" : "⚠️";
     console.log(
-      `     ${status} ${r.collection}: ${r.docCount} 条`,
+      `     ${status} ${r.collection}: ${r.docCount} docs`,
     );
   }
-  console.log(`  📋 元信息:   ${path.basename(metaPath)}`);
-  console.log(`  📐 表结构:   ${path.basename(schemaPath)}`);
+  console.log(`  📋 Metadata:    ${path.basename(metaPath)}`);
+  console.log(`  📐 Schemas:     ${path.basename(schemaPath)}`);
   console.log();
 }
 
 main().catch((err) => {
   console.error(
-    `\n❌ 导出失败: ${err instanceof Error ? err.message : String(err)}`,
+    `\n❌ Export failed: ${err instanceof Error ? err.message : String(err)}`,
   );
   process.exit(1);
 });

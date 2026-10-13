@@ -1,16 +1,16 @@
 /**
- * stages/build-upstream.ts — 上游请求头/请求体构造 stage (Phase 4)。
+ * stages/build-upstream.ts — stage that builds upstream request headers/body (Phase 4).
  *
- * 提取自 4 处 buildUpstreamHeaders / buildUpstreamBody / prepareUpstreamRequest 调用:
- *   - handler.ts:1546-1566 (含 prepareUpstreamRequest 压缩扩展)
+ * Extracted from 4 call sites of buildUpstreamHeaders / buildUpstreamBody / prepareUpstreamRequest:
+ *   - handler.ts:1546-1566 (including the prepareUpstreamRequest compression extension)
  *   - anthropicHandler.ts:1463-1479
- *   - codexHandler.ts:1219 附近
- *   - workbuddyHandler.ts:591 附近
+ *   - codexHandler.ts:1219 area
+ *   - workbuddyHandler.ts:591 area
  *
- * 本 stage 只做协议层调度 (protocol.buildUpstreamBody + buildUpstreamHeaders)。
- * prepareUpstreamRequest 的压缩扩展在此不 wrap —— 它需要大量 handler 内部状态
- * (messages/sessionKey/pipe/upstreamCall/userQuery/spaceId), Phase 4.4/4.5 组装时
- * 由 caller 直接调用 prepareUpstreamRequest, 结果拿到再调本 stage 的 buildUpstream。
+ * This stage only does protocol-layer dispatch (protocol.buildUpstreamBody + buildUpstreamHeaders).
+ * The compression extension of prepareUpstreamRequest is not wrapped here -- it needs a lot of handler-internal state
+ * (messages/sessionKey/pipe/upstreamCall/userQuery/spaceId); when Phase 4.4/4.5 assembles things,
+ * the caller calls prepareUpstreamRequest directly, then passes the result to this stage's buildUpstream.
  */
 
 import type { ForwardTarget } from "../../guard-adapter.js";
@@ -18,7 +18,7 @@ import type { ProtocolStrategy } from "../strategies/protocol/types.js";
 
 export interface BuildUpstreamStageInput {
   protocol: ProtocolStrategy;
-  /** body — 可能已被 prepareUpstreamRequest 修改过 (由 caller 决定) */
+  /** body — may already have been modified by prepareUpstreamRequest (decided by the caller) */
   body: Record<string, unknown>;
   target: ForwardTarget;
   clientHeaders: Headers;
@@ -31,7 +31,7 @@ export interface BuildUpstreamStageResult {
   upstreamHeaders: Record<string, string>;
 }
 
-/** 纯协议层调度: 无副作用, 无 IO。 */
+/** Pure protocol-layer dispatch: no side effects, no IO. */
 export function stageBuildUpstream(input: BuildUpstreamStageInput): BuildUpstreamStageResult {
   const upstreamBody = input.protocol.buildUpstreamBody(input.body, input.target);
   const upstreamHeaders = input.protocol.buildUpstreamHeaders(

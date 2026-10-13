@@ -1,12 +1,12 @@
 /**
- * stages/instance-upstream-override.ts — instance upstream override 应用 stage。
+ * stages/instance-upstream-override.ts — instance upstream override application stage.
  *
- * 提取自 openai-chat + anthropic runner ~18 行 相同的 override 应用块:
- *   1. routedToCheapModel gate (cost-guard 已路由到 cheap → 不应用 override)
- *   2. kind=override → 替换 target.url / effectiveApiKey / body.model / modelId
- *   3. skipCreditReport=true (custom upstream 用户自付, 不算平台账)
+ * Extracted from the identical ~18-line override application block in the openai-chat + anthropic runners:
+ *   1. routedToCheapModel gate (cost-guard already routed to cheap -> do not apply override)
+ *   2. kind=override -> replace target.url / effectiveApiKey / body.model / modelId
+ *   3. skipCreditReport=true (custom upstream is paid by the user, not billed to the platform)
  *
- * 这是 stateful mutation (body/target 变), stage 返回新值让 caller 应用。
+ * This is a stateful mutation (body/target change); the stage returns new values for the caller to apply.
  */
 
 import type { Resolution } from "../../instance-upstream-cache.js";
@@ -20,27 +20,27 @@ export interface InstanceUpstreamOverrideInput {
   body: Record<string, unknown>;
   modelId: string;
   /**
-   * 请求原始 path (c.req.path)。传入后 override URL 走 joinUrl(base, path) 智能拼接,
-   * 让 anthropic base 不带 /v1 也能通 (b11bf612 GLM /v1 修复); 也顺带修 base
-   * 已含完整 endpoint 时旧手拼的 double-append。
+   * The original request path (c.req.path). When passed, the override URL is smartly joined via joinUrl(base, path),
+   * so an anthropic base without /v1 still works (b11bf612 GLM /v1 fix); it also fixes the double-append of the old
+   * hand-concatenation when the base already contains the full endpoint.
    *
-   * 未传时退回老手拼行为 (base + forwardEndpoint), 保持向后兼容。
+   * When not passed, falls back to the old hand-concatenation behavior (base + forwardEndpoint), keeping backward compatibility.
    */
   requestPath?: string;
 }
 
 export interface InstanceUpstreamOverrideResult {
-  /** 是否触发 override — 若 false 所有其他字段无效 */
+  /** whether override was triggered — if false all other fields are invalid */
   applied: boolean;
-  /** 新 target.url (仅 applied=true) */
+  /** new target.url (only when applied=true) */
   newTargetUrl: string;
-  /** 新 effectiveApiKey (仅 applied=true; custom_passthrough → 原 apiKey) */
+  /** new effectiveApiKey (only when applied=true; custom_passthrough -> the original apiKey) */
   newEffectiveApiKey: string;
-  /** 新 modelId (仅 applied=true 且 row 有 model_id 时不为空; 否则 = 原 modelId) */
+  /** new modelId (only non-empty when applied=true and the row has model_id; otherwise = the original modelId) */
   newModelId: string;
-  /** 是否修改了 body.model (仅 applied 且 row.model_id) */
+  /** whether body.model was modified (only when applied and row.model_id) */
   bodyModelUpdated: boolean;
-  /** custom upstream 用户自付, credit 跳过 */
+  /** custom upstream is paid by the user, credit skipped */
   skipCreditReport: boolean;
 }
 
@@ -62,8 +62,8 @@ export function stageInstanceUpstreamOverride(
   }
 
   const row = earlyConvResolution.row;
-  // 优先走 joinUrl(base, requestPath) 智能拼 (b11bf612): anthropic base 不带 /v1 自动补,
-  // base 已含完整 endpoint 早退不 double-append。未传 requestPath 时退回老手拼保兼容。
+  // Prefer joinUrl(base, requestPath) smart joining (b11bf612): an anthropic base without /v1 is auto-completed,
+  // a base that already contains the full endpoint returns early without double-append. When requestPath is not passed, fall back to the old hand-concatenation for compatibility.
   const newTargetUrl = input.requestPath
     ? joinUrl(row.base_url, input.requestPath)
     : `${row.base_url.replace(/\/+$/, "")}${forwardEndpoint}`;

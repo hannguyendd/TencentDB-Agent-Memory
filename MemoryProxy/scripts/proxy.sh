@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# context-proxy 后台管理脚本（默认启动 proxy + 守护进程）
-# 用法: ./proxy.sh [start|stop|restart|status|log|daemon|daemon-stop|daemon-status]
+# context-proxy background management script (starts proxy + daemon by default)
+# Usage: ./proxy.sh [start|stop|restart|status|log|daemon|daemon-stop|daemon-status]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# 项目根目录（scripts/ 的上一级），src/index.ts 与 config.yaml 都在这里
+# Project root (parent of scripts/); src/index.ts and config.yaml are both here
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PID_FILE="$SCRIPT_DIR/context-proxy.pid"
 DAEMON_PID_FILE="$SCRIPT_DIR/context-proxy-daemon.pid"
@@ -12,18 +12,18 @@ LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d).log"
 DAEMON_LOG="$LOG_DIR/daemon.log"
 CONFIG_FILE="$PROJECT_ROOT/config.yaml"
 
-# 从 config.yaml 读取端口（默认 8096）
+# Read the port from config.yaml (default 8096)
 PROXY_PORT="$(grep -E '^\s*port:' "$CONFIG_FILE" 2>/dev/null | head -1 | awk '{print $2}')"
 PROXY_PORT="${PROXY_PORT:-8096}"
 
-# 守护进程配置（可通过环境变量覆盖）
-DAEMON_CHECK_INTERVAL="${DAEMON_CHECK_INTERVAL:-5}"       # 健康检查间隔（秒）
-DAEMON_MAX_RESTARTS="${DAEMON_MAX_RESTARTS:-10}"           # 窗口内最大重启次数
-DAEMON_RESTART_WINDOW="${DAEMON_RESTART_WINDOW:-300}"      # 重启计数窗口（秒）
-DAEMON_BACKOFF_BASE="${DAEMON_BACKOFF_BASE:-2}"            # 退避指数底数
-DAEMON_BACKOFF_MAX="${DAEMON_BACKOFF_MAX:-60}"             # 最大退避间隔（秒）
+# Daemon configuration (can be overridden via environment variables)
+DAEMON_CHECK_INTERVAL="${DAEMON_CHECK_INTERVAL:-5}"       # health check interval (seconds)
+DAEMON_MAX_RESTARTS="${DAEMON_MAX_RESTARTS:-10}"           # max restarts within the window
+DAEMON_RESTART_WINDOW="${DAEMON_RESTART_WINDOW:-300}"      # restart counting window (seconds)
+DAEMON_BACKOFF_BASE="${DAEMON_BACKOFF_BASE:-2}"            # backoff exponent base
+DAEMON_BACKOFF_MAX="${DAEMON_BACKOFF_MAX:-60}"             # max backoff interval (seconds)
 
-# 如果是守护循环入口，跳过 set -euo 严格模式，避免意外退出
+# If this is the daemon loop entry, skip set -euo strict mode to avoid unexpected exits
 if [[ "${1:-}" != "_daemon_entry" ]]; then
   set -euo pipefail
 fi
@@ -31,10 +31,10 @@ fi
 # Ensure logs directory exists
 mkdir -p "$LOG_DIR"
 
-# 自动检测 node 路径（兼容 nvm / fnm / 系统安装 / 自定义路径）
+# Auto-detect the node path (supports nvm / fnm / system install / custom paths)
 _find_node() {
   local p
-  # 1. 优先尝试 NVM，强制激活并定位 Node v22
+  # 1. Try NVM first, force-activate it and locate Node v22
   for s in "$HOME/.nvm/nvm.sh" /usr/local/nvm/nvm.sh; do
     if [[ -f "$s" ]]; then
       source "$s" 2>/dev/null
@@ -42,15 +42,15 @@ _find_node() {
       [[ -n "$p" ]] && { echo "$p"; return; }
     fi
   done
-  # 2. 尝试使用 FNM
+  # 2. Try FNM
   if command -v fnm &>/dev/null; then
     eval "$(fnm env 2>/dev/null)"
     p="$(command -v node 2>/dev/null)"
     [[ -n "$p" ]] && { echo "$p"; return; }
   fi
-  # 3. 兜底当前 PATH
+  # 3. Fall back to the current PATH
   p="$(command -v node 2>/dev/null)" && { echo "$p"; return; }
-  # 4. 常见自定义目录
+  # 4. Common custom directories
   for d in "$HOME/.workbuddy/binaries/node/versions" "$HOME/.local/share/fnm/node-versions"; do
     [[ -d "$d" ]] && { p="$(find "$d" -maxdepth 3 -type f -name node -executable 2>/dev/null | sort -V | tail -1)"; [[ -n "$p" ]] && { echo "$p"; return; }; }
   done
@@ -76,7 +76,7 @@ cmd_start() {
     >> "$LOG_FILE" 2>&1 &
   echo $! > "$PID_FILE"
 
-  # 等待启动
+  # Wait for startup
   local i=0
   while (( i < 10 )); do
     if curl -sf http://localhost:${PROXY_PORT}/health > /dev/null 2>&1; then
@@ -93,7 +93,7 @@ cmd_start() {
 }
 
 cmd_stop() {
-  # 先停守护进程，防止它立刻把 proxy 拉起来
+  # Stop the daemon first, to keep it from immediately restarting the proxy
   if _daemon_is_running; then
     cmd_daemon_stop
   fi
@@ -104,7 +104,7 @@ cmd_stop() {
     kill "$pid" 2>/dev/null || true
     rm -f "$PID_FILE"
   fi
-  # 兜底：确保端口释放
+  # Fallback: make sure the port is released
   fuser -k ${PROXY_PORT}/tcp 2>/dev/null || true
   sleep 1
   if [[ -n "$pid" ]]; then
@@ -146,7 +146,7 @@ cmd_log() {
   fi
 }
 
-# ── 守护进程 ──────────────────────────────────────────────────────────────
+# ── Daemon ──────────────────────────────────────────────────────────────
 
 _daemon_is_running() {
   [[ -f "$DAEMON_PID_FILE" ]] && kill -0 "$(cat "$DAEMON_PID_FILE")" 2>/dev/null
@@ -156,9 +156,9 @@ _daemon_log() {
   echo "[daemon $(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$DAEMON_LOG"
 }
 
-# 核心守护循环：监控 proxy 进程，异常时自动重启
+# Core daemon loop: monitor the proxy process and restart it automatically on failure
 _daemon_loop() {
-  # 不在守护循环里用 set -e，每个操作自己处理错误
+  # Do not use set -e inside the daemon loop; each operation handles its own errors
   set +e
 
   local restart_count=0
@@ -169,11 +169,11 @@ _daemon_loop() {
     if ! _is_running; then
       _daemon_log "proxy process died, attempting restart..."
 
-      # 退避策略：连续失败越多，等待越久
+      # Backoff strategy: the more consecutive failures, the longer the wait
       local backoff=$(( DAEMON_BACKOFF_BASE ** consecutive_failures ))
       [[ $backoff -gt $DAEMON_BACKOFF_MAX ]] && backoff=$DAEMON_BACKOFF_MAX
 
-      # 重启次数限流
+      # Restart rate limiting
       local now
       now=$(date +%s)
       if (( window_start == 0 )) || (( now - window_start > DAEMON_RESTART_WINDOW )); then
@@ -198,7 +198,7 @@ _daemon_loop() {
         consecutive_failures=$((consecutive_failures + 1))
       fi
     else
-      # 进程存活，重置连续失败计数（但保留窗口内重启计数）
+      # Process alive: reset the consecutive failure count (but keep the in-window restart count)
       consecutive_failures=0
     fi
 
@@ -212,7 +212,7 @@ cmd_daemon() {
     return 0
   fi
 
-  # 确保 proxy 先启动
+  # Make sure the proxy is started first
   if ! _is_running; then
     echo "[daemon] proxy not running, starting first..."
     cmd_start || { echo "[daemon] failed to start proxy, aborting" >&2; return 1; }
@@ -221,7 +221,7 @@ cmd_daemon() {
   echo "[daemon] starting daemon process..."
   mkdir -p "$LOG_DIR"
 
-  # 后台启动守护循环
+  # Start the daemon loop in the background
   nohup "$SCRIPT_DIR/proxy.sh" _daemon_entry >> "$DAEMON_LOG" 2>&1 &
 
   echo $! > "$DAEMON_PID_FILE"
@@ -265,9 +265,9 @@ case "${1:-daemon}" in
   daemon)         cmd_daemon         ;;
   daemon-stop)    cmd_daemon_stop    ;;
   daemon-status)  cmd_daemon_status  ;;
-  _daemon_entry)  _daemon_loop       ;;  # 内部入口，不对外暴露
+  _daemon_entry)  _daemon_loop       ;;  # internal entry, not exposed externally
   *)
-    echo "用法: $0 [start|stop|restart|status|log|daemon|daemon-stop|daemon-status]"
+    echo "Usage: $0 [start|stop|restart|status|log|daemon|daemon-stop|daemon-status]"
     exit 1
     ;;
 esac

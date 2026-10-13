@@ -1,16 +1,16 @@
 /**
- * stages/forward-with-retry.ts — 完整 fetch + retry 编排 stage。
+ * stages/forward-with-retry.ts — full fetch + retry orchestration stage.
  *
- * 提取自 openai-chat + anthropic runner 各 ~150 行 forwardWithRetry 函数。
- * 差异通过参数化保留:
+ * Extracted from the ~150-line forwardWithRetry functions in each of the openai-chat + anthropic runners.
+ * Differences are preserved via parameterization:
  *   - protocol: 'openai' | 'anthropic' — rate-limit tag
- *   - retryBodyBuilder: openai 覆写 model, anthropic 不改
- *   - timeoutBehavior: openai 走 gate > 0, anthropic 恒开
- *   - debugOutboundMd5: openai/anthropic 各有独立打印格式, 由 caller 传函数
+ *   - retryBodyBuilder: openai overrides model, anthropic leaves it unchanged
+ *   - timeoutBehavior: openai uses gate > 0, anthropic is always on
+ *   - debugOutboundMd5: openai/anthropic each have their own print format, a function is passed in by the caller
  *
- * ⚠️ debug dump body 部分保留在 caller (openai 有, anthropic 没有), 因为它
- * 需要访问 upstream body/headers 各自复本, 且各自 dump 文件路径都是 debug env
- * gate 的; 不 stage 化。
+ * WARNING: the debug dump body part stays in the caller (openai has it, anthropic does not), because it
+ * needs access to each side's own copy of the upstream body/headers, and each dump file path is gated
+ * by a debug env; not stage-ified.
  */
 
 import type { ProxyConfig } from "../../types.js";
@@ -31,13 +31,13 @@ export interface ForwardWithRetryInput {
   protocol: "openai" | "anthropic";
   /**
    * timeout gating semantics:
-   *   - "gated": openai style, 只有 forwardTimeoutMs > 0 才设 AbortSignal
-   *   - "always": anthropic style, 总是设 AbortSignal.timeout
+   *   - "gated": openai style, AbortSignal is set only when forwardTimeoutMs > 0
+   *   - "always": anthropic style, always set AbortSignal.timeout
    */
   timeoutBehavior: "gated" | "always";
   /**
-   * retry body 构建函数. openai 版本: `{...originalBody, model: retryTarget.model}`;
-   * anthropic 版本: originalBody 原样返回。
+   * retry body builder function. openai version: `{...originalBody, model: retryTarget.model}`;
+   * anthropic version: returns originalBody as is.
    */
   buildRetryBody: (originalBody: Record<string, unknown>, retryModel: string) => Record<string, unknown>;
 }
@@ -48,8 +48,8 @@ export interface ForwardWithRetryResult {
 }
 
 /**
- * 完整 forward+retry 编排。抛 RateLimitExceededError 时上层需 catch (转 429)。
- * 抛 Error("Upstream request failed") 时 caller 需转 502。
+ * Full forward+retry orchestration. When RateLimitExceededError is thrown the upper layer must catch it (convert to 429).
+ * When Error("Upstream request failed") is thrown the caller must convert it to 502.
  */
 export async function stageForwardWithRetry(
   input: ForwardWithRetryInput,

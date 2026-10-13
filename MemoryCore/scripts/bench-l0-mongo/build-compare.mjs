@@ -23,11 +23,11 @@ const OLD = JSON.parse(readFileSync(join(HERE, "reports/l0-bench-100M-FULL-merge
 const RTT_MS = 37;
 
 const STALL_WINDOWS_MAJ = [
-  { from: "15:39:39", to: "15:40:39", qps: 0, docs: 67_821_000, kind: "完全停顿" },
-  { from: "15:43:39", to: "15:44:39", qps: 4_900, docs: 76_822_000, kind: "严重降速" },
-  { from: "15:46:39", to: "15:47:39", qps: 0, docs: 81_119_000, kind: "完全停顿" },
-  { from: "15:47:39", to: "15:48:39", qps: 11_150, docs: 81_788_000, kind: "停顿尾声" },
-  { from: "15:55:39", to: "15:56:39", qps: 0, docs: 97_079_000, kind: "完全停顿" },
+  { from: "15:39:39", to: "15:40:39", qps: 0, docs: 67_821_000, kind: "Complete stall" },
+  { from: "15:43:39", to: "15:44:39", qps: 4_900, docs: 76_822_000, kind: "Severe slowdown" },
+  { from: "15:46:39", to: "15:47:39", qps: 0, docs: 81_119_000, kind: "Complete stall" },
+  { from: "15:47:39", to: "15:48:39", qps: 11_150, docs: 81_788_000, kind: "End of stall" },
+  { from: "15:55:39", to: "15:56:39", qps: 0, docs: 97_079_000, kind: "Complete stall" },
 ];
 
 const FLOW_MAJ = { isLaggedCount: 3, isLaggedTimeMicros: 54_999_988 };
@@ -110,45 +110,45 @@ function stackedLatencyChart(rows) {
     <div class="bar-val">${fmt(srv(r.total), 1)} ms</div></div>`).join("")}
     <div class="bar-row" style="margin-top:14px"><div class="bar-lab"></div>
     <div class="bar-track" style="border:none;background:none;height:auto">
-      <span class="lgd"><i style="background:#374151"></i>跨地域 RTT ${RTT_MS} ms</span>
-      <span class="lgd"><i style="background:#3b82f6"></i>服务端耗时</span></div>
-    <div class="bar-val" style="color:var(--fg3);font-size:12px">右侧=服务端</div></div></div>`;
+      <span class="lgd"><i style="background:#374151"></i>Cross-region RTT ${RTT_MS} ms</span>
+      <span class="lgd"><i style="background:#3b82f6"></i>Server time</span></div>
+    <div class="bar-val" style="color:var(--fg3);font-size:12px">Right = server</div></div></div>`;
 }
 
 const qpsOverlay = lineChart({
   series: [
-    { name: "w:1（9/1，32 分钟）", color: "#22c55e", dots: true,
+    { name: "w:1 (9/1, 32 min)", color: "#22c55e", dots: true,
       points: w1Curve.map((p) => ({ x: p.pct, y: p.qps, t: `${p.tMin.toFixed(0)}min · ${fmt(p.qps)}/s` })) },
-    { name: "w:majority（8/31，39 分钟）", color: "#f59e0b",
+    { name: "w:majority (8/31, 39 min)", color: "#f59e0b",
       points: majCurve.map((p) => ({ x: p.pct, y: p.qps, t: `${p.tMin.toFixed(0)}min · ${fmt(p.qps)}/s` })) },
-    { name: "升配前（索引已损坏）", color: "#ef4444", dash: true,
+    { name: "Before upgrade (broken index)", color: "#ef4444", dash: true,
       points: oldCurve.map((p) => ({ x: p.pct, y: p.qps, t: `${p.tMin.toFixed(0)}min · ${fmt(p.qps)}/s` })) },
   ],
   yMax: 100000, yTicks: [100, 1000, 10000, 100000], logY: true,
-  xLabel: "写入进度（% of 1 亿条）", yLabel: "瞬时吞吐 docs/s（对数轴）",
+  xLabel: "Write progress (% of 100M docs)", yLabel: "Instantaneous throughput docs/s (log scale)",
 });
 
 const qpsW1Linear = lineChart({
   series: [
-    { name: "w:1 — 瞬时吞吐", color: "#22c55e", dots: true,
+    { name: "w:1 — instantaneous throughput", color: "#22c55e", dots: true,
       points: w1Curve.map((p) => ({ x: p.tMin, y: p.qps, t: `${p.tMin.toFixed(0)}min · ${fmt(p.qps)}/s` })) },
-    { name: "w:majority — 瞬时吞吐", color: "#f59e0b",
+    { name: "w:majority — instantaneous throughput", color: "#f59e0b",
       points: majCurve.map((p) => ({ x: p.tMin, y: p.qps, t: `${p.tMin.toFixed(0)}min · ${fmt(p.qps)}/s` })) },
   ],
   yMax: 90000, yTicks: [0, 20000, 40000, 60000, 80000], xMax: 40,
-  xLabel: "耗时（分钟）", yLabel: "瞬时吞吐 docs/s",
+  xLabel: "Elapsed (minutes)", yLabel: "Instantaneous throughput docs/s",
 });
 
 const w1i = W1.write100m.insert, maji = MAJ.write100m.insert, odi = OLD.write100m.insert;
 const w1s = w1i.stalls ?? {}, majs = { zeroWindows: 3, slowBatches: "?", longestBatchMs: maji.batchLatency.maxMs };
 
 const QUERY_LABEL = {
-  searchL0Fts: "BM25 关键词检索（命中）",
-  searchL0FtsEmpty: "BM25 关键词检索（无命中）",
-  sessionReplay: "会话回放（按 session 分页）",
-  queryL0ForL1: "L1 聚合取数（按 session_key）",
-  paginated: "租户维度分页列表",
-  countL0: "租户维度计数",
+  searchL0Fts: "BM25 keyword search (hit)",
+  searchL0FtsEmpty: "BM25 keyword search (no hit)",
+  sessionReplay: "Session replay (paged by session)",
+  queryL0ForL1: "L1 aggregation fetch (by session_key)",
+  paginated: "Tenant-level paged list",
+  countL0: "Tenant-level count",
 };
 const queryRows = Object.entries(W1.query ?? {}).map(([name, q]) => ({ name, q }));
 
@@ -157,10 +157,10 @@ const latRow = (L, tag) => `<tr><td>${tag}</td>
   <td class="num">${fmt(L.p99Ms)}</td><td class="num">${fmt(L.p999Ms ?? 0)}</td><td class="num ${L.maxMs > 10000 ? "down" : ""}">${fmt(L.maxMs)}</td></tr>`;
 
 const html = `<!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>MongoDB L0 一亿条压测报告</title>
+<title>MongoDB L0 100M-Document Benchmark Report</title>
 <style>
   :root{--bg:#0b0f17;--card:#121826;--card2:#0e1420;--line:#1f2937;--fg:#e5e7eb;--fg2:#9aa4b2;--fg3:#6b7280;
     --green:#22c55e;--red:#ef4444;--blue:#3b82f6;--amber:#f59e0b;--purple:#a855f7}
@@ -204,94 +204,94 @@ const html = `<!doctype html>
 </head>
 <body><div class="wrap">
 
-<h1>MongoDB L0 一亿条压测报告</h1>
+<h1>MongoDB L0 100M-Document Benchmark Report</h1>
 <p class="sub">
-  实例 <code>28.79.181.33:7026</code> · 8C32G500G · 跨地域 RTT ${RTT_MS}ms<br/>
-  最新：<code>l0_bench_w1_r1_s100m</code>（9/1，w:1）· 对比：<code>l0_bench_8c32g_r3_s100m</code>（8/31，w:majority）<br/>
-  两次均为 batch=1000、并发=8，唯一变量是写关注。
+  Instance <code>28.79.181.33:7026</code> · 8C32G500G · cross-region RTT ${RTT_MS}ms<br/>
+  Latest: <code>l0_bench_w1_r1_s100m</code>(9/1, w:1) · Compared against: <code>l0_bench_8c32g_r3_s100m</code>(8/31, w:majority)<br/>
+  Both runs use batch=1000 and concurrency=8; the only variable is write concern.
 </p>
 
 <div class="pills">
-  <span class="pill on">1 亿条 × 2 轮均完成</span>
-  <span class="pill on">w:1 — 0 stall · 32 分钟</span>
+  <span class="pill on">100M docs × 2 rounds completed</span>
+  <span class="pill on">w:1 — 0 stall · 32 min</span>
   <span class="pill on">BM25 READY</span>
-  <span class="pill warn">w:majority — 3 次完全停顿</span>
+  <span class="pill warn">w:majority — 3 complete stalls</span>
 </div>
 
 <div class="verdict">
-  <p><b>结论：改成 w:1 后 WriteStall 完全消除，1 亿条 32 分钟写完，0 错误，最长单批 1.2 秒。</b></p>
+  <p><b>Conclusion: after switching to w:1, WriteStall is eliminated entirely. 100M docs were written in 32 minutes with 0 errors and a longest batch of 1.2 s.</b></p>
   <p style="color:var(--fg2)">
-    w:majority 那轮（8/31）平均 ${fmt(maji.docsPerSec)} docs/s、3 次完全停顿、最长单批 ${fmt(maji.batchLatency.maxMs / 1000, 1)} 秒——
-    根因是复制跟不上导致 flow control 限流（<code>isLaggedCount=3</code>）。
-    改成 w:1 后（9/1）平均 ${fmt(w1i.docsPerSec)} docs/s、<b>零吞吐窗口 0 次</b>、最长单批 ${fmt(w1i.batchLatency.maxMs / 1000, 1)} 秒。
-    查询性能不受写关注影响，仅列 w:1 轮结果；延迟均扣除 ${RTT_MS}ms RTT 给出服务端耗时。
+    The w:majority round (8/31) averaged ${fmt(maji.docsPerSec)} docs/s, with 3 complete stalls and a longest batch of ${fmt(maji.batchLatency.maxMs / 1000, 1)} s.
+    The root cause is replication lag triggering flow-control throttling (<code>isLaggedCount=3</code>).
+    After switching to w:1 (9/1), it averaged ${fmt(w1i.docsPerSec)} docs/s with <b>0 zero-throughput windows</b> and a longest batch of ${fmt(w1i.batchLatency.maxMs / 1000, 1)} s.
+    Query performance is unaffected by write concern, so only the w:1 round is listed; all latencies have the ${RTT_MS}ms RTT subtracted to give server time.
   </p>
 </div>
 
-<h2>一、写入对比：w:1 vs w:majority</h2>
+<h2>1. Write comparison: w:1 vs w:majority</h2>
 
 <div class="grid2">
-  <div class="stat"><div class="k">w:1 总耗时</div><div class="v up">${(w1i.wallMs / 60000).toFixed(1)} 分钟</div>
-    <div class="d">w:majority ${(maji.wallMs / 60000).toFixed(1)} 分钟</div></div>
-  <div class="stat"><div class="k">w:1 平均吞吐</div><div class="v up">${fmt(w1i.docsPerSec)} docs/s</div>
+  <div class="stat"><div class="k">w:1 total time</div><div class="v up">${(w1i.wallMs / 60000).toFixed(1)} min</div>
+    <div class="d">w:majority ${(maji.wallMs / 60000).toFixed(1)} min</div></div>
+  <div class="stat"><div class="k">w:1 average throughput</div><div class="v up">${fmt(w1i.docsPerSec)} docs/s</div>
     <div class="d">w:majority ${fmt(maji.docsPerSec)} docs/s</div></div>
-  <div class="stat"><div class="k">w:1 零吞吐窗口</div><div class="v up">${w1s.zeroWindows ?? 0} 次</div>
-    <div class="d">w:majority ${majs.zeroWindows} 次</div></div>
-  <div class="stat"><div class="k">w:1 最长单批</div><div class="v up">${fmt(w1i.batchLatency.maxMs / 1000, 1)} 秒</div>
-    <div class="d">w:majority ${fmt(maji.batchLatency.maxMs / 1000, 1)} 秒</div></div>
+  <div class="stat"><div class="k">w:1 zero-throughput windows</div><div class="v up">${w1s.zeroWindows ?? 0}</div>
+    <div class="d">w:majority ${majs.zeroWindows}</div></div>
+  <div class="stat"><div class="k">w:1 longest batch</div><div class="v up">${fmt(w1i.batchLatency.maxMs / 1000, 1)} s</div>
+    <div class="d">w:majority ${fmt(maji.batchLatency.maxMs / 1000, 1)} s</div></div>
 </div>
 
 <table>
-  <thead><tr><th>指标</th><th>w:1（9/1）</th><th>w:majority（8/31）</th><th>升配前（参考）</th></tr></thead>
+  <thead><tr><th>Metric</th><th>w:1 (9/1)</th><th>w:majority (8/31)</th><th>Before upgrade (reference)</th></tr></thead>
   <tbody>
-    <tr><td>写关注</td><td class="num up">w:1</td><td class="num">w:majority</td><td class="num">w:majority</td></tr>
-    <tr><td>总耗时</td><td class="num up">${(w1i.wallMs / 60000).toFixed(1)} min</td><td class="num">${(maji.wallMs / 60000).toFixed(1)} min</td><td class="num">${(odi.wallMs / 3600000).toFixed(1)} h</td></tr>
-    <tr><td>平均吞吐</td><td class="num up">${fmt(w1i.docsPerSec)} /s</td><td class="num">${fmt(maji.docsPerSec)} /s</td><td class="num">${fmt(odi.docsPerSec)} /s</td></tr>
-    <tr><td>峰值吞吐</td><td class="num">${fmt(Math.max(...w1Curve.map((p) => p.qps)))} /s</td><td class="num">${fmt(Math.max(...majCurve.map((p) => p.qps)))} /s</td><td class="num">${fmt(Math.max(...oldCurve.map((p) => p.qps)))} /s</td></tr>
-    <tr><td>零吞吐窗口</td><td class="num up">${w1s.zeroWindows ?? 0}</td><td class="num down">${majs.zeroWindows}</td><td class="num">—</td></tr>
-    <tr><td>慢批次 (>5s)</td><td class="num up">${w1s.slowBatches ?? 0}</td><td class="num down">有</td><td class="num">—</td></tr>
-    <tr><td>写入错误</td><td class="num">${w1i.errors}</td><td class="num">${maji.errors}</td><td class="num">${odi.errors}</td></tr>
-    <tr><td>BM25 索引</td><td class="num up">READY</td><td class="num up">READY</td><td class="num down">构建失败</td></tr>
+    <tr><td>Write concern</td><td class="num up">w:1</td><td class="num">w:majority</td><td class="num">w:majority</td></tr>
+    <tr><td>Total time</td><td class="num up">${(w1i.wallMs / 60000).toFixed(1)} min</td><td class="num">${(maji.wallMs / 60000).toFixed(1)} min</td><td class="num">${(odi.wallMs / 3600000).toFixed(1)} h</td></tr>
+    <tr><td>Average throughput</td><td class="num up">${fmt(w1i.docsPerSec)} /s</td><td class="num">${fmt(maji.docsPerSec)} /s</td><td class="num">${fmt(odi.docsPerSec)} /s</td></tr>
+    <tr><td>Peak throughput</td><td class="num">${fmt(Math.max(...w1Curve.map((p) => p.qps)))} /s</td><td class="num">${fmt(Math.max(...majCurve.map((p) => p.qps)))} /s</td><td class="num">${fmt(Math.max(...oldCurve.map((p) => p.qps)))} /s</td></tr>
+    <tr><td>Zero-throughput windows</td><td class="num up">${w1s.zeroWindows ?? 0}</td><td class="num down">${majs.zeroWindows}</td><td class="num">—</td></tr>
+    <tr><td>Slow batches (>5s)</td><td class="num up">${w1s.slowBatches ?? 0}</td><td class="num down">Yes</td><td class="num">—</td></tr>
+    <tr><td>Write errors</td><td class="num">${w1i.errors}</td><td class="num">${maji.errors}</td><td class="num">${odi.errors}</td></tr>
+    <tr><td>BM25 index</td><td class="num up">READY</td><td class="num up">READY</td><td class="num down">Build failed</td></tr>
   </tbody>
 </table>
 
-<h3>批延迟分位对比（batch=1000）</h3>
+<h3>Batch latency percentiles (batch=1000)</h3>
 <table>
-  <thead><tr><th>运行</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>p999</th><th>max</th></tr></thead>
+  <thead><tr><th>Run</th><th>p50</th><th>p90</th><th>p95</th><th>p99</th><th>p999</th><th>max</th></tr></thead>
   <tbody>
-    ${latRow(w1i.batchLatency, "w:1（9/1）")}
-    ${latRow(maji.batchLatency, "w:majority（8/31）")}
+    ${latRow(w1i.batchLatency, "w:1 (9/1)")}
+    ${latRow(maji.batchLatency, "w:majority (8/31)")}
   </tbody>
 </table>
 <p style="color:var(--fg2);font-size:13.5px">
-  w:majority 的 p99（${fmt(maji.batchLatency.p99Ms)}ms）看起来比 w:1（${fmt(w1i.batchLatency.p99Ms)}ms）更好，
-  但 max 高达 ${fmt(maji.batchLatency.maxMs / 1000, 0)} 秒——极端长尾被 majority 等待「拉平」了，真正的问题在 max 和零吞吐窗口。
-  w:1 的 p999 仅 ${fmt(w1i.batchLatency.p999Ms)}ms，分布干净。
+  The w:majority p99 (${fmt(maji.batchLatency.p99Ms)}ms) looks better than w:1 (${fmt(w1i.batchLatency.p99Ms)}ms),
+  but max reaches ${fmt(maji.batchLatency.maxMs / 1000, 0)} s. The extreme tail is "flattened" by the majority wait; the real problems are max and the zero-throughput windows.
+  The w:1 p999 is only ${fmt(w1i.batchLatency.p999Ms)}ms, a clean distribution.
 </p>
 
-<h2>二、QPS 曲线</h2>
-<p>横轴统一为写入进度百分比。w:1（绿）全程平滑下滑；w:majority（橙）有三次断崖归零。</p>
+<h2>2. QPS curves</h2>
+<p>The x-axis is write progress in percent. w:1 (green) declines smoothly throughout; w:majority (orange) drops to zero three times.</p>
 ${qpsOverlay}
 
-<h3>按实际分钟（线性轴）</h3>
+<h3>By actual minutes (linear axis)</h3>
 ${qpsW1Linear}
 
-<h3>w:1 分阶段平均吞吐</h3>
+<h3>w:1 average throughput by phase</h3>
 ${barChart([25, 50, 75, 100].map((hi, i) => {
   const lo = [0, 25, 50, 75][i];
   const seg = w1Curve.filter((p) => p.pct > lo && p.pct <= hi);
   return { label: `${lo}–${hi}%`, value: Math.round(seg.reduce((a, b) => a + b.qps, 0) / Math.max(1, seg.length)), color: ["#22c55e", "#4ade80", "#86efac", "#bbf7d0"][i] };
 }), { unit: " docs/s" })}
 
-<h2>三、w:majority 的 WriteStall 分析</h2>
+<h2>3. WriteStall analysis for w:majority</h2>
 
 <div class="note ok">
-  <p style="margin:0"><b>w:1 已验证消除此问题。</b>以下分析针对 w:majority 那轮，供理解根因；w:1 轮零吞吐窗口 = ${w1s.zeroWindows ?? 0}。</p>
+  <p style="margin:0"><b>w:1 is verified to eliminate this problem.</b> The analysis below covers the w:majority round to explain the root cause; zero-throughput windows in the w:1 round = ${w1s.zeroWindows ?? 0}。</p>
 </div>
 
-<h3>精确时间窗口（2026-08-31，w:majority 轮）</h3>
+<h3>Exact time windows (2026-08-31, w:majority round)</h3>
 <table>
-  <thead><tr><th>窗口</th><th>瞬时吞吐</th><th>累计文档</th><th>判定</th></tr></thead>
+  <thead><tr><th>Window</th><th>Instantaneous throughput</th><th>Cumulative docs</th><th>Verdict</th></tr></thead>
   <tbody>${STALL_WINDOWS_MAJ.map((s) => `<tr>
     <td class="num">${s.from} → ${s.to}</td>
     <td class="num ${s.qps === 0 ? "down" : ""}">${fmt(s.qps)} /s</td>
@@ -299,14 +299,14 @@ ${barChart([25, 50, 75, 100].map((hi, i) => {
   </tbody>
 </table>
 
-<h3>证据：flow control 触发 ${FLOW_MAJ.isLaggedCount} 次</h3>
-<p>PRIMARY 上 <code>serverStatus().flowControl.isLaggedCount = ${FLOW_MAJ.isLaggedCount}</code>，与 3 次完全停顿数量一致。
-<code>w:1</code> 不等从节点确认，绕开了这条限流路径。</p>
+<h3>Evidence: flow control triggered ${FLOW_MAJ.isLaggedCount} times</h3>
+<p>On the PRIMARY, <code>serverStatus().flowControl.isLaggedCount = ${FLOW_MAJ.isLaggedCount}</code>, which matches the 3 complete stalls.
+<code>w:1</code> does not wait for secondary acknowledgement, bypassing this throttling path.</p>
 
-<h2>四、查询性能（w:1 轮，1 亿条）</h2>
-<div class="note info"><p style="margin:0">不与升配前对比（索引已损坏）。串行单连接 200 次，延迟扣除 ${RTT_MS}ms RTT 给出服务端耗时。</p></div>
+<h2>4. Query performance (w:1 round, 100M docs)</h2>
+<div class="note info"><p style="margin:0">No comparison with the pre-upgrade run (index was broken). 200 serial requests on a single connection; latencies have the ${RTT_MS}ms RTT subtracted to give server time.</p></div>
 <table>
-  <thead><tr><th>查询</th><th>实测 p50</th><th>服务端</th><th>实测 QPS</th><th>同机房理论 QPS</th><th>行数</th></tr></thead>
+  <thead><tr><th>Query</th><th>Measured p50</th><th>Server</th><th>Measured QPS</th><th>Same-DC theoretical QPS</th><th>Rows</th></tr></thead>
   <tbody>${queryRows.map(({ name, q }) => {
     const s = srv(q.latency.p50Ms);
     return `<tr><td>${QUERY_LABEL[name] ?? name}</td>
@@ -314,22 +314,22 @@ ${barChart([25, 50, 75, 100].map((hi, i) => {
       <td class="num">${fmt(q.qps, 1)}</td><td class="num up">${fmt(1000 / s, 0)}</td><td class="num">${fmt(q.lastHits)}</td></tr>`;
   }).join("")}
 </tbody></table>
-<h3>延迟拆解</h3>
+<h3>Latency breakdown</h3>
 ${stackedLatencyChart(queryRows.map(({ name, q }) => ({ label: QUERY_LABEL[name] ?? name, total: q.latency.p50Ms, color: name.startsWith("search") ? "#a855f7" : "#3b82f6" })))}
 
-<h2>五、结论</h2>
+<h2>5. Conclusions</h2>
 <ul>
-  <li><b>w:1 验证通过。</b>1 亿条 32 分钟、${fmt(w1i.docsPerSec)} docs/s、0 错误、0 stall、BM25 READY。</li>
-  <li><b>w:majority 的 stall 根因是复制跟不上。</b>flow control 触发 3 次 = 3 次完全停顿；改成 w:1 后问题消除。</li>
-  <li><b>查询瓶颈是网络。</b>扣 RTT 后多数查询服务端 &lt;10ms；同机房或提并发可大幅改善。</li>
-  <li><b>生产建议。</b>w:1 牺牲跨节点持久性保证；若业务需要 majority 安全，需控制写入速率或优化从节点复制能力。</li>
+  <li><b>w:1 verified.</b> 100M docs in 32 min, ${fmt(w1i.docsPerSec)} docs/s, 0 errors, 0 stalls, BM25 READY.</li>
+  <li><b>The root cause of w:majority stalls is replication lag.</b> 3 flow-control triggers = 3 complete stalls; switching to w:1 eliminates the problem.</li>
+  <li><b>The query bottleneck is the network.</b> After subtracting RTT, most queries take &lt;10ms on the server; running in the same DC or raising concurrency would help substantially.</li>
+  <li><b>Production advice.</b> w:1 gives up cross-node durability guarantees; if the workload needs majority safety, throttle the write rate or improve secondary replication capacity.</li>
 </ul>
 
 <div class="foot">
-  报告生成于 ${new Date().toLocaleString("zh-CN")} ·
-  w:1 数据 <code>l0-bench-2026-09-01T14-02-56-975Z.json</code> ·
-  w:majority 数据 <code>l0-bench-2026-08-31T07-18-23-351Z.json</code> ·
-  重新生成：<code>node build-compare.mjs</code>
+  Report generated at ${new Date().toLocaleString("en-US")} ·
+  w:1 data <code>l0-bench-2026-09-01T14-02-56-975Z.json</code> ·
+  w:majority data <code>l0-bench-2026-08-31T07-18-23-351Z.json</code> ·
+  Regenerate: <code>node build-compare.mjs</code>
 </div>
 </div></body></html>`;
 

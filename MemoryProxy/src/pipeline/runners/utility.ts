@@ -1,12 +1,12 @@
 /**
- * Utility endpoint runner — 完整实现 (Phase 4)。
+ * Utility endpoint runner — full implementation (Phase 4).
  *
- * 迁移自 auxiliaryHandler.ts::handleAuxiliaryEndpoint (337 行)。
- * 与老实现语义 1:1 等价, 但改由 pipeline runner 承载。
- * 复用 pipeline 已提取的 stages: stageAuth, stageCredit。
+ * Migrated from auxiliaryHandler.ts::handleAuxiliaryEndpoint (337 lines).
+ * Semantically 1:1 equivalent to the old implementation, but now hosted by the pipeline runner.
+ * Reuses the stages already extracted by the pipeline: stageAuth, stageCredit.
  *
- * ⚠️ 修的 latent leak (addendum §2.4): 老版 HOP_BY_HOP 版本 → 新版
- * WITH_INTERNAL 版本, 防 x-tdai-user-key 透传给上游。
+ * WARNING: fixes a latent leak (addendum §2.4): old HOP_BY_HOP version -> new
+ * WITH_INTERNAL version, preventing x-tdai-user-key from being passed through to upstream.
  */
 
 import type { Context } from "hono";
@@ -83,8 +83,8 @@ function extractUsageFromResponse(
 }
 
 /**
- * runUtilityPipeline — count_tokens / embeddings / completions / moderations 完整链路,
- * 与 handleAuxiliaryEndpoint 语义等价。
+ * runUtilityPipeline — full chain for count_tokens / embeddings / completions / moderations,
+ * semantically equivalent to handleAuxiliaryEndpoint.
  */
 export async function runUtilityPipeline(c: Context, config: ProxyConfig): Promise<Response> {
   const traceId = uuidv7();
@@ -94,9 +94,9 @@ export async function runUtilityPipeline(c: Context, config: ProxyConfig): Promi
   if (!entry) return c.json({ error: "Unregistered endpoint" }, 404);
 
   // 1. Auth (via shared stageAuth)
-  // 老 auxiliary 是 x-api-key 优先 (与 stage 的 Bearer 优先反过来), 但两者结果集合等价
-  // (若两个都在时 handler 用 x-api-key, stage 用 Bearer) —— 客户端场景不会同时带两个,
-  // 所以这里改用 stageAuth 保持 zero-regression。
+  // The old auxiliary preferred x-api-key (the reverse of the stage's Bearer-first), but both yield equivalent result sets
+  // (if both are present the handler uses x-api-key, the stage uses Bearer) -- clients never send both at once,
+  // so stageAuth is used here to keep zero-regression.
   const auth = await stageAuth(c, "xapi-first");
   const apiKey = auth.apiKey;
   const spaceId = auth.spaceId;
@@ -106,11 +106,11 @@ export async function runUtilityPipeline(c: Context, config: ProxyConfig): Promi
   }
   const keyId = auth.keyId;
 
-  // systemUser 短路 (utility 无 body, stage 内部 undefined)
+  // systemUser short-circuit (utility has no body, undefined inside the stage)
   const sysResp = await stageSystemUser(c, config, userId);
   if (sysResp) return sysResp;
 
-  // 2. body 读取 (raw bytes, 不解析 JSON, 只提 model)
+  // 2. read body (raw bytes, no JSON parsing, only extract model)
   const rawBody = await c.req.arrayBuffer();
   const bodyText = new TextDecoder().decode(rawBody);
   const modelId = extractModelId(bodyText);
@@ -119,9 +119,9 @@ export async function runUtilityPipeline(c: Context, config: ProxyConfig): Promi
   let upstreamUrl = joinUrl(config.upstream.url, c.req.path);
   const upstreamHeaders = buildAuxUpstreamHeaders(c, config, entry);
 
-  // instance upstream override (aux 跟 conversation config)
-  // 命中 custom 组时同时置 skipCreditReport —— 与 stages/instance-upstream-override.ts
-  // 的语义一致: custom upstream 由用户自付, 不算平台账。
+  // instance upstream override (aux follows the conversation config)
+  // On a custom group hit, also set skipCreditReport -- consistent with the semantics of stages/instance-upstream-override.ts
+  // custom upstream is paid by the user, not billed to the platform.
   let skipCreditReport = false;
   {
     const instanceConfigs = await getInstanceUpstreamConfigs(config.coreSkill, spaceId, config.instanceUpstream);
@@ -181,8 +181,8 @@ export async function runUtilityPipeline(c: Context, config: ProxyConfig): Promi
   const usage = extractUsageFromResponse(respText, entry);
 
   if (usage && upstreamResp.ok) {
-    // custom upstream (instance 配了 override 组) 不上报计费 —— 与
-    // anthropic/openai-chat/codex/workbuddy 的 skipCreditReport 语义对齐。
+    // custom upstream (instance configured an override group) does not report billing -- aligned with the
+    // skipCreditReport semantics of anthropic/openai-chat/codex/workbuddy.
     if (skipCreditReport) {
       log.debug("aux.credit_report_skipped", { path: c.req.path, upstreamUrl, reason: "custom_upstream" });
     } else {

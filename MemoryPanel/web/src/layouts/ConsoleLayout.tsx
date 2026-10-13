@@ -1,7 +1,7 @@
 /**
- * ConsoleLayout — 主布局壳。
+ * ConsoleLayout - main layout shell.
  *
- * 基于 tea-component 的 `Layout` + `Menu` 组件，包含 TabBar、路由、菜单过滤等业务逻辑。
+ * Based on tea-component's `Layout` + `Menu` components, containing business logic such as TabBar, routing and menu filtering.
  */
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
@@ -17,7 +17,7 @@ import { ITEM_ICON, usePageMeta, GROUP_ORDER_KEYS, type PageId } from '@/constan
 
 const { Body, Sider, Content } = Layout;
 
-/** 路由 path → PageId */
+/** Route path → PageId */
 const PATH_TO_PAGE: Record<string, PageId> = {
   '/': 'workbench_board',
   '/wiki': 'wiki',
@@ -30,7 +30,7 @@ const PATH_TO_PAGE: Record<string, PageId> = {
   '/team/api-keys': 'api_keys',
 };
 
-/** PageId → 路由 path */
+/** PageId → route path */
 const PAGE_TO_PATH: Record<PageId, string> = Object.fromEntries(
   Object.entries(PATH_TO_PAGE).map(([path, id]) => [id, path]),
 ) as Record<PageId, string>;
@@ -71,20 +71,20 @@ export function ConsoleLayout() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 使用说明页为独立页（自带返回按钮与页头），不占用多标签页栏
+  // The guide page is a standalone page (with its own back button and page header) and does not occupy the multi-tab bar
   const isGuide = location.pathname === '/guide';
 
   const [openPages, setOpenPages] = useState<PageId[]>(() => (isGuide ? [] : [activePage]));
 
   useEffect(() => {
-    // /guide 独立页不把 workbench_board 等页面追加进标签栏，避免返回时多出标签
+    // The standalone /guide page does not append pages such as workbench_board to the tab bar, to avoid an extra tab on return
     if (isGuide) return;
     setOpenPages((prev) => (prev.includes(activePage) ? prev : [...prev, activePage]));
   }, [activePage, isGuide]);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // 首次使用引导：登录后按「每用户仅首次」判定自动弹出
+  // First-use onboarding: after login, auto-open is decided "once per user, first time only"
   const currentUserId = auth?.user_id;
   const [onboardingVisible, setOnboardingVisible] = useState(false);
   useEffect(() => {
@@ -94,12 +94,12 @@ export function ConsoleLayout() {
   }, [currentUserId]);
 
   /**
-   * 回顾引导：清掉 onboarded 标记 + 把 Guide 重新置为可见。
-   * 必须先清标记再 setVisible，否则 Guide 内部的 close→markOnboarded 链路里
-   * 立刻又会重新标记为已看过（虽然本次不冲突，但下次自动判定仍会按"已看过"处理）。
+   * Replay onboarding: clear the onboarded flag + set the Guide visible again.
+   * The flag must be cleared before setVisible, otherwise the close→markOnboarded chain inside Guide
+   * would immediately mark it as seen again (no conflict this time, but the next auto-check would still treat it as "seen").
    *
-   * 入口仅保留「使用说明」页底部（GuidePage 触发 tdai-replay-onboarding 事件），
-   * 顶栏「我的资料」等处的回顾引导入口已按需求收敛删除。
+   * The entry is kept only at the bottom of the "Guide" page (GuidePage triggers the tdai-replay-onboarding event);
+   * replay-onboarding entries such as the top bar "My Profile" have been removed as required.
    */
   const handleReplayOnboarding = useCallback(() => {
     if (!currentUserId) return;
@@ -107,7 +107,7 @@ export function ConsoleLayout() {
     setOnboardingVisible(true);
   }, [currentUserId]);
 
-  // GuidePage 底部「引导回放」通过自定义事件触发回顾引导
+  // The "replay guide" at the bottom of GuidePage is triggered via a custom event
   useEffect(() => {
     const onReplay = () => handleReplayOnboarding();
     window.addEventListener('tdai-replay-onboarding', onReplay);
@@ -135,16 +135,16 @@ export function ConsoleLayout() {
     [activePage, navigateTo],
   );
 
-  // ===== 基于 team role 的菜单过滤 =====
-  // admin 可访问所有页面（含资源管理）
-  // 「成员管理」项：reviewer 不可见
+  // ===== Menu filtering based on team role =====
+  // admin can access all pages (including resource management)
+  // "Member management" item: not visible to reviewer
   //
-  // 「可观测」（analytics）入口三层收敛（缺一即隐藏）：
-  //   1. 仅 system_admin 可见（useCurrentRole() === 'admin'）
-  //   2. 面板 env 开关 PANEL_FEATURE_ANALYTICS_ENABLED（默认关闭，经
-  //      /meta/instances 的 capabilities 下发；开关关闭时不发起 CH 探测）
-  //   3. 运行时 CH 探测：内核未配置 analytics ClickHouse 时自动隐藏
-  //      （探测中先保持展示，确认未配置后收敛隐藏，避免闪烁）
+  // "Observability" (analytics) entry is narrowed in three layers (hidden if any one is missing):
+  //   1. Visible only to system_admin (useCurrentRole() === 'admin')
+  //   2. Panel env switch PANEL_FEATURE_ANALYTICS_ENABLED (off by default, delivered via
+  //      capabilities of /meta/instances; no CH probe is made when the switch is off)
+  //   3. Runtime CH probe: automatically hidden when the kernel has no analytics ClickHouse configured
+  //      (kept displayed while probing, narrowed to hidden once confirmed unconfigured, to avoid flicker)
   const analyticsSwitchOn = usePanelAnalyticsEnabled();
   const analyticsChConfigured = useAnalyticsChConfigured(analyticsSwitchOn === true);
   const analyticsVisible =
@@ -155,7 +155,7 @@ export function ConsoleLayout() {
 
     for (const meta of Object.values(PAGE_META)) {
       if (userRole === 'reviewer' && meta.id === 'team_members') continue;
-      // 「可观测」仅 system_admin 可见，且需面板开关开启 + 内核已配置 CH
+      // "Observability" is visible only to system_admin, and requires the panel switch on + the kernel having CH configured
       if (meta.id === 'analytics') {
         if (userRole !== 'admin' || !analyticsVisible) continue;
       }
@@ -207,7 +207,7 @@ export function ConsoleLayout() {
       <Layout>
         <Body>
           <Sider>
-            {/* 品牌已在全局 Header 展示，侧栏只承载导航（与 Memory项目公共壳层一致）。 */}
+            {/* The brand is already shown in the global Header; the sidebar only carries navigation (consistent with the shared shell of the Memory project). */}
             <Menu collapsable collapsed={sidebarCollapsed} onCollapsedChange={setSidebarCollapsed}>
               {pinnedGroup?.items.map((item) => renderMenuItem(item))}
               {restGroups.map((group) => (
@@ -227,7 +227,7 @@ export function ConsoleLayout() {
               />
             )}
             <Content.Body className="_memory-content-body">
-              {/* key 绑定 pathname：路由切换时重挂载页面帧，触发 _page-enter 过渡，保持跨页连续性 */}
+              {/* key bound to pathname: remount the page frame on route change to trigger the _page-enter transition, keeping cross-page continuity */}
               <main key={location.pathname} className="_memory-page-frame">
                 <Outlet />
               </main>

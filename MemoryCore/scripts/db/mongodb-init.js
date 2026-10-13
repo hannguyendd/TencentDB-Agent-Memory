@@ -1,8 +1,8 @@
 /**
- * 记忆内核 metadata 模块 — MongoDB 索引初始化（v3.2 · 按实例分库）
- * 每个实例独立 database：tdai_metadata_{service-id}
+ * Memory core metadata module - MongoDB index initialization (v3.2, one database per instance)
+ * Each instance has its own database: tdai_metadata_{service-id}
  *
- * 用法:
+ * Usage:
  *   mongosh "$URI" --eval 'const dbName="tdai_metadata_default"' scripts/db/mongodb-init.js
  */
 

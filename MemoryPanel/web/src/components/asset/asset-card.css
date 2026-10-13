@@ -1,14 +1,14 @@
 /**
- * asset-card.css —— Wiki / Code 资产列表页共享的「卡片网格 + 骨架屏 + 统计条 +
- * 工具栏 + 表格行」样式。
+ * asset-card.css —— Wiki / Code asset list pages -- shared "card grid + skeleton + stats bar + +
+ * toolbar + table row" styles.
  *
- * 原分散在 wiki-sources-panel.css（._asset-wiki-*）与 code-sources-panel.css
- * （._codelist-*）中，两者结构几乎镜像。此处合并为一份公共样式，选择器同时
- * 覆盖两组类名；各页面仅保留自己的差异化覆盖（如 code 的 mono 名称、不同断点）。
+ * Originally scattered across wiki-sources-panel.css (._asset-wiki-*) and code-sources-panel.css code-sources-panel.css
+ * (._codelist-*), whose structures nearly mirror each other. They are merged here into one shared stylesheet, with selectors
+ * covering both sets of class names; each page keeps only its own differing overrides (e.g. code's mono name, different breakpoints).
  */
 
 /* ============================================================
-   页面外层
+   Page outer wrapper
    ============================================================ */
 ._asset-wiki-page,
 ._asset-code-page,
@@ -24,7 +24,7 @@
 }
 
 /* ============================================================
-   统计条（MetricsBoard 一行）
+   Stats bar (one MetricsBoard row)
    ============================================================ */
 ._asset-wiki-stats,
 ._asset-code-stats,
@@ -36,7 +36,7 @@
 }
 
 /* ============================================================
-   工具栏
+   Toolbar
    ============================================================ */
 ._asset-wiki-toolbar,
 ._asset-code-toolbar,
@@ -52,8 +52,8 @@
   justify-content: flex-end;
 }
 
-/* 工具栏 SearchBox 最小宽度，避免 placeholder 文字被截断。
-   实际类名是 .tea-form--search / .tea-search（旧版 .tea-searchbox 是错的）。 */
+/* Toolbar SearchBox min width, to avoid truncating the placeholder text.
+   The actual class names are .tea-form--search / .tea-search (the old .tea-searchbox was wrong). */
 ._asset-wiki-toolbar .tea-form--search,
 ._asset-wiki-toolbar .tea-search {
   flex: 1 1 200px;
@@ -69,7 +69,7 @@
 }
 
 /* ============================================================
-   空态
+   Empty state
    ============================================================ */
 ._asset-wiki-empty,
 ._asset-code-empty {
@@ -82,7 +82,7 @@
 }
 
 /* ============================================================
-   卡片网格（Wiki / Code 各自的列宽保持原值）
+   Card grid (Wiki / Code each keep their original column widths)
    ============================================================ */
 ._asset-wiki-grid,
 ._asset-wiki-skeleton-grid {
@@ -99,7 +99,7 @@
 }
 
 /* ============================================================
-   骨架屏（首屏加载时展示占位卡片，风格与工作台/AgentGrid 骨架一致）
+   Skeleton (placeholder cards shown during first-screen loading, styled consistently with the workbench/AgentGrid skeleton)
    ============================================================ */
 ._asset-wiki-skeleton-card,
 ._codelist-skeleton-card {
@@ -147,7 +147,7 @@
 }
 
 /* ============================================================
-   卡片主体
+   Card body
    ============================================================ */
 ._asset-wiki-card,
 ._codelist-card {
@@ -186,7 +186,7 @@
   border-color: var(--tea-color-border-brand-default);
 }
 
-/* ── 卡片 head（图标 + 名称 + chevron） ── */
+/* ── Card head (icon + name + chevron) ── */
 ._asset-wiki-card-head,
 ._codelist-card-head {
   display: inline-flex;
@@ -217,7 +217,7 @@
   white-space: nowrap;
 }
 
-/* Code 仓库名用等宽字体（页面差异化覆盖） */
+/* Code repo names use a monospace font (page-specific override) */
 ._codelist-card-name {
   font-family: var(--font-mono);
 }
@@ -241,7 +241,7 @@
   transform: translateX(2px);
 }
 
-/* ── meta 行（状态 + 时间/分支） ── */
+/* ── meta row (status + time/branch) ── */
 ._asset-wiki-card-meta,
 ._codelist-card-meta {
   display: flex;
@@ -252,7 +252,7 @@
   font-size: 12px;
 }
 
-/* ── owner / id 行 ── */
+/* ── owner / id row ── */
 ._asset-wiki-card-owner,
 ._asset-wiki-card-id,
 ._codelist-card-owner,
@@ -284,7 +284,7 @@
   color: var(--tea-color-text-brand-default);
 }
 
-/* ── actions 行 ── */
+/* ── actions row ── */
 ._asset-wiki-actions,
 ._codelist-card-actions {
   display: flex;
@@ -298,7 +298,7 @@
 }
 
 /* ============================================================
-   表格行（列表视图）
+   Table row (list view)
    ============================================================ */
 ._asset-wiki-row-name,
 ._codelist-row-name {
@@ -333,7 +333,7 @@
   font-size: 12px;
 }
 
-/* ── 图标 + 文字行内对齐 ── */
+/* ── Inline alignment of icon + text ── */
 ._asset-wiki-inline-icon,
 ._codelist-inline-icon,
 ._codedetail-inline-icon {
@@ -352,7 +352,7 @@
 }
 
 /* ============================================================
-   响应式（保持各页原有断点）
+   Responsive (keeps each page's original breakpoints)
    ============================================================ */
 @media (max-width: 960px) {
   ._asset-wiki-stats,

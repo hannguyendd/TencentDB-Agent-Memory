@@ -1,50 +1,50 @@
 /**
- * text-pagination.ts — 文字模式独立分页.
+ * text-pagination.ts — standalone pagination for text mode.
  *
- * 与卡片模式（claude-code/pagination.ts）的差异：
- *   - 卡片模式：每页 3 项 real + 1 个 MORE 槽位（受 AskUserQuestion 硬上限 4 选项限制）
- *   - 文字模式：每页 10 项 real，无 MORE 槽位（markdown 无上限，靠 `next/prev` 关键字翻页）
+ * Differences from card mode (claude-code/pagination.ts):
+ *   - Card mode: 3 real items per page + 1 MORE slot (limited by AskUserQuestion's hard cap of 4 options)
+ *   - Text mode: 10 real items per page, no MORE slot (markdown has no limit; paging is driven by `next/prev` keywords)
  *
- * 复用 formData.pageIndex 字段：卡片模式和文字模式**永不共存**（能力探测决定走哪路），
- * 因此同一个 pageIndex 字段两边各自使用即可，无需引入 textPageIndex。
+ * Reuses the formData.pageIndex field: card mode and text mode **never coexist** (capability detection decides which path),
+ * so the same pageIndex field can be used independently on each side, with no need to introduce textPageIndex.
  *
- * 边界：
- *   - items 为空 → currentPageItems = [], totalPages = 1, isEmpty = true
- *   - pageIndex 越界（负数 / 超尾）→ clamp 到 [0, totalPages-1]，不抛
+ * Boundaries:
+ *   - items is empty → currentPageItems = [], totalPages = 1, isEmpty = true
+ *   - pageIndex out of range (negative / past the end) → clamped to [0, totalPages-1], no throw
  */
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
-/** 文字模式每页显示的选项数（不含 next/prev/skip 等关键字操作提示）。 */
+/** Number of options shown per page in text mode (excluding keyword action hints such as next/prev/skip). */
 export const TEXT_PAGE_SIZE = 10;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface TextPagination<T> {
-  /** 当前页要渲染的 items（可能是 items 全量的子集）。 */
+  /** Items to render on the current page (may be a subset of all items). */
   currentPageItems: T[];
-  /** 总页数（items 为空时约定 1，方便渲染层显示"第 1 页 / 共 1 页"）。 */
+  /** Total number of pages (defined as 1 when items is empty, so the render layer can show "Page 1 of 1"). */
   totalPages: number;
-  /** 当前页码（0-based，clamp 到合法范围）。 */
+  /** Current page number (0-based, clamped to the valid range). */
   currentPageIndex: number;
-  /** items 是否为空。 */
+  /** Whether items is empty. */
   isEmpty: boolean;
-  /** 是否还有下一页（用于渲染 `next` 关键字提示）。 */
+  /** Whether there is a next page (used to render the `next` keyword hint). */
   hasNext: boolean;
-  /** 是否还有上一页（用于渲染 `prev` 关键字提示）。 */
+  /** Whether there is a previous page (used to render the `prev` keyword hint). */
   hasPrev: boolean;
-  /** 当前页首个 item 在 items 里的绝对序号（0-based，用于渲染编号）。 */
+  /** Absolute index of the first item of the current page within items (0-based, used for rendering numbering). */
   offset: number;
 }
 
 // ── Compute ────────────────────────────────────────────────────────────────────
 
 /**
- * 计算文字模式分页信息。
+ * Compute text-mode pagination info.
  *
- * @param items      - 完整 items 列表
- * @param pageIndex  - 请求的页码（0-based，可能越界，内部会 clamp）
- * @param pageSize   - 每页大小，默认 TEXT_PAGE_SIZE
+ * @param items      - the full items list
+ * @param pageIndex  - the requested page number (0-based, may be out of range; clamped internally)
+ * @param pageSize   - page size, defaults to TEXT_PAGE_SIZE
  */
 export function computeTextPagination<T>(
   items: readonly T[],

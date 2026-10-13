@@ -1,5 +1,5 @@
 /**
- * v3 元数据 API 类型（SDK 本地定义，与记忆内核 src/metadata/types.ts 对齐）。
+ * v3 metadata API types (defined locally in the SDK, aligned with the memory kernel src/metadata/types.ts).
  */
 
 export type UserStatus = "active" | "inactive" | "invited";
@@ -18,13 +18,13 @@ export type Permission = "read" | "write" | "delete" | "assign" | "share" | "use
 export type AclSubjectType = "user" | "team_role" | "agent";
 export type AclEffect = "allow" | "deny";
 
-/** list 接口分页入参（可选；传 limit 或 offset 任一时启用分页响应）。 */
+/** Pagination params for list endpoints (optional; passing either limit or offset enables a paginated response). */
 export interface PaginationInput {
   limit?: number;
   offset?: number;
 }
 
-/** 解析后的分页参数。 */
+/** Resolved pagination params. */
 export interface PaginationParams {
   limit: number;
   offset: number;
@@ -44,7 +44,7 @@ export interface UserPublic {
   created_at: string;
 }
 
-/** user/create 响应：不含 username。 */
+/** user/create response: does not include username. */
 export interface CreateUserResult {
   user_id: string;
   user_type: UserType;
@@ -54,7 +54,7 @@ export interface CreateUserResult {
 
 export type UserKeyStatus = "active" | "revoked";
 
-/** user-key/list · get 响应（脱敏，不含完整 key_value）。 */
+/** user-key/list / get response (redacted, without the full key_value). */
 export interface UserKeyPublic {
   key_id: string;
   user_id: string;
@@ -68,7 +68,7 @@ export interface UserKeyPublic {
   revoked_at?: string | null;
 }
 
-/** user-key/create 响应：仅此一次返回完整 key_value。 */
+/** user-key/create response: the full key_value is returned only this once. */
 export interface UserKeyCreated extends UserKeyPublic {
   key_value: string;
 }
@@ -107,7 +107,7 @@ export interface TeamMemberEntity {
   role: TeamRole;
   joined_at: string;
   status: MemberStatus;
-  /** team-member/list · get 响应附带（读时 JOIN，v3.2.2+） */
+  /** Included in team-member/list / get responses (joined at read time, v3.2.2+) */
   username?: string;
 }
 
@@ -294,27 +294,27 @@ export interface AuthVerifyResult {
   user: UserPublic | null;
 }
 
-// ── 请求类型 ──
+// ── Request types ──
 export interface CreateUserRequest {
   username: string;
 }
 
-/** user/list 请求（v3.1.1+ / v3.2.1）：team_id 仅 system_admin 可省略。 */
+/** user/list request (v3.1.1+ / v3.2.1): team_id may be omitted only by system_admin. */
 export interface ListUsersRequest extends PaginationInput {
   team_id?: string;
   user_ids?: string[];
-  /** 精确匹配 username（大小写敏感；用于查重等）。 */
+  /** Exact match on username (case-sensitive; used for duplicate checks, etc.). */
   username?: string;
 }
 export interface CreateTeamRequest {
   name: string;
-  /** 创建时指定；须等于 caller。创建后不可通过 update 修改。 */
+  /** Specified at creation; must equal the caller. Cannot be changed via update afterwards. */
   owner_user_id: string;
   description?: string;
   status?: TeamStatus;
   metadata_json?: string;
 }
-/** team/update：不含 `owner_user_id`（归属不可改）。 */
+/** team/update: does not include `owner_user_id` (ownership cannot be changed). */
 export interface UpdateTeamRequest {
   team_id: string;
   name?: string;
@@ -329,7 +329,7 @@ export interface AddTeamMemberRequest {
 }
 export interface CreateAgentRequest {
   team_id: string;
-  /** 创建时指定；须等于 caller。创建后不可通过 update 修改。 */
+  /** Specified at creation; must equal the caller. Cannot be changed via update afterwards. */
   owner_user_id: string;
   name: string;
   description?: string;
@@ -338,7 +338,7 @@ export interface CreateAgentRequest {
   status?: AgentStatus;
   metadata_json?: string;
 }
-/** agent/update：不含 `owner_user_id`（归属不可改）。 */
+/** agent/update: does not include `owner_user_id` (ownership cannot be changed). */
 export interface UpdateAgentRequest {
   agent_id: string;
   name?: string;
@@ -350,34 +350,34 @@ export interface UpdateAgentRequest {
 }
 export interface ListAgentsRequest extends PaginationInput {
   team_id?: string;
-  /** 列表过滤（非修改归属）。 */
+  /** List filter (does not change ownership). */
   owner_user_id?: string;
   status?: AgentStatus;
-  /** 精确匹配 agent name（大小写敏感；用于查重等）。 */
+  /** Exact match on agent name (case-sensitive; used for duplicate checks, etc.). */
   name?: string;
 }
 
-/** team/list 请求。 */
+/** team/list request. */
 export interface ListTeamsRequest extends PaginationInput {
   user_id?: string;
   user_key?: string;
-  /** 精确匹配 team name（大小写敏感；用于查重等）。 */
+  /** Exact match on team name (case-sensitive; used for duplicate checks, etc.). */
   name?: string;
 }
 
-/** task/list 请求。 */
+/** task/list request. */
 export interface ListTasksRequest extends PaginationInput {
   team_id?: string;
-  /** 列表过滤（非修改归属）。 */
+  /** List filter (does not change ownership). */
   creator_user_id?: string;
   creator_user_key?: string;
   status?: TaskStatus;
-  /** 精确匹配 task title（大小写敏感；用于查重等）。 */
+  /** Exact match on task title (case-sensitive; used for duplicate checks, etc.). */
   title?: string;
 }
 export interface CreateTaskRequest {
   team_id: string;
-  /** 创建时指定；须等于 caller。创建后不可通过 update 修改。 */
+  /** Specified at creation; must equal the caller. Cannot be changed via update afterwards. */
   creator_user_id: string;
   title: string;
   description?: string;
@@ -389,7 +389,7 @@ export interface CreateTaskRequest {
   metadata_json?: string;
   linked_agents?: Array<{ agent_id: string; role_in_task?: string }>;
 }
-/** task/update：不含 `creator_user_id`（归属不可改）。 */
+/** task/update: does not include `creator_user_id` (ownership cannot be changed). */
 export interface UpdateTaskRequest {
   task_id: string;
   title?: string;
@@ -402,12 +402,12 @@ export interface UpdateTaskRequest {
   metadata_json?: string;
 }
 export interface CreateAssetRequest {
-  /** 由调用方（外部资产系统）提供；元数据模块不生成 asset_id。 */
+  /** Provided by the caller (external asset system); the metadata module does not generate asset_id. */
   asset_id: string;
   team_id: string;
   asset_type: AssetType;
   name: string;
-  /** 创建时指定；须等于 caller。创建后不可通过 update 修改。 */
+  /** Specified at creation; must equal the caller. Cannot be changed via update afterwards. */
   owner_user_id: string;
   source_type: string;
   description?: string;
@@ -419,7 +419,7 @@ export interface CreateAssetRequest {
   content_ref?: string;
   metadata_json?: string;
 }
-/** asset/update：不含 `owner_user_id`（归属不可改；仅 asset owner 可调用）。 */
+/** asset/update: does not include `owner_user_id` (ownership cannot be changed; only the asset owner may call). */
 export interface UpdateAssetRequest {
   asset_id: string;
   name?: string;
@@ -437,7 +437,7 @@ export interface ListAssetsRequest extends PaginationInput {
   team_id: string;
   asset_type?: AssetType;
   status?: AssetStatus;
-  /** 列表过滤（非修改归属）。 */
+  /** List filter (does not change ownership). */
   owner_user_id?: string;
   visibility?: AssetVisibility;
 }
@@ -515,8 +515,8 @@ export interface SetUserConfigRequest {
   params: Record<string, string>;
 }
 
-// ── Knowledge (v3 管理面实体，/v3/knowledge/*) ──
-// 与记忆内核 src/core/store/types.ts 的 KnowledgeEntity / src/gateway/knowledge-schemas.ts 对齐。
+// ── Knowledge (v3 management-plane entity, /v3/knowledge/*) ──
+// Aligned with KnowledgeEntity in the memory kernel src/core/store/types.ts and src/gateway/knowledge-schemas.ts.
 
 export type KnowledgeType = "wiki" | "code-graph";
 
@@ -527,7 +527,7 @@ export interface KnowledgeEntity {
   name: string;
   summary: string | null;
   team_id: string;
-  /** 预留：agent 绑定维度（当前写 ""，绑定权威在 meta_assets）。 */
+  /** Reserved: agent binding dimension (currently written as ""; the binding source of truth is meta_assets). */
   agent_id?: string;
   user_id: string | null;
   repo_url?: string;
@@ -544,7 +544,7 @@ export interface KnowledgeListResult {
 export interface CreateKnowledgeRequest {
   knowledge_id: string;
   type: KnowledgeType;
-  /** Knowledge Service 数据面地址（如 http://host:8421/v3）。 */
+  /** Knowledge Service data-plane address (e.g. http://host:8421/v3). */
   service_url: string;
   name: string;
   summary?: string | null;
@@ -567,6 +567,6 @@ export interface UpdateKnowledgeRequest {
 export interface ListKnowledgeRequest extends PaginationInput {
   team_id: string;
   type?: KnowledgeType;
-  /** 按 id 批量联查明细（proxy 解析 agent 绑定后取渲染字段用）。 */
+  /** Batch lookup of details by id (used by the proxy to fetch render fields after resolving agent bindings). */
   knowledge_ids?: string[];
 }

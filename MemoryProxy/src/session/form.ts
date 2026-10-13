@@ -26,48 +26,48 @@ export const SESSION_INIT_TOOLCALL_PREFIXES = [
 ] as const;
 
 /**
- * Form 标题：两轮分开。第一轮选 team，第二轮选 agent+task。
- * extractor 不依赖标题判别，只用作 retry 提示 + UI 文案。
+ * Form titles: split into two rounds. Round 1 selects the team, round 2 selects agent+task.
+ * The extractor does not rely on titles for detection; they are only used for retry hints + UI text.
  */
-export const SESSION_INIT_TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const SESSION_INIT_AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-/** 跳过本次关联的选项文本，extractor 识别后直接 bypass 整个 session-init。 */
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
+export const SESSION_INIT_TEAM_FORM_TITLE = "Session Init — Select Team";
+export const SESSION_INIT_AGENT_TASK_FORM_TITLE = "Session Init — Select Agent and Task";
+/** Option text for skipping the association this time; once the extractor recognizes it, the whole session-init is bypassed. */
+export const SKIP_LABEL = "Do not associate this time (skip injection, pass through)";
 
 /**
- * 资产关联前置对话框选项。
- * 用户选"是" → 继续 team/agent/task 流程
- * 用户选"否" → 直接 bypass
+ * Pre-association dialog options for assets.
+ * User picks "Yes" → continue with the team/agent/task flow
+ * User picks "No" → bypass directly
  */
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = "Yes, associate team assets";
+export const ASSET_CONFIRM_NO = "No, do not associate this time";
+export const ASSET_CONFIRM_FORM_TITLE = "Session Init — Associate Team Assets?";
 /**
- * Claude Code 分页模式专用：当 team 下 agent 数量超过 3 时，最后 1 个槽位
- * 用作"更多 →"按钮（非末页）。用户点击后 handler 把 agentPageIndex+1 重发 form。
- * extractor 识别此 label 后返回 MORE_MARKER 信号。
+ * Claude Code paging mode only: when a team has more than 3 agents, the last slot
+ * is used as the "More →" button (on non-final pages). After the user clicks it, the handler resends the form with agentPageIndex+1.
+ * The extractor returns the MORE_MARKER signal when it recognizes this label.
  */
-export const MORE_LABEL = "更多 →";
+export const MORE_LABEL = "More →";
 /**
  * Filler shown when the real option count on this page is 1 but Claude Code's
  * `AskUserQuestion` schema requires ≥2 options. Mirrors `claude-code/form.ts`
  * — chosen deliberately to miss every team/agent/task lookup so the extractor
  * treats it as `unrecognized` and `init.ts` bypasses session-init. MUST NOT
- * contain "跳过 / 不关联 / skip" (would fire SKIP_RE on unrelated text).
+ * contain "skip / do not associate" (would fire SKIP_RE on unrelated text).
  */
-export const NO_MORE_LABEL = "（无更多选项）";
-export const NO_MORE_DESC = "选此项将跳过本次注入，直接放行";
-/** 兼容旧测试的总标题（cleaner.ts 检测用）。 */
-export const SESSION_INIT_FORM_TITLE = "会话初始化 — 选择 Team / Agent / 任务";
+export const NO_MORE_LABEL = "(No more options)";
+export const NO_MORE_DESC = "Selecting this skips injection this time and passes through";
+/** Overall title kept for legacy tests (used for detection in cleaner.ts). */
+export const SESSION_INIT_FORM_TITLE = "Session Init — Select Team / Agent / Task";
 
 /**
- * 选项 label 的分隔符。第二轮的 agent / task 选项不再带团队前缀
- * （已被轮1 选定），仅 task 用 "Agent / Task" 体现 agent 归属。
+ * Separator for option labels. Round-2 agent / task options no longer carry a team prefix
+ * (the team was already chosen in round 1); only tasks use "Agent / Task" to show which agent they belong to.
  */
 export const PATH_SEP = " / ";
 
 /** Title used when extraction failed and the form is re-issued. */
-export const SESSION_INIT_RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const SESSION_INIT_RETRY_FORM_TITLE = "Could not recognize your selection, please select again";
 
 /** Tool name used by the fake form (CodeBuddy / OpenAI protocol). */
 export const SESSION_INIT_TOOL_NAME = "ask_followup_question";
@@ -98,26 +98,26 @@ export function containsSessionInitFormTitle(s: string): boolean {
 }
 
 /**
- * 两轮 form 共用的 props：
- *   - stage="team": 仅渲染 team 列表
- *   - stage="agent_task": 渲染所选 team 下的 agent + task
- * 之所以拆两轮：单一 form 路径下用户可能在 agent 列表挑了 team_A 的 agent，
- * 又在 task 列表挑了 team_B 的 task —— 跨 team 错配是合法的字符串组合，
- * 但语义不一致。拆两轮把 team 维度提前定死，从协议层杜绝跨 team 错配。
+ * Props shared by both rounds of the form:
+ *   - stage="team": render only the team list
+ *   - stage="agent_task": render the agents + tasks under the selected team
+ * Why two rounds: with a single form, the user might pick an agent from team_A in the agent list
+ * and a task from team_B in the task list — a cross-team mismatch is a valid string combination
+ * but semantically inconsistent. Splitting into two rounds fixes the team dimension up front and rules out cross-team mismatches at the protocol level.
  */
 export type FormStage = "asset_confirm" | "team" | "agent_task";
 
 export interface FormData {
-  /** 控制面 /resources 返回的完整嵌套结构。 */
+  /** Full nested structure returned by the control-plane /resources. */
   teams: TeamOption[];
-  /** 当前轮渲染哪个 stage 的 form。 */
+  /** Which stage of the form to render in this round. */
   stage: FormStage;
-  /** stage="agent_task" 时必填，限定渲染哪个 team 下的 agent/task。 */
+  /** Required when stage="agent_task"; limits which team's agents/tasks are rendered. */
   selectedTeamId?: string;
   /**
-   * Claude Code 分页：stage="agent_task" 时，按此页码切片 agents。
-   * 每页显示 3 个 agent + 1 个"更多 →"或 SKIP_LABEL。
-   * CodeBuddy 路径忽略此字段（ask_followup_question 没有选项数上限）。
+   * Claude Code paging: when stage="agent_task", slice agents by this page index.
+   * Each page shows 3 agents + 1 "More →" or SKIP_LABEL.
+   * The CodeBuddy path ignores this field (ask_followup_question has no cap on option count).
    */
   pageIndex?: number;
   /** Whether this is a retry (extraction failed in the previous round). */
@@ -136,11 +136,11 @@ export interface FormData {
 
 /**
  * Build the ask_followup_question arguments for the current stage.
- *   - 轮1 (team): 单 question，列出所有 team。
- *   - 轮2 (agent_task): 双 question，仅列出所选 team 下的 agent / task。
+ *   - Round 1 (team): a single question listing all teams.
+ *   - Round 2 (agent_task): two questions, listing only the agents / tasks under the selected team.
  *
- * extractor 通过 question_item 的 id 识别（"team" / "agent" / "task"），
- * 标题仅作为 UI 文案。
+ * The extractor identifies them by question_item id ("team" / "agent" / "task");
+ * the title is only UI text.
  */
 function buildFollowupQuestionArgs(data: FormData): { title: string; questions: string } {
   const { teams, stage, selectedTeamId, retry } = data;
@@ -163,7 +163,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (stage === "asset_confirm") {
     questions.push({
       id: "asset_confirm",
-      question: "本次对话是否要关联团队资产？",
+      question: "Associate team assets with this conversation?",
       options: [ASSET_CONFIRM_YES, ASSET_CONFIRM_NO],
       multiSelect: false,
     });
@@ -173,7 +173,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (stage === "team") {
     questions.push({
       id: "team",
-      question: "请选择本次会话所属的 Team：",
+      question: "Please select the Team for this session:",
       options: [
         ...teams.map((t) => `${t.team_name} (${t.team_id.slice(-8)})`),
       ],
@@ -187,20 +187,20 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (!team) return { title, questions: JSON.stringify(questions) };
 
   if (team.agents.length > 0) {
-    // agent 选项 label 格式: "agent名 (id尾8位)" 避免同名无法区分
+    // agent option label format: "agent_name (last 8 chars of id)" so same-named agents can be told apart
     const agentLabelOptions = [
       ...team.agents.map((a) => `${a.agent_name} (${a.agent_id.slice(-8)})`),
     ];
     questions.push({
       id: "agent",
-      question: `请选择「${team.team_name}」下要使用的 Agent：`,
+      question: `Please select the Agent to use under "${team.team_name}":`,
       options: agentLabelOptions,
       multiSelect: false,
     });
   }
 
-  // 该 team 下所有 tasks 的完整列表（不可跳过）
-  // label 格式: "任务名 (id尾8位)" 避免同名 task 无法区分
+  // Full list of all tasks under this team (cannot be skipped)
+  // label format: "task_name (last 8 chars of id)" so same-named tasks can be told apart
   const taskOptions: string[] = [];
   for (const tk of team.tasks) {
     const idSuffix = tk.task_id.slice(-8);
@@ -209,7 +209,7 @@ function buildFollowupQuestionArgs(data: FormData): { title: string; questions: 
   if (taskOptions.length > 0) {
     questions.push({
       id: "task",
-      question: `请选择「${team.team_name}」下关联的任务：`,
+      question: `Please select the task to associate under "${team.team_name}":`,
       options: taskOptions,
       multiSelect: false,
     });
@@ -300,11 +300,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？",
-      header: "关联资产",
+      question: titlePrefix + "Associate team assets with this conversation?",
+      header: "Team Assets",
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: "Select Team / Agent / Task and inject the team context" },
+        { label: ASSET_CONFIRM_NO, description: "Inject nothing this time, pass through" },
       ],
       multiSelect: false,
     });
@@ -313,8 +313,8 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
   if (stage === "team") {
     // Team options: show up to 3 teams (no skip option)
-    // label 格式: "team名 (id尾8位)" 避免同名无法区分
-    // description 留空 —— label 已含 team 名 + id 后缀，重复即噪音。
+    // label format: "team_name (last 8 chars of id)" so same-named teams can be told apart
+    // description left empty — the label already has the team name + id suffix, repeating it is noise.
     const teamOpts = teams.slice(0, CC_MAX_BUSINESS_OPTIONS).map((t) => ({
       label: `${t.team_name} (${t.team_id.slice(-8)})`,
       description: "",
@@ -324,7 +324,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       ? teamOpts
       : [...teamOpts, { label: NO_MORE_LABEL, description: NO_MORE_DESC }];
     questions.push({
-      question: titlePrefix + "请选择本次会话所属的 Team：",
+      question: titlePrefix + "Please select the Team for this session:",
       header: "Team",
       options: allOptions.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -333,8 +333,8 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
   }
 
   // stage === "agent_task"
-  // Claude Code 分页：4 选项硬限制 → 每页 3 agents + 1 个"更多→"（非末页）。
-  // 末页不再放 SKIP，只放剩余 agent。如果末页只有 1 个 agent，补占位保证 ≥2 options。
+  // Claude Code paging: hard limit of 4 options → each page has 3 agents + 1 "More →" (on non-final pages).
+  // The final page no longer includes SKIP, only the remaining agents. If the final page has only 1 agent, add a placeholder to guarantee ≥2 options.
   const team = teams.find((t) => t.team_id === selectedTeamId) ?? teams[0];
   if (!team) return { questions };
 
@@ -345,32 +345,32 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
   const isLastPage = start + CC_MAX_BUSINESS_OPTIONS >= totalAgents;
   const totalPages = Math.max(1, Math.ceil(totalAgents / CC_MAX_BUSINESS_OPTIONS));
 
-  // agent label 格式: "agent名 (id尾8位)" 避免同名无法区分。
-  // description 只保留 agent 自身描述（有信息量），删掉尾部 "(Team 共 N 个任务)"
-  // / "(无任务)" 提示 —— 用户此时正在选 agent，任务数量与他无关。
+  // agent label format: "agent_name (last 8 chars of id)" so same-named agents can be told apart.
+  // description keeps only the agent's own description (informative); drop the trailing "(Team has N tasks)"
+  // / "(No tasks)" hints — the user is choosing an agent now and the task count is irrelevant.
   const combinedOptions: Array<{ label: string; description: string }> = slice.map((a) => ({
     label: `${a.agent_name} (${a.agent_id.slice(-8)})`,
     description: a.description ?? "",
   }));
 
-  // 非末页：放"更多→"；末页：不放任何额外选项（移除 SKIP）
+  // Non-final page: add "More →"; final page: no extra options (SKIP removed)
   if (!isLastPage) {
     const remaining = totalAgents - (start + CC_MAX_BUSINESS_OPTIONS);
     combinedOptions.push({
       label: MORE_LABEL,
-      description: `查看下一批（还剩 ${remaining} 个 Agent）`,
+      description: `View the next batch (${remaining} more Agents)`,
     });
   }
 
-  // AskUserQuestion 要求 options ≥ 2，极端情况下 slice 为空时兜底：
-  // 用"（无更多选项）"占位，用户选它 → extractor 未识别 → init.ts bypass。
+  // AskUserQuestion requires options ≥ 2; as a fallback when the slice is empty in extreme cases:
+  // use "(No more options)" as a placeholder; if the user selects it → extractor does not recognize it → init.ts bypasses.
   while (combinedOptions.length < 2) {
     combinedOptions.push({ label: NO_MORE_LABEL, description: NO_MORE_DESC });
   }
 
-  const pageSuffix = totalPages > 1 ? `（第 ${pageIndex + 1}/${totalPages} 页）` : "";
+  const pageSuffix = totalPages > 1 ? ` (page ${pageIndex + 1}/${totalPages})` : "";
   questions.push({
-    question: titlePrefix + `请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：`,
+    question: titlePrefix + `Please select the Agent to use under "${team.team_name}"${pageSuffix}:`,
     header: totalPages > 1 ? `Agent ${pageIndex + 1}/${totalPages}`.slice(0, 12) : "Agent",
     options: combinedOptions.slice(0, CC_MAX_OPTIONS),
     multiSelect: false,
@@ -494,9 +494,9 @@ function renderTextMarkdown(data: FormData): string {
 
   const lines: string[] = [`## ${title}`, ""];
   if (stage === "team") {
-    lines.push("请选择本次会话所属的 Team（回复编号或名称）：", "");
+    lines.push("Please select the Team for this session (reply with the number or name):", "");
     teams.forEach((t, i) => {
-      lines.push(`${i + 1}. **${t.team_name}** — ${t.agents.length} 个 Agent`);
+      lines.push(`${i + 1}. **${t.team_name}** — ${t.agents.length} Agents`);
     });
     lines.push(`0. ${SKIP_LABEL}`);
     return lines.join("\n");
@@ -505,7 +505,7 @@ function renderTextMarkdown(data: FormData): string {
   const team = teams.find((t) => t.team_id === selectedTeamId) ?? teams[0];
   if (!team) return lines.join("\n");
 
-  lines.push(`请选择「${team.team_name}」下要使用的 Agent（回复编号或名称）：`, "");
+  lines.push(`Please select the Agent to use under "${team.team_name}" (reply with the number or name):`, "");
   team.agents.forEach((a, i) => {
     lines.push(`${i + 1}. **${a.agent_name}**`);
   });
@@ -545,19 +545,19 @@ function renderTextTable(data: FormData): string {
     : stage === "team"
       ? SESSION_INIT_TEAM_FORM_TITLE
       : SESSION_INIT_AGENT_TASK_FORM_TITLE;
-  const lines: string[] = [`### ${title}`, "", "| # | 名称 | 说明 |", "|---|------|------|"];
+  const lines: string[] = [`### ${title}`, "", "| # | Name | Description |", "|---|------|------|"];
   if (stage === "team") {
     teams.forEach((t, i) =>
-      lines.push(`| ${i + 1} | ${t.team_name} | ${t.agents.length} 个 Agent |`),
+      lines.push(`| ${i + 1} | ${t.team_name} | ${t.agents.length} Agents |`),
     );
-    lines.push(`| 0 | ${SKIP_LABEL} | 跳过本次注入 |`);
+    lines.push(`| 0 | ${SKIP_LABEL} | Skip injection this time |`);
   } else {
     const team = teams.find((t) => t.team_id === selectedTeamId) ?? teams[0];
     if (team) {
       team.agents.forEach((a, i) => {
         lines.push(`| ${i + 1} | ${a.agent_name} | |`);
       });
-      lines.push(`| 0 | ${SKIP_LABEL} | 跳过本次注入 |`);
+      lines.push(`| 0 | ${SKIP_LABEL} | Skip injection this time |`);
     }
   }
   return lines.join("\n");
@@ -696,12 +696,12 @@ function buildMultiQuestionArgs(data: FormData): { questions: CCAskQuestion[] } 
       while (opts.length < 1) opts.push({ label: NO_MORE_LABEL, description: NO_MORE_DESC });
       // Skip option only on last page
       const isLast = p === totalPages - 1;
-      if (isLast) opts.push({ label: SKIP_LABEL, description: "本次不关联，直接放行" });
+      if (isLast) opts.push({ label: SKIP_LABEL, description: "Do not associate this time, pass through" });
       // Ensure at least 2 options (schema min)
       if (opts.length < 2) opts.push({ label: NO_MORE_LABEL, description: NO_MORE_DESC });
       questions.push({
         question:
-          titlePrefix + `请选择本次会话所属的 Team（第 ${p + 1}/${totalPages} 页）：`,
+          titlePrefix + `Please select the Team for this session (page ${p + 1}/${totalPages}):`,
         header: `Team ${p + 1}/${totalPages}`.slice(0, 12),
         options: opts.slice(0, CC_MAX_OPTIONS),
         multiSelect: false,
@@ -723,12 +723,12 @@ function buildMultiQuestionArgs(data: FormData): { questions: CCAskQuestion[] } 
       description: a.description ?? "",
     }));
     const isLast = p === totalPages - 1;
-    if (isLast) opts.push({ label: SKIP_LABEL, description: "本次不关联，直接放行" });
-    if (opts.length < 2) opts.push({ label: "其它", description: "需要其他选项" });
+    if (isLast) opts.push({ label: SKIP_LABEL, description: "Do not associate this time, pass through" });
+    if (opts.length < 2) opts.push({ label: "Other", description: "Another option is needed" });
     questions.push({
       question:
         titlePrefix +
-        `请选择「${team.team_name}」下的 Agent（第 ${p + 1}/${totalPages} 页）：`,
+        `Please select the Agent under "${team.team_name}" (page ${p + 1}/${totalPages}):`,
       header: `Agent ${p + 1}/${totalPages}`.slice(0, 12),
       options: opts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,

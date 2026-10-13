@@ -1,65 +1,65 @@
 /**
- * Codex `request_user_input` 分页布局器 —— 结构照抄
- * `session/claude-code/pagination.ts`，只是 codex 的 option 上限跟 CC 不同：
+ * Codex `request_user_input` pagination layout — structure copied from
+ * `session/claude-code/pagination.ts`, except codex's option limit differs from CC's:
  *
- * - codex 单 question 最多 **3 个** option（客户端会自动追加"其他"占 1 位，
- *   我们不能自己塞，所以实际能用 2 或 3 位）
- * - 中间页需要留 1 slot 给"MORE →"翻页 → 每页最多 2 real
- * - 末页无 MORE → 可塞满 3
+ * - A single codex question has at most **3** options (the client automatically appends "Other" taking 1 slot,
+ *   which we must not fill ourselves, so 2 or 3 are actually usable)
+ * - Middle pages need to reserve 1 slot for the "MORE →" page-turn → at most 2 real per page
+ * - The last page has no MORE → can be filled to 3
  *
- * 策略：
- *   - total ≤ 3：单页展示所有（无 MORE）
- *   - total > 3：前 N-1 页每页 2 real + MORE，末页塞剩下的（∈ [2, 3]）
+ * Strategy:
+ *   - total ≤ 3: show everything on a single page (no MORE)
+ *   - total > 3: each of the first N-1 pages has 2 real + MORE; the last page takes the rest (∈ [2, 3])
  *
- * 页数：`totalPages = ceil((total - 3) / 2) + 1`
- *   - 前 N-1 页各 2 real = 2(N-1) 项
- *   - 末页 total - 2(N-1) 项
+ * Page count: `totalPages = ceil((total - 3) / 2) + 1`
+ *   - each of the first N-1 pages has 2 real = 2(N-1) items
+ *   - the last page has total - 2(N-1) items
  *
- * 效果：
- *   total=3  → [3]                   （单页）
+ * Effect:
+ *   total=3  → [3]                   (single page)
  *   total=4  → [2+MORE, 2]
- *   total=5  → [2+MORE, 3]           ← 末页塞满 3，比"2+2+1"避免 solo
+ *   total=5  → [2+MORE, 3]           ← last page filled to 3, avoids the solo of "2+2+1"
  *   total=6  → [2+MORE, 2+MORE, 2]
  *   total=7  → [2+MORE, 2+MORE, 3]
  *   total=8  → [2+MORE, 2+MORE, 2+MORE, 2]
  *
- * 每页 count 恒定 ≥ 2 ≤ 3，永不 solo 末页。
+ * Per-page count is always ≥ 2 and ≤ 3; the last page is never solo.
  *
- * 跟 CC 分页共用同一哲学，只是常量不同（3/2 vs 4/3）。agents 和 tasks
- * 都用这套。
+ * Shares the same philosophy as CC pagination, only the constants differ (3/2 vs 4/3). Both agents and tasks
+ * use this scheme.
  */
 
-/** codex `request_user_input` 单 question option 硬上限（客户端"其他"槽独立）。 */
+/** Hard cap on options for a single codex `request_user_input` question (the client's "Other" slot is separate). */
 export const CODEX_MAX_OPTIONS = 3;
 
-/** 非末页真实选项数（保留 1 slot 给 MORE→）。 */
+/** Number of real options on a non-last page (1 slot reserved for MORE→). */
 export const CODEX_PAGE_SIZE = 2;
 
-/** 单页阈值：total ≤ 此值时不分页、不放 MORE。 */
+/** Single-page threshold: when total ≤ this value, no pagination and no MORE. */
 export const CODEX_SINGLE_PAGE_LIMIT = CODEX_MAX_OPTIONS;
 
 export interface CodexPageSlice {
-  /** 该 page 覆盖的元素区间 [start, end)。 */
+  /** Element range [start, end) covered by this page. */
   start: number;
   end: number;
-  /** 该 page 是否是最后一页（末页不追加 MORE 选项）。 */
+  /** Whether this page is the last page (the last page does not append a MORE option). */
   isLastPage: boolean;
-  /** 该 page 展示的真实选项数（= end - start）。 */
+  /** Number of real options shown on this page (= end - start). */
   count: number;
-  /** 分页后的总页数（total ≤ 3 时为 1）。 */
+  /** Total pages after pagination (1 when total ≤ 3). */
   totalPages: number;
-  /** 全体元素数量，方便调用方拼提示文案。 */
+  /** Total number of elements, so callers can compose hint text. */
   total: number;
 }
 
 /**
- * 计算给定 `total` 项、目标 `pageIndex`（0-based）的切片区间。
+ * Compute the slice range for `total` items and the target `pageIndex` (0-based).
  *
- * 保证：任何合法 pageIndex 返回 `count >= 2`（除非 total < 2 —— 边界由
- * 上游 form builder 兜底）。
+ * Guarantees: any valid pageIndex returns `count >= 2` (unless total < 2 — that edge case is covered by the
+ * upstream form builder).
  *
- * pageIndex 超出 totalPages-1 时钳制到最后一页（防御性；正常调用方会先
- * 用 totalPages-1 计算 safeNextPage）。
+ * When pageIndex exceeds totalPages-1 it is clamped to the last page (defensive; normal callers first
+ * use totalPages-1 to compute safeNextPage).
  */
 export function computeCodexPagination(
   total: number,
@@ -78,7 +78,7 @@ export function computeCodexPagination(
     };
   }
 
-  // total > 3 时：前 N-1 页各 2 real + MORE，末页塞 total - 2(N-1) 项（∈ [2, 3]）。
+  // When total > 3: each of the first N-1 pages has 2 real + MORE; the last page takes total - 2(N-1) items (∈ [2, 3]).
   const totalPages =
     Math.ceil((safeTotal - CODEX_MAX_OPTIONS) / CODEX_PAGE_SIZE) + 1;
 

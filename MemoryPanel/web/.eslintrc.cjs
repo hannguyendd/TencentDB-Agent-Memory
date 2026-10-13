@@ -1,8 +1,8 @@
 /**
- * ESLint 配置
+ * ESLint configuration
  *
- * 适用于 React + TypeScript + Vite 项目。
- * 集成 prettier（关闭与 prettier 冲突的规则）。
+ * For React + TypeScript + Vite projects.
+ * Integrates prettier (disables rules that conflict with prettier).
  */
 module.exports = {
   root: true,
@@ -26,17 +26,17 @@ module.exports = {
     },
   },
   rules: {
-    // 允许 any 但给出 warning（渐进式迁移）
+    // Allow any but emit a warning (incremental migration)
     '@typescript-eslint/no-explicit-any': 'warn',
-    // 允许未使用变量在开发阶段（tsc 已有 noUnusedLocals）
+    // Allow unused variables during development (tsc already has noUnusedLocals)
     '@typescript-eslint/no-unused-vars': [
       'warn',
       { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
     ],
-    // React Hooks 规则
+    // React Hooks rules
     'react-hooks/rules-of-hooks': 'error',
     'react-hooks/exhaustive-deps': 'warn',
-    // 代码风格交给 prettier
+    // Code style is left to prettier
     'no-console': ['warn', { allow: ['warn', 'error'] }],
     'prefer-const': 'error',
     'no-var': 'error',

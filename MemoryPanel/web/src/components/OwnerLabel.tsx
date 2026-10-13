@@ -1,10 +1,10 @@
 /**
- * OwnerLabel —— 通用「资产 Owner 展示」组件。
+ * OwnerLabel —— Generic "asset owner display" component.
  *
- * 此前 Wiki（WikiOwnerLabel）与 Code（CodeOwnerLabel）各自实现了一模一样的
- * 「@displayName + 当前用户追加“你”标记」逻辑（都依赖 useUserDisplayName 全局
- * 缓存 + Rules of Hooks 约束下不能在 .map 里循环调 hook 的子组件结构）。
- * 这里统一收口；title / youText / youClassName 由调用方注入以兼容各页 i18n 与样式。
+ * Previously Wiki (WikiOwnerLabel) and Code (CodeOwnerLabel) each implemented the exact same
+ * "@displayName + append a "You" marker for the current user" logic (both depend on the useUserDisplayName global
+ * cache, plus a child-component structure forced by the Rules of Hooks, which forbid calling hooks in a loop inside .map).
+ * This consolidates them in one place; title / youText / youClassName are injected by the caller to stay compatible with each page's i18n and styling.
  */
 import { useUserDisplayName } from '@/services/user-profile-store';
 
@@ -17,11 +17,11 @@ export function OwnerLabel({
 }: {
   userId: string;
   currentUserId: string;
-  /** hover 提示文本（调用方负责 i18n，通常含 userId 插值） */
+  /** hover tooltip text (the caller handles i18n; usually includes userId interpolation) */
   title: string;
-  /** “你”标记文案（当前用户时展示） */
+  /** "You" marker text (shown for the current user) */
   youText: string;
-  /** “你”标记的 class（各页面可注入自己的样式类） */
+  /** Class for the "You" marker (each page can inject its own style class) */
   youClassName?: string;
 }) {
   const name = useUserDisplayName(userId);

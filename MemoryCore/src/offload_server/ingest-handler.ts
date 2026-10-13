@@ -78,13 +78,13 @@ export async function handleIngest(
   if (prompt || (recentMessages && recentMessages.length > 0)) {
     const parts: string[] = [];
     if (recentMessages && recentMessages.length > 0) {
-      parts.push("历史消息，可作为参考：");
+      parts.push("Conversation history, for reference:");
       for (const m of recentMessages) {
         parts.push(`[${m.role === "user" ? "User" : "Assistant"}]: ${m.content}`);
       }
     }
     if (prompt) {
-      parts.push(`\n最新user message：\n[User]: ${prompt}`);
+      parts.push(`\nLatest user message:\n[User]: ${prompt}`);
     }
     contextText = parts.join("\n");
   }

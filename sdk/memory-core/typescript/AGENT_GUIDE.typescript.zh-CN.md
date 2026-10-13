@@ -1,22 +1,22 @@
-# Agent 接入指南（TypeScript）
+# Agent Integration Guide (TypeScript)
 
-本文讲怎么把 `@tencentdb-agent-memory/memory-sdk-ts` 接到一个 AI Agent 里。新接入推荐使用 v3 严格 isolation 客户端（`@tencentdb-agent-memory/memory-sdk-ts/v3`）；v2 兼容客户端仍从包根入口导出。SDK API 速查见 [`README.md`](./README.md)，本文讲**怎么把它们组装成一套长期记忆**。
-
----
-
-## 接入要做的四件事
-
-```
-用户输入  →  ① 召回（注入 prompt） → LLM → ② 捕获（写 L0）
-                            ↑
-                  ③ 工具：让 LLM 自己再查
-                            ↑
-                  ④ 错误降级：失败不挂主流程
-```
+This guide explains how to wire `@tencentdb-agent-memory/memory-sdk-ts` into an AI Agent. New integrations should use the v3 strict-isolation client (`@tencentdb-agent-memory/memory-sdk-ts/v3`); the v2 compatibility client is still exported from the package root. For a quick SDK API reference see [`README.md`](./README.md); this guide covers **how to assemble them into a long-term memory system**.
 
 ---
 
-## 0. 初始化
+## Four things to do when integrating
+
+```
+User input  →  ① Recall (inject into prompt) → LLM → ② Capture (write L0)
+                            ↑
+                  ③ Tools: let the LLM search again on its own
+                            ↑
+                  ④ Error degradation: failures must not break the main flow
+```
+
+---
+
+## 0. Initialization
 
 ```typescript
 import { MemoryClient } from "@tencentdb-agent-memory/memory-sdk-ts/v3";
@@ -28,26 +28,26 @@ const client = new MemoryClient({
   teamId: "team-xxx",
   agentId: "agt-xxx",
   userId: "usr-xxx",
-  sessionId: "session-xxx", // 可选；L0/L1 缺省时可跨 session 聚合
+  sessionId: "session-xxx", // optional; when omitted, L0/L1 can aggregate across sessions
 });
 ```
 
-注意：**必须传 config 对象**，不能传裸 transport（`new MemoryClient(transport, isolation)` 仅用于单测 mock）。
+Note: **you must pass a config object**, not a bare transport (`new MemoryClient(transport, isolation)` is only for unit-test mocks).
 
-`serviceId` 决定 memory instance 隔离；`teamId/agentId/userId/sessionId` 决定 v3 数据面 isolation。若要跨 session 做 agent 级召回，可使用 `client.withIsolation({ sessionId: null })`。
+`serviceId` determines memory instance isolation; `teamId/agentId/userId/sessionId` determine v3 data-plane isolation. To recall at the agent level across sessions, use `client.withIsolation({ sessionId: null })`.
 
 ---
 
-## 1. 召回（Recall）
+## 1. Recall
 
-在用户消息发给 LLM 前，并行拉三类记忆，拼到 system prompt 里。
+Before sending the user message to the LLM, fetch three kinds of memory in parallel and assemble them into the system prompt.
 
 ```typescript
 async function recall(client: MemoryClient, userQuery: string) {
   const [l1, persona, scenes] = await Promise.allSettled([
     client.searchAtomic({ query: userQuery, limit: 5 }),
-    client.readCore(),                              // L3 用户画像
-    client.listScenarios({}),                       // L2 场景索引
+    client.readCore(),                              // L3 user persona
+    client.listScenarios({}),                       // L2 scene index
   ]);
 
   const l1Items = l1.status === "fulfilled" ? l1.value.items : [];
@@ -58,12 +58,12 @@ async function recall(client: MemoryClient, userQuery: string) {
 }
 ```
 
-`Promise.allSettled` 是关键——任何一路超时/失败，其它两路结果照常用，不影响主对话。
+`Promise.allSettled` is the key: if any one path times out or fails, the other two results are still used and the main conversation is unaffected.
 
-### 拼 prompt 的两个区块
+### Two blocks for assembling the prompt
 
-- **prependContext（动态）**：L1 召回结果，每轮都变，放在用户消息前。
-- **appendSystemContext（稳定）**：Persona + Scene 索引 + 工具调用指南，放在 system prompt 末尾，用 KV cache 命中。 _（待确定：放到 system prompt 末尾仍可能造成 KV cache miss，需要继续讨论。）_
+- **prependContext (dynamic)**: L1 recall results, which change every turn; placed before the user message.
+- **appendSystemContext (stable)**: Persona + Scene index + tool usage guide; placed at the end of the system prompt to hit the KV cache. _(TBD: placing it at the end of the system prompt can still cause KV cache misses; needs further discussion.)_
 
 ```typescript
 function formatPrompt(l1, persona, scenes) {
@@ -74,37 +74,37 @@ function formatPrompt(l1, persona, scenes) {
   const parts: string[] = [];
   if (persona) parts.push(`<user-persona>\n${persona}\n</user-persona>`);
   if (scenes.length > 0) {
-    parts.push("## Scene Navigation\n*以下场景可用 tdai_read_file 读取详情*");
+    parts.push("## Scene Navigation\n*The following scenes can be read in detail with tdai_read_file*");
     parts.push(scenes.map(s => `- \`${s.path}\``).join("\n"));
   }
-  parts.push(MEMORY_TOOLS_GUIDE);  // 见下文
+  parts.push(MEMORY_TOOLS_GUIDE);  // See below
 
   return { prepend, append: parts.join("\n\n") };
 }
 ```
 
-> 实现要点：在 `before_prompt_build` 钩子里**缓存原始用户文本**（清洁版，未注入 recall），后面 capture 阶段要用——见第 2 节。
+> Implementation note: in the `before_prompt_build` hook, **cache the original user text** (the clean version, without injected recall); the capture phase needs it later -- see Section 2.
 
 ---
 
-## 2. 捕获（Capture）
+## 2. Capture
 
-在 agent 一轮跑完后（`agent_end` 钩子），把这一轮新增的 user/assistant 消息清洗后写回 L0。
+After an agent turn finishes (the `agent_end` hook), clean the new user/assistant messages from that turn and write them back to L0.
 
 ```typescript
 async function capture(client: MemoryClient, ctx: {
   sessionKey: string;
-  rawMessages: any[];                  // 框架给的完整消息历史
-  originalUserText: string;            // 召回阶段缓存的清洁版用户文本
-  originalUserMessageCount: number;    // 召回阶段缓存的消息数
+  rawMessages: any[];                  // Full message history provided by the framework
+  originalUserText: string;            // Clean user text cached during recall
+  originalUserMessageCount: number;    // Message count cached during recall
 }) {
-  // ① 位置切片：只保留这一轮新增的消息
+  // ① Positional slice: keep only the messages added in this turn
   const newMessages = ctx.rawMessages.slice(ctx.originalUserMessageCount);
 
-  // ② 提取 user/assistant，去掉 tool calls / system / 多模态噪声
+  // ② Extract user/assistant, dropping tool calls / system / multimodal noise
   const extracted = extractUserAssistant(newMessages);
 
-  // ③ 把被 recall 污染的用户消息换回原始版
+  // ③ Swap the recall-polluted user message back to the original
   for (const m of extracted) {
     if (m.role === "user" && m.timestamp === newMessages[0]?.timestamp) {
       m.content = ctx.originalUserText;
@@ -112,14 +112,14 @@ async function capture(client: MemoryClient, ctx: {
     }
   }
 
-  // ④ 文本清洗：去图片 base64、去代码块、过滤太短/纯符号
+  // ④ Text cleanup: strip image base64, strip code blocks, filter too-short / symbol-only content
   const cleaned = extracted
     .map(m => ({ ...m, content: sanitize(m.content) }))
     .filter(m => m.content.trim().length > 5);
 
   if (cleaned.length === 0) return;
 
-  // ⑤ 提交
+  // ⑤ Submit
   await client.addConversation({
     session_id: ctx.sessionKey,
     messages: cleaned.map(m => ({
@@ -131,58 +131,58 @@ async function capture(client: MemoryClient, ctx: {
 }
 ```
 
-### 为什么要替换"被污染的用户消息"
+### Why replace the "polluted user message"
 
-召回阶段会往用户消息前 prepend 一段 `<relevant-memories>...</relevant-memories>`。如果不还原成原始文本就写 L0，下一轮召回就会基于这段被污染的文本去 search/embedding——形成**反馈环**，记忆会越来越乱。
+During recall, a `<relevant-memories>...</relevant-memories>` block is prepended to the user message. If it is written to L0 without restoring the original text, the next recall will search/embed based on this polluted text, forming a **feedback loop** that makes memory increasingly messy.
 
-### 为什么要位置切片
+### Why use a positional slice
 
-`agent_end` 给你的是**完整历史**，不是本轮新增。直接全发会重复写历史消息。在 `before_prompt_build` 时记一下消息数 N，`agent_end` 时 `messages.slice(N)` 就是这轮新增的。
+`agent_end` hands you the **full history**, not just this turn's additions. Sending it all would write historical messages again. Record the message count N at `before_prompt_build`; at `agent_end`, `messages.slice(N)` is what this turn added.
 
 ---
 
-## 3. 工具暴露
+## 3. Exposing tools
 
-只用 prompt 注入的记忆是有限的。再注册三个工具让 LLM 自己查：
+Memory injected via the prompt alone is limited. Register three more tools so the LLM can search on its own:
 
-| 工具 | 何时用 | 实现 |
+| Tool | When to use | Implementation |
 |---|---|---|
-| `tdai_memory_search` | 找结构化偏好/事实 | `client.searchAtomic({ query, limit })` |
-| `tdai_conversation_search` | 找原始对话片段 | `client.searchConversation({ query, limit })` |
-| `tdai_read_file` | 读场景全文 / 核心记忆 | v3 用 `client.readScenario({ path })` / `client.readCore()`；COS 原始产物读取继续用 v2 `client.readFile(path)` |
+| `tdai_memory_search` | Find structured preferences/facts | `client.searchAtomic({ query, limit })` |
+| `tdai_conversation_search` | Find raw conversation snippets | `client.searchConversation({ query, limit })` |
+| `tdai_read_file` | Read full scene text / core memory | In v3 use `client.readScenario({ path })` / `client.readCore()`; reading raw COS artifacts still uses v2 `client.readFile(path)` |
 
-在 system prompt 里说清楚什么时候该调，并加上调用次数上限：
+State clearly in the system prompt when to call them, and add a call limit:
 
 ```
-## 记忆工具
-- tdai_memory_search：搜结构化记忆（用户偏好、规则、历史事件）
-- tdai_conversation_search：搜原始对话原文
-- tdai_read_file：读取场景文件（用 Scene Navigation 列出的路径）
+## Memory tools
+- tdai_memory_search: search structured memory (user preferences, rules, historical events)
+- tdai_conversation_search: search raw conversation text
+- tdai_read_file: read a scene file (use the paths listed in Scene Navigation)
 
-⚠️ memory_search + conversation_search 一轮总共最多调 3 次。
+⚠️ memory_search + conversation_search may be called at most 3 times in total per turn.
 ```
 
-不限次数 LLM 会反复瞎搜。
+Without a limit, the LLM will search aimlessly over and over.
 
 ---
 
-## 4. 错误降级
+## 4. Error degradation
 
-记忆服务挂了**不能挂主对话**。三条原则：
+A memory service outage **must not break the main conversation**. Three principles:
 
-1. **召回**用 `Promise.allSettled`，单路失败不影响其它。
-2. **捕获**包 try/catch，失败只记日志：
+1. **Recall** uses `Promise.allSettled`, so one failing path does not affect the others.
+2. **Capture** is wrapped in try/catch; on failure just log:
    ```typescript
    try { await capture(...); }
    catch (e) { logger.warn(`capture failed: ${e.message}`); }
    ```
-3. **工具**返回错误信息字符串而不是抛异常，让 LLM 自己看到 "memory unavailable" 然后继续聊。
+3. **Tools** return an error message string instead of throwing, so the LLM sees "memory unavailable" and keeps chatting.
 
 ---
 
-## 5. 错误处理
+## 5. Error handling
 
-非零 code 抛 `TDAMError`：
+A non-zero code throws `TDAMError`:
 
 ```typescript
 import { TDAMError } from "@tencentdb-agent-memory/memory-sdk-ts";
@@ -192,7 +192,7 @@ try {
 } catch (e) {
   if (e instanceof TDAMError) {
     if (e.code === 404) {
-      // 文件不存在，正常情况
+      // File does not exist; normal case
     } else {
       logger.warn(`memory error code=${e.code} request_id=${e.requestId}`);
     }
@@ -200,21 +200,21 @@ try {
 }
 ```
 
-`requestId` 在 server 端也有日志，排障时给后端就行。
+`requestId` is also logged on the server side; just give it to the backend when troubleshooting.
 
 ---
 
-## 6. 性能建议
+## 6. Performance tips
 
-- **召回总预算 < 200ms**：三路并行后取最快返回的可用结果，超时的丢掉。
-- **prompt 注入控制大小**：L1 ≤ 5 条、Scene 列表只列 path 不列内容、Persona 一份就够。让 LLM 不够用时再用工具拉详情。
-- **session 粒度**：`sessionKey` 是 L0 conversation 的 partition key，长期对话用稳定 id（用户 id + 会话 id），不要每轮换。
+- **Total recall budget < 200ms**: run the three paths in parallel, use the fastest available results, and drop any that time out.
+- **Keep injected prompt size small**: L1 <= 5 items, list only the path (not the content) in the Scene list, and one Persona is enough. Let the LLM pull details with tools when it needs more.
+- **Session granularity**: `sessionKey` is the partition key of L0 conversations; for long-running conversations use a stable id (user id + conversation id) and do not change it every turn.
 
 ---
 
-## 7. 管理面：Knowledge / 元数据
+## 7. Management plane: Knowledge / metadata
 
-上面讲的都是 `MemoryClient`（数据面：读写记忆）。如果你还需要**管理** Knowledge 知识源（wiki / code-graph）的元数据、或管理 user/team/agent/task/asset，用 `MetadataClient`：
+Everything above is about `MemoryClient` (data plane: reading and writing memory). If you also need to **manage** the metadata of Knowledge sources (wiki / code-graph), or manage user/team/agent/task/asset, use `MetadataClient`:
 
 ```typescript
 import { MetadataClient } from "@tencentdb-agent-memory/memory-sdk-ts";
@@ -225,9 +225,9 @@ const meta = new MetadataClient({
   serviceId: "your-instance-id",
 });
 
-// 登记 / 列出 / 改名 / 删除 Knowledge 实体（管理面 CRUD，详见 README.md）
+// Register / list / rename / delete Knowledge entities (management-plane CRUD, see README.md)
 await meta.createKnowledge({ knowledge_id: "wiki-1", type: "wiki", service_url: "http://ks:8421/v3", name: "Wiki", team_id: "team-1" });
 await meta.listKnowledge({ team_id: "team-1", type: "wiki" });
 ```
 
-注意：`MetadataClient` 只管元数据 CRUD；真正搜 wiki 内容、读页面、同步仓库要调 Knowledge Service 数据面（`service_url` 指向的 `:8421`），那是另一组接口，不在本 SDK 范围内。
+Note: `MetadataClient` only handles metadata CRUD; actually searching wiki content, reading pages, or syncing repositories requires calling the Knowledge Service data plane (`:8421`, pointed to by `service_url`). That is a separate set of endpoints and is outside the scope of this SDK.

@@ -1,8 +1,8 @@
 /**
- * 菜单元数据 — 从 App.tsx 抽出
+ * Menu metadata - extracted from App.tsx
  *
- * 包含页面 ID 类型、页面元信息、分组排序、分组图标。
- * Sidebar / TabBar / 路由等模块共用。
+ * Contains the page ID type, page metadata, group ordering and group icons.
+ * Shared by modules such as Sidebar / TabBar / routing.
  */
 import { useTranslation } from 'react-i18next';
 import {
@@ -27,20 +27,20 @@ export type PageId =
   | 'api_keys'
   | 'analytics';
 
-/** 页面元数据 */
+/** Page metadata */
 export interface PageMeta {
   id: PageId;
   label: string;
   desc?: string;
-  /** 所属分组，用于侧边栏菜单分组标题 */
+  /** Group it belongs to, used for the sidebar menu group title */
   group: string;
-  /** 分组内排序，越小越靠前 */
+  /** Order within the group; smaller is earlier */
   order: number;
-  /** 固定标签页不可关闭（工作台看板） */
+  /** Pinned tab cannot be closed (workbench board) */
   affix?: boolean;
 }
 
-// 使用 useTranslation 的 hook 版本
+// Hook version using useTranslation
 export function usePageMeta(): Record<PageId, PageMeta> {
   const { t } = useTranslation();
   return {
@@ -56,10 +56,10 @@ export function usePageMeta(): Record<PageId, PageMeta> {
   };
 }
 
-/** 分组排序顺序 */
+/** Group ordering */
 export const GROUP_ORDER_KEYS = ['workbench', 'observability', 'organization', 'assets'] as const;
 
-/** 每个页面在侧边栏菜单中的图标（Tea 官方图标，size 16） */
+/** Icon of each page in the sidebar menu (official Tea icons, size 16) */
 export const ITEM_ICON: Record<PageId, JSX.Element> = {
   workbench_board: <DashboardIcon size={16} />,
   analytics: (
@@ -79,7 +79,7 @@ export const ITEM_ICON: Record<PageId, JSX.Element> = {
   chat_memory: <ChatIcon size={16} />,
 };
 
-/** 分组图标（工作台 / 可观测 / 组织与权限 / 资产管理） */
+/** Group icons (Workbench / Observability / Organization & Permissions / Asset Management) */
 export const GROUP_ICON: Record<string, JSX.Element> = {
   workbench: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

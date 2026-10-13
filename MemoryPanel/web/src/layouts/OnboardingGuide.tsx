@@ -1,18 +1,18 @@
 /**
- * OnboardingGuide — 首次使用引导（Tea Guide 组件版）
+ * OnboardingGuide - first-use onboarding (Tea Guide component version)
  *
- * 使用 tea-component `Guide` 组件逐步高亮页面元素，替代旧的全屏双栏引导。
+ * Uses the tea-component `Guide` component to highlight page elements step by step, replacing the old full-screen two-column guide.
  *
- * 双角色 SOP（步骤切换时自动跳转到对应页面，不只是展示）：
- *   - Admin：登录身份 → 新建/切换团队 → 新建成员发放 user_key → Agent → 点击 Agent 绑定资产 → 四个资产页
- *   - Member：登录身份 → 邀请成员 → Agent → 点击 Agent 绑定资产 → User_Key 管理 → 四个资产页
+ * Dual-role SOP (on step change it automatically navigates to the matching page, not just displays):
+ *   - Admin: login identity → create/switch team → create member and issue user_key → Agent → click Agent to bind assets → four asset pages
+ *   - Member: login identity → invite member → Agent → click Agent to bind assets → User_Key management → four asset pages
  *
- * Admin 与 Member 的 Agent / 资产操作能力一致（均可编辑）；唯一差异在成员管理：
- * member 不能创建用户账号，只能按 user_id 邀请已有用户；admin 可新建用户并发放
- * user_key，也可新建团队。资产步骤逐一跳入 Wiki / Code / Skill / Chat Memory 页面介绍。
+ * Admin and Member have the same Agent / asset operation abilities (both can edit); the only difference is in member management:
+ * a member cannot create user accounts and can only invite existing users by user_id; an admin can create users and issue
+ * user_key, and can also create teams. The asset steps jump into the Wiki / Code / Skill / Chat Memory pages one by one to introduce them.
  *
- * 健壮性：每步 element 选择器若在目标页缺失（如成员无「添加成员」权限），
- * 自动 fallback 到全局 Header 品牌区，避免 Guide 因元素缺失而整体消失。
+ * Robustness: if the element selector of any step is missing on the target page (e.g. a member lacks the "Add member" permission),
+ * it automatically falls back to the global Header brand area, so the Guide does not vanish entirely due to a missing element.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -21,38 +21,38 @@ import { Guide, type GuideStep } from 'tea-component';
 
 const STORAGE_PREFIX = 'tdai-panel.onboarded';
 
-/** 全局始终存在的锚点元素（Header 品牌区），用于目标元素缺失时的 fallback */
+/** Anchor element that always exists globally (Header brand area), used as a fallback when the target element is missing */
 const FALLBACK_SELECTOR = '._memory-global-header-brand';
 
-/** 每用户维度的「已看过引导」localStorage key */
+/** Per-user "onboarding already seen" localStorage key */
 function onboardedKey(userId?: string): string {
   return `${STORAGE_PREFIX}.${userId || 'anonymous'}`;
 }
 
-/** 是否应当自动弹出引导（未标记过 = 首次） */
+/** Whether the onboarding should auto-open (never marked = first time) */
 export function shouldShowOnboarding(userId?: string): boolean {
   try {
     return window.localStorage.getItem(onboardedKey(userId)) !== '1';
   } catch {
-    // localStorage 不可用时不打扰用户
+    // Do not disturb the user when localStorage is unavailable
     return false;
   }
 }
 
 /**
- * 重置「已看过引导」标记。
+ * Reset the "onboarding already seen" flag.
  *
- * 用户在「我的资料 → 回顾引导」手动触发：清掉 onboarded 标记，下次进主面板
- * useEffect 检测 shouldShowOnboarding() === true 会再次自动弹出。
+ * Triggered manually by the user via "My Profile → Replay onboarding": clears the onboarded flag, and next time the main panel is entered
+ * the useEffect detects shouldShowOnboarding() === true and auto-opens it again.
  *
- * 注意：调用方还需把 OnboardingGuide 的 visible 设回 true，因为之前的 close()
- * 已经把内部 current 推进到 -1 并调了 onClose，仅清标记不足以重新打开。
+ * Note: the caller must also set the OnboardingGuide's visible back to true, because the earlier close()
+ * has already advanced the internal current to -1 and called onClose; clearing the flag alone is not enough to reopen it.
  */
 export function resetOnboarding(userId?: string): void {
   try {
     window.localStorage.removeItem(onboardedKey(userId));
   } catch {
-    /* localStorage 不可用时静默忽略 */
+    /* Silently ignore when localStorage is unavailable */
   }
 }
 
@@ -60,16 +60,16 @@ function markOnboarded(userId?: string): void {
   try {
     window.localStorage.setItem(onboardedKey(userId), '1');
   } catch {
-    /* localStorage 不可用时静默忽略 */
+    /* Silently ignore when localStorage is unavailable */
   }
 }
 
 interface OnboardingStep {
-  /** 目标路由：切换步骤时自动跳转（省略表示停留在当前页面） */
+  /** Target route: auto-navigate on step change (omitted means stay on the current page) */
   path?: string;
   /**
-   * 要高亮的元素选择器。支持数组按序回退（例如 admin 优先高亮"添加成员"按钮，
-   * 按钮不存在时回退到成员列表区），全部缺失时最终回退到 Header 品牌区。
+   * Selector(s) of the element to highlight. Supports an array for sequential fallback (e.g. admin prefers highlighting the "Add member" button,
+   * falling back to the member list area when the button does not exist), finally falling back to the Header brand area when all are missing.
    */
   selector: string | string[];
   placement?: GuideStep['placement'];
@@ -77,7 +77,7 @@ interface OnboardingStep {
   descKey: string;
 }
 
-/** 按顺序返回第一个匹配的元素，找不到返回 null */
+/** Return the first matching element in order, or null if none is found */
 function firstMatch(selectors: string[]): Element | null {
   for (const sel of selectors) {
     const el = document.querySelector(sel);
@@ -86,17 +86,17 @@ function firstMatch(selectors: string[]): Element | null {
   return null;
 }
 
-/** 解析步骤高亮元素；目标元素缺失时按序回退，最终回退到全局 Header 品牌区，保证 Guide 始终可渲染 */
+/** Resolve the step highlight element; fall back in order when the target is missing, finally to the global Header brand area, so the Guide can always render */
 function resolveElement(selector: string | string[]): Element {
   const list = Array.isArray(selector) ? selector : [selector];
   return firstMatch(list) || document.querySelector(FALLBACK_SELECTOR) || document.body;
 }
 
 /**
- * 按元素在视口中的实际位置动态计算气泡展开方向：
- *   - 水平：元素中心在左半屏 → 向右展开（*-start）；右半屏 → 向左展开（*-end）
- *   - 垂直：元素中心在上半屏 → 向下展开（bottom-*）；下半屏 → 向上展开（top-*）
- * 这样气泡永远朝视口中央方向展开，任何页面/任何位置的元素都不会被挤出屏幕。
+ * Dynamically compute the bubble expansion direction from the element's actual position in the viewport:
+ *   - Horizontal: element center in the left half → expand right (*-start); in the right half → expand left (*-end)
+ *   - Vertical: element center in the upper half → expand down (bottom-*); in the lower half → expand up (top-*)
+ * So the bubble always expands toward the viewport center, and an element at any page/position is never pushed off screen.
  */
 function computePlacement(
   selector: string | string[],
@@ -104,9 +104,9 @@ function computePlacement(
 ): GuideStep['placement'] {
   const list = Array.isArray(selector) ? selector : [selector];
   const el = firstMatch(list);
-  // 元素缺失（页面未跳转/未渲染）时无法用位置推断方向，直接使用步骤预设的安全方向。
-  // 绝不能 fallback 到 body 计算：body rect 高度远超视口，cy 必大于 innerHeight/2，
-  // 会算出 top-* 把气泡定位到屏幕外（"框超出屏幕点不到"的根因）。
+  // When the element is missing (page not navigated/not rendered), direction cannot be inferred from position, so use the step's preset safe direction directly.
+  // Never fall back to computing with body: the body rect height far exceeds the viewport, cy is always greater than innerHeight/2,
+  // which would compute top-* and position the bubble off screen (the root cause of "box exceeds screen, can't click").
   if (!el) return fallback;
   const rect = el.getBoundingClientRect();
   const cx = rect.left + rect.width / 2;
@@ -126,13 +126,13 @@ function computePlacement(
 }
 
 /**
- * 点击 Agent 进入编辑弹窗绑定资产的引导步骤（Admin / Member 共有，
- * 紧跟「新建 Agent」步骤，同页切换无跳转）。
- * 锚点三级回退：
- *   1. 卡片视图：框选第一个可编辑 Agent 的整张卡片；
- *   2. 列表视图（无卡片）：回退到可编辑 Agent 的名称按钮；
- *   3. 用户还没有任何 Agent：回退到「新建 Agent」按钮，
- *      文案同步提示「先新建一个 Agent 再回来点它」。
+ * Onboarding step for clicking an Agent to open the edit dialog and bind assets (shared by Admin / Member,
+ * immediately follows the "New Agent" step, same-page switch without navigation).
+ * Three-level anchor fallback:
+ *   1. Card view: box the whole card of the first editable Agent;
+ *   2. List view (no cards): fall back to the name button of an editable Agent;
+ *   3. User has no Agent yet: fall back to the "New Agent" button,
+ *      with the copy also hinting "create an Agent first, then come back and click it".
  */
 const AGENT_BIND_STEP: OnboardingStep = {
   path: '/team/agents',
@@ -146,23 +146,23 @@ const AGENT_BIND_STEP: OnboardingStep = {
   descKey: 'onboarding.guide.agentBind.desc',
 };
 
-/** 每个资产页各自跳入介绍的引导步骤（Wiki / Code / Skill / Chat Memory） */
+/** Onboarding steps that jump into each asset page to introduce it (Wiki / Code / Skill / Chat Memory) */
 const ASSET_STEPS: OnboardingStep[] = [
   {
     path: '/wiki',
-    // 优先框「新建 Wiki」按钮；按钮缺失（固定资产 tab / 无 team）时回退到顶部 Wiki tab，
-    // 而不是回退到 logo，避免框错区域。
+    // Prefer boxing the "New Wiki" button; when the button is missing (pinned asset tab / no team) fall back to the top Wiki tab,
+    // rather than the logo, to avoid boxing the wrong area.
     selector: ['[data-guide="create-wiki"]', '[data-guide="tab-wiki"]'],
-    // ActionPanel 左侧"新建 Wiki"按钮：向右展开
+    // "New Wiki" button on the left of ActionPanel: expand right
     placement: 'bottom-start',
     titleKey: 'onboarding.guide.asset.wiki.title',
     descKey: 'onboarding.guide.asset.wiki.desc',
   },
   {
     path: '/code',
-    // 优先框「注册仓库」按钮；按钮缺失时回退到顶部 Code tab。
+    // Prefer boxing the "Register repository" button; fall back to the top Code tab when the button is missing.
     selector: ['[data-guide="create-code"]', '[data-guide="tab-code"]'],
-    // ActionPanel 左侧"注册仓库"按钮：向右展开
+    // "Register repository" button on the left of ActionPanel: expand right
     placement: 'bottom-start',
     titleKey: 'onboarding.guide.asset.code.title',
     descKey: 'onboarding.guide.asset.code.desc',
@@ -170,7 +170,7 @@ const ASSET_STEPS: OnboardingStep[] = [
   {
     path: '/skills',
     selector: '[data-guide="import-skill"]',
-    // 页头右侧 actions 中的"导入 Skill"按钮（与 Memory 一致）：向左展开
+    // "Import Skill" button in the page header's right-side actions (same as Memory): expand left
     placement: 'bottom-end',
     titleKey: 'onboarding.guide.asset.skill.title',
     descKey: 'onboarding.guide.asset.skill.desc',
@@ -178,7 +178,7 @@ const ASSET_STEPS: OnboardingStep[] = [
   {
     path: '/memory',
     selector: '[data-guide="import-memory"]',
-    // 右侧"导入记忆"按钮：向左展开
+    // "Import memory" button on the right: expand left
     placement: 'bottom-end',
     titleKey: 'onboarding.guide.asset.memory.title',
     descKey: 'onboarding.guide.asset.memory.desc',
@@ -188,30 +188,30 @@ const ASSET_STEPS: OnboardingStep[] = [
 function buildSteps(role: 'admin' | 'member'): OnboardingStep[] {
   const loginStep: OnboardingStep = {
     selector: '._memory-global-header-user-btn',
-    // header 右上角用户按钮：用 bottom-end 让气泡右边缘对齐元素右边缘，向左展开，
-    // 避免在窄视口下气泡被裁掉"下一步"按钮
+    // User button at the top right of the header: use bottom-end so the bubble's right edge aligns with the element's right edge and expands left,
+    // avoiding the bubble clipping the "Next" button on narrow viewports
     placement: 'bottom-end',
     titleKey: 'onboarding.guide.login.title',
     descKey: 'onboarding.guide.login.desc',
   };
 
-  // Admin 与 Member 的 Agent / 资产操作能力一致（都可编辑），仅成员管理不同：
-  //   - admin：可新建团队、新建用户并发放 user_key（member 无此权限）
-  //   - member：只能按 user_id 邀请已有用户加入团队；但可管理自己的 User_Key（admin 无此入口）
-  // placement 选择：右侧元素用 bottom-end（向左展开），左侧元素用 bottom-start（向右展开）
+  // Admin and Member have the same Agent / asset operation abilities (both can edit); only member management differs:
+  //   - admin: can create teams, create users and issue user_key (member lacks this permission)
+  //   - member: can only invite existing users into the team by user_id; but can manage their own User_Key (admin has no such entry)
+  // placement choice: right-side elements use bottom-end (expand left), left-side elements use bottom-start (expand right)
   if (role === 'admin') {
     return [
       loginStep,
       {
         selector: '._memory-team-switcher-trigger',
-        // header 左上角：向左展开避免右移溢出
+        // Top-left of the header: expand left to avoid overflow when shifting right
         placement: 'bottom-start',
         titleKey: 'onboarding.guide.team.title',
         descKey: 'onboarding.guide.team.desc',
       },
       {
         path: '/team/members',
-        // 优先高亮"添加成员"按钮；无 team 时按钮不存在，回退到成员列表区
+        // Prefer highlighting the "Add member" button; when there is no team the button does not exist, fall back to the member list area
         selector: ['[data-guide="add-member"]', '[data-guide="members-list"]'],
         placement: 'bottom-end',
         titleKey: 'onboarding.guide.memberAdmin.title',
@@ -220,7 +220,7 @@ function buildSteps(role: 'admin' | 'member'): OnboardingStep[] {
       {
         path: '/team/agents',
         selector: '[data-guide="create-agent"]',
-        // ActionPanel 左侧"新建 Agent"按钮：向右展开
+        // "New Agent" button on the left of ActionPanel: expand right
         placement: 'bottom-start',
         titleKey: 'onboarding.guide.agent.title',
         descKey: 'onboarding.guide.agent.desc',
@@ -234,8 +234,8 @@ function buildSteps(role: 'admin' | 'member'): OnboardingStep[] {
     loginStep,
     {
       path: '/team/members',
-      // 普通 member 没有"添加成员"按钮（仅 admin/teamAdmin 可见），
-      // 所以高亮始终存在的成员列表区，避免 fallback 到 header 导致"没跳转/定位错"
+      // A regular member has no "Add member" button (only visible to admin/teamAdmin),
+      // so highlight the always-present member list area, avoiding fallback to the header causing "no navigation / wrong positioning"
       selector: '[data-guide="members-list"]',
       placement: 'bottom-start',
       titleKey: 'onboarding.guide.member.title',
@@ -244,7 +244,7 @@ function buildSteps(role: 'admin' | 'member'): OnboardingStep[] {
     {
       path: '/team/agents',
       selector: '[data-guide="create-agent"]',
-      // ActionPanel 左侧"新建 Agent"按钮：向右展开
+      // "New Agent" button on the left of ActionPanel: expand right
       placement: 'bottom-start',
       titleKey: 'onboarding.guide.agent.title',
       descKey: 'onboarding.guide.agent.desc',
@@ -253,7 +253,7 @@ function buildSteps(role: 'admin' | 'member'): OnboardingStep[] {
     {
       path: '/team/api-keys',
       selector: '[data-guide="create-key"]',
-      // Justify 右侧"新建 Key"按钮：向左展开
+      // "New Key" button on the right of Justify: expand left
       placement: 'bottom-end',
       titleKey: 'onboarding.guide.apikey.title',
       descKey: 'onboarding.guide.apikey.desc',
@@ -271,7 +271,7 @@ export function OnboardingGuide({
   visible: boolean;
   userId?: string;
   userRole: 'admin' | 'member' | 'reviewer' | null;
-  /** 关闭引导（无论「跳过」还是「完成」都会标记为已看过） */
+  /** Close the onboarding (both "Skip" and "Finish" mark it as seen) */
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -285,17 +285,17 @@ export function OnboardingGuide({
   const pendingRef = useRef<number | null>(null);
 
   /**
-   * 动画对齐策略（替代旧的"隐藏→显示"门控，消除无遮罩空窗）：
-   *   - 同页切换：气泡（popper transform）与高亮框（top/left/width/height）带
-   *     CSS transition，随 scrollIntoView smooth 滚动平滑滑到新位置，全程可见；
-   *   - 跨页切换：旧锚点会随页面卸载（popper 对 detached 元素会定位到 0,0），
-   *     先 fadeOut 淡出 → 跳转 → 新锚点就绪后 no-anim 瞬间落位 → fadeIn 淡入。
+   * Animation alignment strategy (replaces the old "hide→show" gating, eliminating the unmasked gap):
+   *   - Same-page switch: the bubble (popper transform) and highlight box (top/left/width/height) carry a
+   *     CSS transition, sliding smoothly to the new position along with the scrollIntoView smooth scroll, visible throughout;
+   *   - Cross-page switch: the old anchor unmounts with the page (popper positions detached elements at 0,0),
+   *     so fadeOut first → navigate → once the new anchor is ready no-anim snaps into place → fadeIn.
    */
   const fadeOut = useCallback(() => {
     document.body.classList.add('_guide-fading');
   }, []);
 
-  /** 新步骤首帧定位完成后淡入（双 rAF：等 React commit + popper 定位） */
+  /** Fade in after the new step's first-frame positioning completes (double rAF: wait for React commit + popper positioning) */
   const fadeIn = useCallback(() => {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
@@ -305,7 +305,7 @@ export function OnboardingGuide({
     });
   }, []);
 
-  // 卸载时清理全局 class
+  // Clean up the global class on unmount
   useEffect(() => {
     return () => {
       document.body.classList.remove('_guide-fading');
@@ -322,8 +322,8 @@ export function OnboardingGuide({
     onClose();
   }, [userId, onClose]);
 
-  // 步骤切换：finish/cancel 直接关闭；next/back/start 先跳转目标页面，
-  // 等目标路径匹配且元素出现后再推进 current（避免 Guide 因元素缺失闪退）。
+  // Step switching: finish/cancel close directly; next/back/start first navigate to the target page,
+  // and advance current only after the target path matches and the element appears (avoids the Guide flashing away due to a missing element).
   const handleCurrentChange = useCallback(
     (next: number, context: { from: 'start' | 'back' | 'next' | 'finish' | 'cancel' }) => {
       const { from } = context;
@@ -335,19 +335,19 @@ export function OnboardingGuide({
       const target = steps[next];
       if (!target) return;
       if (target.path && target.path !== location.pathname) {
-        // 跨页跳转：先淡出（遮住"锚点卸载→新页加载"窗口），pending 完成后淡入
+        // Cross-page navigation: fade out first (covering the "anchor unmount → new page load" window), fade in after pending completes
         fadeOut();
         pendingRef.current = next;
         navigate(target.path);
       } else {
-        // 同页切换：直接推进，位置 transition 与滚动动画对齐，平滑滑过去
+        // Same-page switch: advance directly, position transition aligns with the scroll animation, sliding over smoothly
         setCurrent(next);
       }
     },
     [steps, location.pathname, navigate, close, fadeOut],
   );
 
-  // 等待跳转完成：路径匹配后轮询目标元素出现，再推进 current（最多等 60 帧约 1s）
+  // Wait for navigation to complete: after the path matches, poll until the target element appears, then advance current (wait at most 60 frames, about 1s)
   useEffect(() => {
     const pending = pendingRef.current;
     if (pending === null) return;
@@ -359,11 +359,11 @@ export function OnboardingGuide({
     let tries = 0;
     const tick = () => {
       if (cancelled) return;
-      // selector 可能是回退数组：任一元素出现即视为目标页面已就绪
+      // selector may be a fallback array: any element appearing means the target page is ready
       const list = Array.isArray(target.selector) ? target.selector : [target.selector];
       if (firstMatch(list) || tries >= 60) {
         pendingRef.current = null;
-        // 新锚点瞬间落位（no-anim 禁用过渡，避免从旧位置滑入），然后淡入
+        // New anchor snaps into place (no-anim disables transitions, avoiding sliding in from the old position), then fades in
         document.body.classList.add('_guide-no-anim');
         setCurrent(pending);
         fadeIn();
@@ -378,7 +378,7 @@ export function OnboardingGuide({
     };
   }, [location.pathname, steps, fadeIn]);
 
-  // 初次显示：popper 首帧定位前禁用过渡（避免气泡从 (0,0) 滑入），定位完成后启用
+  // Initial display: disable transitions before popper's first-frame positioning (avoiding the bubble sliding in from (0,0)), enable after positioning completes
   useEffect(() => {
     if (!visible) return;
     document.body.classList.add('_guide-no-anim');
@@ -405,7 +405,7 @@ export function OnboardingGuide({
   const startContent: GuideStep = useMemo(
     () => ({
       element: () => resolveElement(FALLBACK_SELECTOR),
-      // 欢迎页高亮 header 品牌区：按实际位置动态计算方向
+      // Welcome page highlights the header brand area: compute direction dynamically from the actual position
       placement: computePlacement(FALLBACK_SELECTOR, 'bottom-start'),
       title: t(
         isAdmin ? 'onboarding.guide.start.admin.title' : 'onboarding.guide.start.member.title',
@@ -418,11 +418,11 @@ export function OnboardingGuide({
     [isAdmin, t, visible],
   );
 
-  // ===== 自定义精确高亮层 =====
-  // tea Guide 内置 mask 基于 react-popper 定位：在内部滚动容器（tea-layout__content）
-  // 下存在固定偏差（约 3~5px），且不随滚动更新（滚动后偏差进一步放大），导致高亮框
-  // "漏边"。这里改用 getBoundingClientRect 实时计算（capture 监听内部容器滚动 +
-  // resize），并用全局 CSS 隐藏 Guide 自带 mask（见 index.css `.tea-overlay[style*="z-index: 9999"]`）。
+  // ===== Custom precise highlight layer =====
+  // The built-in tea Guide mask is positioned with react-popper: under an inner scroll container (tea-layout__content)
+  // it has a fixed offset (about 3~5px) and does not update on scroll (the offset grows after scrolling), causing the highlight box to
+  // "leak at the edges". Here we compute in real time with getBoundingClientRect (capture-listening to inner container scroll +
+  // resize), and hide the Guide's own mask with global CSS (see index.css `.tea-overlay[style*="z-index: 9999"]`).
   const anchorSelector =
     current >= 0 && steps[current] ? steps[current].selector : FALLBACK_SELECTOR;
   const [anchorBox, setAnchorBox] = useState<{
@@ -444,15 +444,15 @@ export function OnboardingGuide({
       setAnchorBox({ top: r.top, left: r.left, width: r.width, height: r.height });
     };
     update();
-    // 步骤切换瞬间 Guide 的 scrollIntoView(smooth) 动画可能尚未结束，
-    // 立即测到的是动画中间位置；用 rAF + 延迟兜底在布局稳定后修正。
+    // At the moment of step change the Guide's scrollIntoView(smooth) animation may not have finished,
+    // so the immediate measurement is a mid-animation position; use rAF + a delayed fallback to correct it once the layout is stable.
     const raf = requestAnimationFrame(update);
     const late = window.setTimeout(update, 400);
-    // capture 阶段监听，能捕获内部滚动容器（非 window）的滚动事件
+    // Listen in the capture phase to catch scroll events of the inner scroll container (not window)
     const onScrollOrResize = () => requestAnimationFrame(update);
     window.addEventListener('scroll', onScrollOrResize, true);
     window.addEventListener('resize', onScrollOrResize);
-    // 数据加载等导致的布局变化也会移动锚点（ResizeObserver 比 resize 事件覆盖更全）
+    // Layout changes caused by data loading etc. can also move the anchor (ResizeObserver covers more than the resize event)
     const ro = new ResizeObserver(() => requestAnimationFrame(update));
     ro.observe(document.body);
     return () => {
@@ -484,7 +484,7 @@ export function OnboardingGuide({
       />
       {anchorBox && (
         <div className="_guide-mask" aria-hidden="true">
-          {/* 上下左右四块半透明遮罩拼出高亮洞 */}
+          {/* Four semi-transparent mask blocks (top/bottom/left/right) form the highlight hole */}
           <div
             className="_guide-mask-block"
             style={{ top: 0, left: 0, right: 0, height: anchorBox.top }}
@@ -506,7 +506,7 @@ export function OnboardingGuide({
               height: anchorBox.height,
             }}
           />
-          {/* 高亮描边 */}
+          {/* Highlight outline */}
           <div
             className="_guide-mask-ring"
             style={{

@@ -123,7 +123,7 @@
   color: var(--tea-color-text-primary);
 }
 
-/* ===== 使用说明按钮 ===== */
+/* ===== Guide button ===== */
 ._memory-global-header-guide-btn {
   padding: 4px 10px;
   border: none;
@@ -147,7 +147,7 @@
   font-weight: 500;
 }
 
-/* ===== Profile Modal：tea Avatar + Justify + 描述型分块 ===== */
+/* ===== Profile Modal: tea Avatar + Justify + descriptive blocks ===== */
 
 ._memory-profile-identity {
   display: flex;
@@ -208,9 +208,9 @@
   line-height: 16px;
 }
 
-/* 修复 tea InputAdornment 默认 display:inline-block 导致的 Input 撑不开
-   （历史上 InputAdornment + size="full" 的 Input 实际宽度按内容收缩，
-   右侧 Copy 图标被孤立悬空）。改为块级容器并让内部 Input 自适应。 */
+/* Fix: tea InputAdornment defaults to display:inline-block, so the Input cannot stretch
+   (historically an Input with InputAdornment + size="full" shrank to its content width,
+   leaving the right-side Copy icon orphaned and floating). Changed to a block-level container with the inner Input adapting. */
 ._memory-profile-input-adornment {
   display: flex;
   align-items: stretch;

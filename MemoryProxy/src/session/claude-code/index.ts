@@ -1,11 +1,11 @@
 /**
  * Claude Code Session Init — Public API.
  *
- * 独立的 Claude Code session-init 实现：
- *   - Form: `AskUserQuestion` tool_use (仅 Anthropic SSE)
- *   - Extractor: JSON tool_result 解析
- *   - Cleaner: tool_use id 匹配
- *   - 分页模式: 每页 3 个 agent + "更多→" 按钮
+ * Standalone Claude Code session-init implementation:
+ *   - Form: `AskUserQuestion` tool_use (Anthropic SSE only)
+ *   - Extractor: JSON tool_result parsing
+ *   - Cleaner: tool_use id matching
+ *   - Pagination mode: 3 agents per page + "More →" button
  */
 
 export { handleSessionInit } from "./init.js";

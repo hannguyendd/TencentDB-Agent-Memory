@@ -15,8 +15,8 @@ interface FetchAssetCapabilitiesInput {
   userKey?: string | null;
   timeoutMs?: number;
   /**
-   * Per-call override for `x-tdai-service-id`，优先于 `serviceId`。
-   * 多租户部署下，调用方应传从请求路径解析出的 spaceId。
+   * Per-call override for `x-tdai-service-id`, takes precedence over `serviceId`.
+   * In multi-tenant deployments, callers should pass the spaceId parsed from the request path.
    */
   serviceIdOverride?: string | null;
 }

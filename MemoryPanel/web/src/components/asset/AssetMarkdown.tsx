@@ -1,18 +1,18 @@
 /**
- * AssetMarkdown —— 资产页统一的 Markdown 渲染组件。
+ * AssetMarkdown —— Unified Markdown rendering component for asset pages.
  *
- * 从 WikiSourcesPanel / CodeSourcesPanel 收敛：两侧此前各有一份复制粘贴的
- * mdComponents，统一收口到此，避免再次分叉。
+ * Consolidated from WikiSourcesPanel / CodeSourcesPanel: each side previously had its own copy-pasted
+ * mdComponents, now consolidated here to avoid diverging again.
  *
- * 两种密度（组件库版本差异）：
- *   - default：Wiki 详情正文用的较大字号（text-sm / text-lg）
- *   - compact：Code 详情搜索结果/探索结果用的紧凑字号（text-[11px]~[13px]）
- * 传入 compact 即切换为 Code 侧原有样式，保持两页视觉不回退。
+ * Two densities (component library version differences):
+ *   - default: larger font sizes used for Wiki detail body (text-sm / text-lg)
+ *   - compact: compact font sizes used for Code detail search/explore results (text-[11px]~[13px])
+ * Passing compact switches to the original Code-side styles, so neither page regresses visually.
  */
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-/** Wiki 详情正文密度（默认） */
+/** Wiki detail body density (default) */
 export const mdComponents: Components = {
   h1: ({ children, ...p }) => (
     <h1 className="text-xl font-bold mb-3 mt-0 pb-2 border-b border-border text-foreground" {...p}>
@@ -112,7 +112,7 @@ export const mdComponents: Components = {
   ),
 };
 
-/** Code 详情搜索/探索结果密度（compact，原 CodeSourcesPanel 实现） */
+/** Code detail search/explore result density (compact, original CodeSourcesPanel implementation) */
 const mdComponentsCompact: Components = {
   h2: ({ children, ...p }) => (
     <h2 className="text-[13px] font-semibold mb-2 mt-4 text-foreground/85" {...p}>
@@ -188,7 +188,7 @@ const mdComponentsCompact: Components = {
   ),
 };
 
-/** 渲染一段 Markdown 正文（统一 gfm 插件 + 共享样式；compact 用于 Code 详情小字号场景） */
+/** Render a piece of Markdown body (unified gfm plugin + shared styles; compact is for the small-font Code detail scenario) */
 export function AssetMarkdown({ content, compact = false }: { content: string; compact?: boolean }) {
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={compact ? mdComponentsCompact : mdComponents}>

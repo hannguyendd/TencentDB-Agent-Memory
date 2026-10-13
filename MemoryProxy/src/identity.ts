@@ -26,7 +26,7 @@ export interface ClientIdentity {
   apiKeyPrefix: string | null;
   /** Session/conversation ID if found in headers or body */
   sessionId: string | null;
-  /** Enterprise WeChat (企微) ID if found in headers */
+  /** Enterprise WeChat (WeCom) ID if found in headers */
   wechatWorkId: string | null;
   /** Any x-request-id or trace ID from headers */
   requestId: string | null;
@@ -338,8 +338,8 @@ export function inspectAndRecord(
     (m: unknown) => (m as Record<string, unknown>).role === "system",
   ) as Record<string, unknown> | undefined;
 
-  // Anthropic 协议的 system prompt 在 body.system 字段（不在 messages 中）
-  // Claude Code 走 Anthropic 协议，system prompt 是 body.system
+  // The Anthropic protocol's system prompt is in the body.system field (not in messages)
+  // Claude Code uses the Anthropic protocol, so the system prompt is body.system
   const anthropicSystem = body.system;
   let anthropicSystemText: string | null = null;
   if (typeof anthropicSystem === "string") {
@@ -367,7 +367,7 @@ export function inspectAndRecord(
   let systemPromptTail: string | null = null;
   let systemContentType: string | null = null;
 
-  // 优先用 OpenAI 格式的 system message
+  // Prefer the OpenAI-format system message
   if (systemMsg) {
     if (typeof systemMsg.content === "string") {
       systemContentType = "string";
@@ -387,7 +387,7 @@ export function inspectAndRecord(
       }
     }
   } else if (anthropicSystemText) {
-    // Anthropic 格式的 system prompt（Claude Code 走这里）
+    // Anthropic-format system prompt (Claude Code goes here)
     systemContentType = typeof anthropicSystem === "string" ? "anthropic-string" : "anthropic-array";
     systemPromptPreview = anthropicSystemText.slice(0, 5000);
     if (anthropicSystemText.length > 5000) {
@@ -429,8 +429,8 @@ export function inspectAndRecord(
       : ""),
   );
 
-  // [DEBUG-CC-SESSION] 临时调试：打印 Claude Code SDK 注入的 session id 值，
-  // 用于验证「同一次 claude 启动多次请求同 id / 不同启动不同 id」。验证完即移除。
+  // [DEBUG-CC-SESSION] Temporary debugging: print the session id value injected by the Claude Code SDK,
+  // to verify "multiple requests from the same claude launch share an id / different launches have different ids". Remove once verified.
   {
     const ccSid =
       identity.customHeaders["x-claude-code-session-id"] ??

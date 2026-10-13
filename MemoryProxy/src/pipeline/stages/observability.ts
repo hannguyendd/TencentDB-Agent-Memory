@@ -1,21 +1,21 @@
 /**
- * stages/observability.ts — LangfuseTurnContext 构造 + turnSeq 单调化 (Phase 1)。
+ * stages/observability.ts — LangfuseTurnContext construction + turnSeq monotonization (Phase 1).
  *
- * 提取自 4 处近乎相同的 lf 装配代码:
- *   - handler.ts:1482-1499         (openai protocol, target.tags 是 route 标签)
- *   - anthropicHandler.ts:1408-1425 (anthropic protocol, 同上)
- *   - codexHandler.ts / workbuddyHandler.ts 部分 lf 装配 (缺 turn ctx, 后期 opt-in)
+ * Extracted from 4 nearly identical lf assembly pieces of code:
+ *   - handler.ts:1482-1499         (openai protocol, target.tags are route tags)
+ *   - anthropicHandler.ts:1408-1425 (anthropic protocol, same as above)
+ *   - parts of the lf assembly in codexHandler.ts / workbuddyHandler.ts (missing turn ctx, opt-in later)
  *
- * turnSeq 单调化 (addendum §4.2, cd898d2e) 依赖 Redis, 未启用 Redis 时
- * localTurnSeq 直接返回 —— 保持等价。
+ * turnSeq monotonization (addendum §4.2, cd898d2e) depends on Redis; when Redis is not enabled
+ * localTurnSeq is returned directly — keeping equivalence.
  *
- * 本 stage 只做 3 件事:
- *   1. resolveMonotonicTurnSeq → 得到会话级单调 turnSeq
- *   2. langfuseTurnTraceId(sessionKey, turnSeq) → 确定性 traceId
- *   3. 组装 LangfuseTurnContext bundle
+ * This stage only does 3 things:
+ *   1. resolveMonotonicTurnSeq -> get the session-level monotonic turnSeq
+ *   2. langfuseTurnTraceId(sessionKey, turnSeq) -> deterministic traceId
+ *   3. assemble the LangfuseTurnContext bundle
  *
- * 不包含 opikCreateTrace / analyzerTrace / debugMetadata 等各自独立的调用 —
- * 那些 caller 拿到 lf 后自行调, Phase 2 protocol strategy 层进一步统一。
+ * Does not include the independent calls such as opikCreateTrace / analyzerTrace / debugMetadata —
+ * the caller makes those itself after getting lf; Phase 2 protocol strategy layer unifies them further.
  */
 
 import type { Context } from "hono";
@@ -34,31 +34,31 @@ export interface LangfuseTurnContextBuildInput {
   target: ForwardTarget;
   messages: unknown[];
   /**
-   * 协议 — 影响 countHumanTurns 分支。
-   * "responses" 走独立的 countHumanTurnsCodex/Workbuddy (codex/wb handler 内部),
-   * caller 必须通过 `localTurnSeqOverride` 传入; 不能在此 stage 内自动推导。
+   * Protocol — affects the countHumanTurns branch.
+   * "responses" uses the separate countHumanTurnsCodex/Workbuddy (inside the codex/wb handlers),
+   * the caller must pass it through `localTurnSeqOverride`; it cannot be derived automatically inside this stage.
    */
   protocol: "openai" | "anthropic" | "responses";
-  /** trace 级 tags (稳定维度: protocol/stream/session, 不含 route tag) */
+  /** trace-level tags (stable dimensions: protocol/stream/session, excluding the route tag) */
   traceTags: string[];
-  /** 供 resolveLatestUserQuery 拿最新用户输入 (path + headers + body) */
+  /** for resolveLatestUserQuery to get the latest user input (path + headers + body) */
   path: string;
   headers: Record<string, string>;
   body: Record<string, unknown>;
-  /** codex/wb 从各自的 countHumanTurnsXxx 拿到, 若未提供则 stage 用 countHumanTurns(messages, protocol) */
+  /** codex/wb get this from their own countHumanTurnsXxx; if not provided the stage uses countHumanTurns(messages, protocol) */
   localTurnSeqOverride?: number;
   /**
-   * turnSeq lane (Redis 单调计数分车道)。
-   * - handler.ts:1483 不传 → 默认 "main"
-   * - anthropicHandler.ts:1409 传 requestKind → main/fork/sidequery 独立车道
-   *   保证 CC fork/sidequery 类别不与主对话争 turnSeq。
+   * turnSeq lane (Redis monotonic counter split into lanes).
+   * - handler.ts:1483 does not pass it -> defaults to "main"
+   * - anthropicHandler.ts:1409 passes requestKind -> main/fork/sidequery have independent lanes
+   *   ensuring CC fork/sidequery categories do not contend with the main conversation for turnSeq.
    */
   lane?: string;
   /**
-   * userQuery 覆写 (58e4c55b opencode fix)。
-   * opencode 主请求的最后一条 user content 才是本 turn 用户输入, 且 tool-loop
-   * 续接以 tool 消息结尾时不该被算作新 human input; caller 算好传入即可,
-   * 不传时 stage 走 resolveLatestUserQuery 默认姿势。
+   * userQuery override (58e4c55b opencode fix).
+   * The last user content of an opencode main request is this turn's user input, and when a tool-loop
+   * continuation ends with a tool message it should not be counted as new human input; the caller computes it and passes it in,
+   * when not passed the stage uses the default resolveLatestUserQuery approach.
    */
   userQueryOverride?: string | null;
 }
@@ -69,11 +69,11 @@ export interface LangfuseTurnBundle {
 }
 
 /**
- * 构造 turn 级 Langfuse 上下文 + 会话级单调 turnSeq。
+ * Construct the turn-level Langfuse context + session-level monotonic turnSeq.
  *
- * 顺序敏感 (blueprint §5.3):
- *   - resolveMonotonicTurnSeq 需依赖 target.turnSeq 或 stateless 计数
- *   - langfuseTurnTraceId 是纯函数, 依赖上一步的 turnSeq
+ * Order-sensitive (blueprint §5.3):
+ *   - resolveMonotonicTurnSeq depends on target.turnSeq or the stateless count
+ *   - langfuseTurnTraceId is a pure function that depends on the previous step's turnSeq
  */
 export async function stageBuildLangfuseTurnContext(
   input: LangfuseTurnContextBuildInput,
@@ -84,8 +84,8 @@ export async function stageBuildLangfuseTurnContext(
   } else if (input.target.turnSeq > 0) {
     localTurnSeq = input.target.turnSeq;
   } else if (input.protocol === "responses") {
-    // codex/wb 必须显式传 localTurnSeqOverride (走各自的 countHumanTurnsCodex/Workbuddy);
-    // 未传就当 0, 后续 resolveMonotonicTurnSeq 也短路 (localTurnSeq<=0 直返)。
+    // codex/wb must explicitly pass localTurnSeqOverride (using their own countHumanTurnsCodex/Workbuddy);
+    // if not passed it is treated as 0, and the later resolveMonotonicTurnSeq also short-circuits (localTurnSeq<=0 returns directly).
     localTurnSeq = 0;
   } else {
     localTurnSeq = countHumanTurns(input.messages, input.protocol);
@@ -119,8 +119,8 @@ export async function stageBuildLangfuseTurnContext(
 }
 
 /**
- * analyzerTrace 上报 — target.analyzerTrace 非 null 时调 reportAnalyzerTrace。
- * openai-chat + anthropic runner 内联块合并。
+ * analyzerTrace report — calls reportAnalyzerTrace when target.analyzerTrace is non-null.
+ * Merges the inline blocks of the openai-chat + anthropic runners.
  */
 export function stageReportAnalyzerTrace(input: {
   config: ProxyConfig;
@@ -148,9 +148,9 @@ export function stageReportAnalyzerTrace(input: {
 }
 
 /**
- * 把 lowercase 请求头装成 plain object — handler 里各处都要
+ * Pack lowercase request headers into a plain object — needed in many places in the handler,
  * "for (const [k,v] of c.req.raw.headers.entries()) hdrs[k.toLowerCase()] = v"。
- * 抽出来一份。
+ * extracted into one shared copy.
  */
 export function collectLowerCaseHeaders(c: Context): Record<string, string> {
   const hdrs: Record<string, string> = {};

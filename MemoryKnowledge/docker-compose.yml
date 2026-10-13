@@ -9,7 +9,7 @@
 #   LLM_MODE=custom LLM_API_KEY=sk-xxx \
 #   LLM_BASE_URL=https://api.example.com/v1 \
 #   docker compose up -d --build
-# 默认 LLM_MODE=proxy 时无需 LLM_API_KEY/LLM_BASE_URL（走 context_proxy 绑定）。
+# With the default LLM_MODE=proxy, LLM_API_KEY/LLM_BASE_URL are not needed (uses the context_proxy binding).
 
 services:
   knowledge:
@@ -34,7 +34,7 @@ services:
     command:
       - --public-url=${PUBLIC_URL:?set PUBLIC_URL e.g. http://203.0.113.10:8421/v3}
       - --tmc-callback=${TMC_CALLBACK:-}
-      # proxy（默认）走 context_proxy 绑定；custom 才需 --llm-key/--llm-base-url。
+      # proxy (default) uses the context_proxy binding; custom requires --llm-key/--llm-base-url.
       - --llm-mode=${LLM_MODE:-proxy}
       - --llm-key=${LLM_API_KEY:-}
       - --llm-base-url=${LLM_BASE_URL:-}

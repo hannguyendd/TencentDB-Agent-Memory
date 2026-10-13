@@ -1,14 +1,14 @@
 # CodeBuddy (CB)
 
-> agentSource: `codebuddy` | 协议: OpenAI Chat Completions / Anthropic Messages | Handler: `handler.ts` (共享)
+> agentSource: `codebuddy` | Protocol: OpenAI Chat Completions / Anthropic Messages | Handler: `handler.ts` (shared)
 >
-> 本地历史导入 Memory Hub：见 [资产导入手册](./asset-import.md)。
+> To import local history into Memory Hub, see the [Asset Import Guide](./asset-import.md).
 
 ---
 
-## 1. 客户端接入配置
+## 1. Client Configuration
 
-CB 通过**配置文件** `~/.codebuddy/models.json` 配置自定义模型：
+CB configures custom models through the **config file** `~/.codebuddy/models.json`:
 
 ```json
 {
@@ -17,7 +17,7 @@ CB 通过**配置文件** `~/.codebuddy/models.json` 配置自定义模型：
       "id": "claude-sonnet-4-20250514",
       "name": "proxy-memory-agent",
       "vendor": "claude",
-      "apiKey": "<业务用户的 sk-mem-... user_key>",
+      "apiKey": "<the business user's sk-mem-... user_key>",
       "maxInputTokens": 200000,
       "url": "http://127.0.0.1:8096/codebuddy/default",
       "supportsToolCall": true,
@@ -27,21 +27,21 @@ CB 通过**配置文件** `~/.codebuddy/models.json` 配置自定义模型：
 }
 ```
 
-字段说明：
-- `id` — Proxy 上游支持的模型 ID（如 `claude-sonnet-4-20250514`）
-- `name` — 在 CodeBuddy 对话框中显示的名称，可自定义
-- `vendor` — UI 展示用（如 `claude`、`openai`），不影响实际请求
-- `apiKey` — 业务用户的 `user_key`（从面板获取，与 CC 的 `ANTHROPIC_AUTH_TOKEN` 相同）
-- `url` — Proxy 地址 + `/codebuddy/<spaceId>`；`default` 是 memory 实例 ID
+Field notes:
+- `id` — a model ID supported by the Proxy upstream (e.g. `claude-sonnet-4-20250514`)
+- `name` — the name shown in the CodeBuddy dialog; customizable
+- `vendor` — for UI display only (e.g. `claude`, `openai`); does not affect actual requests
+- `apiKey` — the business user's `user_key` (obtained from the panel; same as CC's `ANTHROPIC_AUTH_TOKEN`)
+- `url` — Proxy address + `/codebuddy/<spaceId>`; `default` is the memory instance ID
 
-配置完成后在 CB 对话框中选择该模型即可。
+After configuring, select this model in the CB dialog.
 
-### ⚠️ 版本限制
+### ⚠️ Version restrictions
 
-> CodeBuddy **4.10.2 ~ 4.10.4** 不携带 sessionId，无法完成 Session Init。  
-> **请使用 ≥ 4.10.5 或 ≤ 4.10.1**。
+> CodeBuddy **4.10.2 ~ 4.10.4** do not carry a sessionId, so Session Init cannot complete.  
+> **Use ≥ 4.10.5 or ≤ 4.10.1**.
 
-请求路径：
+Request paths:
 - OpenAI: `POST /codebuddy/:spaceId/v1/chat/completions`
 - Anthropic: `POST /codebuddy/:spaceId/v1/messages`
 
@@ -49,82 +49,82 @@ CB 通过**配置文件** `~/.codebuddy/models.json` 配置自定义模型：
 
 ## 2. Session ID
 
-| 优先级 | Header |
-|--------|--------|
+| Priority | Header |
+|----------|--------|
 | 1 | `x-conversation-id` |
 | 2 | `x-session-id` |
 | 3 | `x-cb-session-id` |
 | 4 | `x-codebuddy-session-id` |
 
-CB IDE 插件会自动生成并携带 `x-conversation-id`。
+The CB IDE plugin generates and sends `x-conversation-id` automatically.
 
 ---
 
-## 3. Session Init（会话初始化 / Form）
+## 3. Session Init (session initialization / Form)
 
-### 3.1 机制
+### 3.1 Mechanism
 
-CB 使用 **`ask_followup_question`** function_call 发起交互式 Form：
+CB uses an **`ask_followup_question`** function_call to start an interactive Form:
 
 - Tool name: `ask_followup_question`
 - Call ID prefix: `call_session_init_` (OpenAI) / `toolu_session_init_` (Anthropic)
-- 协议: OpenAI SSE tool_calls chunks 或 Anthropic SSE
+- Protocol: OpenAI SSE tool_calls chunks or Anthropic SSE
 
-### 3.2 状态机
+### 3.2 State machine
 
 ```
 asset_confirm → team_select → agent_task_select → initialized
 ```
 
-4 步流程：
-1. **asset_confirm** — 确认是否需要注入资产（"是否使用记忆/技能？"）
-2. **team_select** — 选择团队
-3. **agent_task_select** — 合并选择 Agent + Task
-4. **initialized** — 注入资产，进入正常对话
+4-step flow:
+1. **asset_confirm** — confirm whether to inject assets ("Use memory/skills?")
+2. **team_select** — choose a team
+3. **agent_task_select** — choose Agent + Task together
+4. **initialized** — inject assets and enter normal conversation
 
-### 3.3 分页
+### 3.3 Pagination
 
-CB 的 `ask_followup_question` 选项列表 **无数量限制**，无需分页。  
-所有选项一次性全部展示。
+CB's `ask_followup_question` option list has **no limit on the number of options**, so no pagination is needed.  
+All options are shown at once.
 
 ### 3.4 Plan Mode / Default Mode
 
-CB **不存在** Default Mode gate。CB 客户端始终有 `ask_followup_question` tool 可用，form 始终可发。
+CB has **no** Default Mode gate. The CB client always has the `ask_followup_question` tool available, so the form can always be sent.
 
-### 3.5 跳过 Session Init
+### 3.5 Skipping Session Init
 
-- 在 `asset_confirm` 步骤选择 "否" → 跳过所有后续步骤，直接透传
-- 在任何步骤输入 "跳过" / "skip" → SKIP_RE 匹配后跳过
-
----
-
-## 4. 请求分类
-
-CB 的请求分类较简单：
-
-| 类型 | 说明 |
-|------|------|
-| **main** | 所有请求默认都是 main |
-
-CB **没有** fork / sidequery / compact 等辅助请求概念。每条请求都走完整链路。
+- Choose "No" at the `asset_confirm` step → all subsequent steps are skipped and requests pass straight through
+- Type "跳过" / "skip" at any step → skipped once SKIP_RE matches
 
 ---
 
-## 5. 用户文本提取
+## 4. Request Classification
 
-CB 消息体 `message.content` 始终是 **纯字符串**（不是 content block 数组）。
+CB's request classification is simple:
 
-提取逻辑：
-1. 在字符串中查找 `<user_query>...</user_query>` XML 包裹
-2. 若找到 → 提取内部文本
-3. 若未找到 → 整个字符串作为用户文本
-4. 剥离 CB 伪 XML 标签 (`<agent_context>`, `<code_context>` 等)
+| Type | Description |
+|------|-------------|
+| **main** | All requests are main by default |
+
+CB has **no** auxiliary request concepts such as fork / sidequery / compact. Every request goes through the full pipeline.
 
 ---
 
-## 6. 注入 Profile
+## 5. User Text Extraction
 
-**XML 结构**的 system prompt 注入：
+In CB the message body `message.content` is always a **plain string** (not a content block array).
+
+Extraction logic:
+1. Look for a `<user_query>...</user_query>` XML wrapper in the string
+2. If found → extract the inner text
+3. If not found → use the entire string as the user text
+4. Strip CB's pseudo-XML tags (`<agent_context>`, `<code_context>`, etc.)
+
+---
+
+## 6. Injection Profile
+
+System prompt injection with an **XML structure**:
 
 ```xml
 <agent_skills>
@@ -135,50 +135,50 @@ CB 消息体 `message.content` 始终是 **纯字符串**（不是 content block
 <session_context>...</session_context>
 ```
 
-注入点：
-- OpenAI: `messages[0].content`（system message 字符串内追加）
-- Anthropic: `system` 字段
+Injection points:
+- OpenAI: `messages[0].content` (appended inside the system message string)
+- Anthropic: the `system` field
 
 ---
 
-## 7. 特殊行为
+## 7. Special Behavior
 
-- **独特 Header 集**: `x-agent-intent`, `x-conversation-message-id`, `x-conversation-request-id`
-- **Assistant placeholder**: CB assistant 消息可能是 `"-"` 占位（空回复标记）
-- **共享 Handler**: dsh 也复用此 handler (`handleChatCompletions`)
-- **双协议支持**: 同一 CB 版本可能走 OpenAI 或 Anthropic 协议，handler 自动适配
-
----
-
-## 8. 归档触发
-
-- 对话超过阈值自动触发 `skill/conversation/add`
-- 支持 `skill/conversation/force-archive`
-- 归档数据写入 L0
+- **Distinct header set**: `x-agent-intent`, `x-conversation-message-id`, `x-conversation-request-id`
+- **Assistant placeholder**: CB assistant messages may be a `"-"` placeholder (empty-reply marker)
+- **Shared handler**: dsh also reuses this handler (`handleChatCompletions`)
+- **Dual-protocol support**: the same CB version may use either the OpenAI or Anthropic protocol; the handler adapts automatically
 
 ---
 
-## 9. 环境变量
+## 8. Archive Triggers
 
-无 CB 专属变量。使用全局 proxy 配置：
+- Conversations over the threshold automatically trigger `skill/conversation/add`
+- `skill/conversation/force-archive` is supported
+- Archived data is written to L0
+
+---
+
+## 9. Environment Variables
+
+There are no CB-specific variables. Use the global proxy configuration:
 
 ```env
 PROXY_PORT=8096
-FORWARD_URL=https://api.openai.com   # CB OpenAI 上游
-# 或 FORWARD_URL=https://api.anthropic.com  # CB Anthropic 上游
+FORWARD_URL=https://api.openai.com   # CB OpenAI upstream
+# or FORWARD_URL=https://api.anthropic.com  # CB Anthropic upstream
 ```
 
-实际上游由 `resolveForwardTarget` 动态决定（tokenhub / 直连 provider）。
+The actual upstream is decided dynamically by `resolveForwardTarget` (tokenhub / direct provider).
 
 ---
 
-## 10. 常见问题
+## 10. FAQ
 
-**Q: CB 和 CC 的主要区别是什么？**  
-A: 协议不同（OpenAI vs Anthropic）、内容结构不同（string vs content-block array）、无辅助请求分类、选项无分页。
+**Q: What are the main differences between CB and CC?**  
+A: Different protocols (OpenAI vs Anthropic), different content structure (string vs content-block array), no auxiliary request classification, and no option pagination.
 
-**Q: CB 的 `<user_query>` 包裹是谁加的？**  
-A: CB IDE 插件客户端在发送前自动包裹用户原文，proxy 提取时剥离。
+**Q: Who adds CB's `<user_query>` wrapper?**  
+A: The CB IDE plugin client wraps the original user text before sending; the proxy strips it during extraction.
 
-**Q: CB 走 Anthropic 协议时和 CC 有什么区别？**  
-A: form tool name 不同 (`ask_followup_question` vs `AskUserQuestion`)，content 仍是 string 格式，注入用 XML 而非 Markdown。agentSource 标记不同。
+**Q: How does CB differ from CC when CB uses the Anthropic protocol?**  
+A: The form tool name differs (`ask_followup_question` vs `AskUserQuestion`), content is still a string, and injection uses XML rather than Markdown. The agentSource marker also differs.

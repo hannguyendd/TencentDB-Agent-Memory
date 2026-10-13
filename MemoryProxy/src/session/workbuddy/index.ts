@@ -1,9 +1,9 @@
 /**
- * WorkBuddy session-init 层统一 export。
+ * WorkBuddy session-init layer unified exports.
  *
- * ⚠️ 独立性铁律：本 barrel 只对外暴露 workbuddy 自己的类型与入口；不再re-export
- * 其他 client 的 session-init 内容。caller（workbuddyHandler）从此处一次拿到
- * 所有必要接口。
+ * ⚠️ Independence rule: this barrel exposes only workbuddy's own types and entry points; it no longer re-exports
+ * session-init content from other clients. The caller (workbuddyHandler) gets
+ * all necessary interfaces from here in one place.
  */
 
 export {

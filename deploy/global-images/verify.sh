@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# 干跑校验：不启动任何容器，只检查环境是否就绪。
+# Dry-run verification: starts no containers, only checks whether the environment is ready.
 #
-# 用法：
-#   ./verify.sh               # 默认全检（含 LLM 通路预检）
-#   ./verify.sh --skip-llm    # 跳过 LLM 检查（离线环境或不希望发外部请求时用）
+# Usage:
+#   ./verify.sh               # Full check by default (including LLM connectivity pre-check)
+#   ./verify.sh --skip-llm    # Skip the LLM check (for offline environments or when external requests are unwanted)
 #
-# 检查项：
-#   1. docker 命令可用
-#   2. .env 文件存在
-#   3. .env 中所有必填参数已填写（非 REPLACE_ME 且非空）
-#   4. 三个镜像是否已在本地（未在本地也不算失败，只 warn）
-#   5. 目标端口是否被占用
-#   6. LLM 上游通路（memory 组 + proxy 组，各自预检）
-#      - openai 协议：GET {base}/models，不消耗 token
-#      - anthropic 协议：POST {base}/v1/messages max_tokens=1，消耗 ≤ 10 token
-#      - 若容器已运行，额外 docker exec 从容器内再打一次（验证容器 → LLM 网络可达）
+# Checks:
+#   1. docker command available
+#   2. .env file exists
+#   3. all required parameters in .env are filled in (not REPLACE_ME and not empty)
+#   4. whether the three images are present locally (absent locally is not a failure, only a warn)
+#   5. whether target ports are in use
+#   6. LLM upstream connectivity (memory group + proxy group, each pre-checked)
+#      - openai protocol: GET {base}/models, consumes no tokens
+#      - anthropic protocol: POST {base}/v1/messages max_tokens=1, consuming ≤ 10 tokens
+#      - if the containers are already running, additionally docker exec a second request from inside the container (verifies container → LLM network reachability)
 #
-# 全部通过 → exit 0；有错 → exit 1；只 warn → exit 0
+# All pass → exit 0; any error → exit 1; warn only → exit 0
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,7 +31,7 @@ for arg in "$@"; do
       sed -n '2,20p' "$0"
       exit 0
       ;;
-    *) warn "未知参数: ${arg}（忽略）" ;;
+    *) warn "Unknown argument: ${arg} (ignored)" ;;
   esac
 done
 
@@ -39,13 +39,13 @@ ERRORS=0
 WARNS=0
 CURL=/usr/bin/curl
 
-# ─── LLM 通路检查函数 ───────────────────────────────────────────────
+# ─── LLM connectivity check functions ───────────────────────────────────────────────
 # check_llm_openai <label> <base_url> <api_key> <model>
-#   OpenAI 兼容：GET {base}/models 只验证 auth+URL，不消耗 token。
-#   base_url 允许带或不带 /v1；这里做归一化。
+#   OpenAI-compatible: GET {base}/models only verifies auth+URL and consumes no tokens.
+#   base_url may or may not include /v1; normalized here.
 check_llm_openai() {
   local label="$1" base="$2" key="$3" model="$4"
-  # 归一化：去尾部 /，去 /messages 或 /chat/completions 后缀
+  # Normalize: strip trailing /, strip the /messages or /chat/completions suffix
   base="${base%/}"
   base="${base%/messages}"
   base="${base%/chat/completions}"
@@ -55,38 +55,38 @@ check_llm_openai() {
     -H "Authorization: Bearer $key" \
     "$url" 2>/dev/null || echo "000")
   if [[ "$code" == "200" ]]; then
-    # 尝试解析 model 是否在列表里（宽松匹配，不匹配也只 warn）
+    # Try to check whether the model is in the list (loose match; a mismatch only warns)
     if grep -q "\"$model\"" "$body_file" 2>/dev/null; then
-      ok "$label OpenAI 协议通路 OK（$model 在 /models 列表内）"
+      ok "$label OpenAI protocol connectivity OK ($model is in the /models list)"
     else
-      ok "$label OpenAI 协议通路 OK（未在 /models 里显式列出 ${model}，业务侧仍可能可用）"
+      ok "$label OpenAI protocol connectivity OK (${model} not explicitly listed in /models, it may still be usable)"
     fi
     rm -f "$body_file"
     return 0
   elif [[ "$code" == "401" || "$code" == "403" ]]; then
-    echo "${C_RED}[error]${C_RST} $label API key 无效（HTTP ${code}）：$url" >&2
+    echo "${C_RED}[error]${C_RST} $label API key invalid (HTTP ${code}): $url" >&2
     head -c 200 "$body_file" >&2; echo >&2
     rm -f "$body_file"
     return 1
   elif [[ "$code" == "404" ]]; then
-    # 部分厂商没有 /models 端点，改用 anthropic 风格或跳过：warn 不 error
-    warn "$label GET /models 404 —— 该厂商可能没有该端点，改用 anthropic 协议检查"
+    # Some providers have no /models endpoint; switch to anthropic style or skip: warn, not error
+    warn "$label GET /models 404 -- this provider may not have the endpoint, falling back to the anthropic protocol check"
     check_llm_anthropic "$label" "$base" "$key" "$model"
     rm -f "$body_file"
     return $?
   else
-    warn "$label 无法访问 ${url}（HTTP=${code}）$(head -c 100 "$body_file" 2>/dev/null)"
+    warn "$label cannot reach ${url} (HTTP=${code})$(head -c 100 "$body_file" 2>/dev/null)"
     rm -f "$body_file"
     return 1
   fi
 }
 
 # check_llm_anthropic <label> <base_url> <api_key> <model>
-#   Anthropic：POST {base}/v1/messages 发 max_tokens=1，消耗 ≤ 10 token 但能同时验 URL/auth/model。
+#   Anthropic: POST {base}/v1/messages with max_tokens=1, consuming ≤ 10 tokens but verifying URL/auth/model at the same time.
 check_llm_anthropic() {
   local label="$1" base="$2" key="$3" model="$4"
   base="${base%/}"
-  # 归一化：若已含 /messages 直接用；否则拼 /v1/messages
+  # Normalize: use as is if it already contains /messages; otherwise append /v1/messages
   local url
   if [[ "$base" == */messages ]]; then
     url="$base"
@@ -105,25 +105,25 @@ check_llm_anthropic() {
     "$url" 2>/dev/null || echo "000")
   case "$code" in
     200)
-      ok "$label Anthropic 协议通路 OK（模型 $model 已应答）"
+      ok "$label Anthropic protocol connectivity OK (model $model responded)"
       rm -f "$body_file"; return 0 ;;
     401|403)
-      echo "${C_RED}[error]${C_RST} $label API key 无效（HTTP ${code}）：$url" >&2
+      echo "${C_RED}[error]${C_RST} $label API key invalid (HTTP ${code}): $url" >&2
       head -c 200 "$body_file" >&2; echo >&2
       rm -f "$body_file"; return 1 ;;
     404)
-      echo "${C_RED}[error]${C_RST} $label URL 不存在（HTTP 404）：$url —— 检查 BASE_URL" >&2
+      echo "${C_RED}[error]${C_RST} $label URL not found (HTTP 404): $url -- check BASE_URL" >&2
       rm -f "$body_file"; return 1 ;;
     400)
-      # 400 常见于模型名不存在或 body 校验失败
+      # 400 is commonly caused by a nonexistent model name or body validation failure
       if grep -qE "model.*not.*found|invalid.*model|model_not_found" "$body_file" 2>/dev/null; then
-        echo "${C_RED}[error]${C_RST} $label 模型名 '$model' 无效（HTTP 400）" >&2
+        echo "${C_RED}[error]${C_RST} $label model name '$model' is invalid (HTTP 400)" >&2
         rm -f "$body_file"; return 1
       fi
-      warn "$label HTTP 400（可能是参数格式问题，非通路错）：$(head -c 150 "$body_file")"
+      warn "$label HTTP 400 (possibly a parameter format issue, not a connectivity error): $(head -c 150 "$body_file")"
       rm -f "$body_file"; return 0 ;;
     *)
-      warn "$label 无法访问 ${url}（HTTP=${code}）$(head -c 100 "$body_file" 2>/dev/null)"
+      warn "$label cannot reach ${url} (HTTP=${code})$(head -c 100 "$body_file" 2>/dev/null)"
       rm -f "$body_file"; return 1 ;;
   esac
 }
@@ -131,22 +131,22 @@ check_llm_anthropic() {
 # check_llm_group <label> <base_url> <api_key> <model> <protocol>
 check_llm_group() {
   local label="$1" base="$2" key="$3" model="$4" proto="${5:-openai}"
-  info "检查 $label 通路（协议=${proto}，base=${base}，model=${model}）..."
+  info "Checking $label connectivity (protocol=${proto}, base=${base}, model=${model})..."
   case "$proto" in
     anthropic) check_llm_anthropic "$label" "$base" "$key" "$model" ;;
     *)         check_llm_openai    "$label" "$base" "$key" "$model" ;;
   esac
 }
 
-# 容器内 curl 验证（可选，容器已运行时才做）
+# In-container curl verification (optional, only when the container is running)
 check_llm_from_container() {
   local container="$1" label="$2" base="$3" key="$4" model="$5" proto="${6:-openai}"
   if ! $DOCKER ps --format '{{.Names}}' | grep -qx "$container"; then
-    return 0  # 容器没跑，跳过（非错误）
+    return 0  # container not running, skipping (not an error)
   fi
-  info "  ↳ 从容器 $container 内部再打一次 $label..."
-  # 关注点是"网络可达"：只要能拿到任何 HTTP 状态码就算通；000 才算不可达。
-  # auth 错在宿主机侧已经报过，容器内不再重复触发 error。
+  info "  ↳ Re-testing $label from inside container $container..."
+  # The focus is "network reachability": getting any HTTP status code counts as reachable; only 000 is unreachable.
+  # Auth errors were already reported on the host side, so they are not raised again from inside the container.
   local url code
   case "$proto" in
     anthropic)
@@ -166,30 +166,30 @@ check_llm_from_container() {
       ;;
   esac
   if [[ "$code" == "000" ]]; then
-    warn "  容器 ${container} 无法访问 ${url}（网络隔离 / DNS 失败）"
+    warn "  container ${container} cannot reach ${url} (network isolation / DNS failure)"
     WARNS=$((WARNS+1))
   else
-    ok "  容器 ${container} → $label 网络可达（HTTP ${code}）"
+    ok "  container ${container} → $label network reachable (HTTP ${code})"
   fi
 }
 
 # 1. docker
 if command -v "$DOCKER" >/dev/null 2>&1 || [[ -x "$DOCKER" ]]; then
-  ok "docker 可用: $DOCKER"
+  ok "docker available: $DOCKER"
 else
   ERRORS=$((ERRORS+1))
-  echo "${C_RED}[error]${C_RST} docker 不可用" >&2
+  echo "${C_RED}[error]${C_RST} docker not available" >&2
 fi
 
 # 2. .env
 if [[ ! -f "$ENV_FILE" ]]; then
   ERRORS=$((ERRORS+1))
-  echo "${C_RED}[error]${C_RST} $ENV_FILE 不存在。执行：cp .env.example .env" >&2
+  echo "${C_RED}[error]${C_RST} $ENV_FILE does not exist. Run: cp .env.example .env" >&2
 else
-  ok ".env 存在"
+  ok ".env exists"
   set -a; source "$ENV_FILE"; set +a
 
-  # 3. 必填参数
+  # 3. Required parameters
   MISSING=()
   for var in \
     MEMORY_CORE_IMAGE MEMORY_HUB_IMAGE PROXY_IMAGE \
@@ -205,66 +205,66 @@ else
   done
   if (( ${#MISSING[@]} > 0 )); then
     ERRORS=$((ERRORS+1))
-    echo "${C_RED}[error]${C_RST} 以下必填参数未设置：${MISSING[*]}" >&2
+    echo "${C_RED}[error]${C_RST} The following required parameters are not set:${MISSING[*]}" >&2
   else
-    ok "所有必填参数已填写"
+    ok "All required parameters are filled in"
   fi
 
-  # 4. 镜像是否本地存在
+  # 4. Whether images exist locally
   for img_var in MEMORY_CORE_IMAGE MEMORY_HUB_IMAGE PROXY_IMAGE; do
     img="${!img_var:-}"
     if [[ -z "$img" ]]; then continue; fi
     if $DOCKER image inspect "$img" >/dev/null 2>&1; then
-      ok "镜像本地已存在: $img"
+      ok "image exists locally: $img"
     else
       WARNS=$((WARNS+1))
-      warn "镜像本地不存在，启动时会 pull: $img"
+      warn "image not present locally, will pull at startup: $img"
     fi
   done
 
-  # 5. 端口占用（仅提醒）
+  # 5. Port usage (reminder only)
   for port_var in MEMORY_CORE_PORT PANEL_PORT KNOWLEDGE_PORT PROXY_PORT; do
     port="${!port_var:-}"
     if [[ -z "$port" ]]; then continue; fi
     if lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
       WARNS=$((WARNS+1))
-      warn "端口 $port ($port_var) 已被占用，启动前请释放或在 .env 改端口"
+      warn "Port $port ($port_var) is already in use; free it or change the port in .env before starting"
     else
-      ok "端口 $port ($port_var) 空闲"
+      ok "Port $port ($port_var) is free"
     fi
   done
 
-  # 6. LLM 通路（默认检查，--skip-llm 跳过）
+  # 6. LLM connectivity (checked by default, --skip-llm to skip)
   if (( SKIP_LLM == 1 )); then
-    info "跳过 LLM 通路检查（--skip-llm）"
+    info "Skipping LLM connectivity check (--skip-llm)"
   elif (( ${#MISSING[@]} > 0 )); then
-    warn "跳过 LLM 通路检查（必填参数未填齐）"
+    warn "Skipping LLM connectivity check (required parameters incomplete)"
   else
     echo ""
-    info "═══ LLM 通路检查 ═══════════════════════════════════════"
+    info "═══ LLM connectivity check ═══════════════════════════════════════"
 
-    # memory 组
-    if ! check_llm_group "memory 组" "$MEMORY_LLM_BASE_URL" "$MEMORY_LLM_API_KEY" \
+    # memory group
+    if ! check_llm_group "memory group" "$MEMORY_LLM_BASE_URL" "$MEMORY_LLM_API_KEY" \
          "$MEMORY_LLM_MODEL" "${MEMORY_LLM_PROTOCOL:-openai}"; then
       ERRORS=$((ERRORS+1))
     fi
-    # 容器已运行则容器内也验一次
-    check_llm_from_container tdai-memory-hub "memory 组 (from container)" \
+    # If the container is running, verify from inside it too
+    check_llm_from_container tdai-memory-hub "memory group (from container)" \
       "$MEMORY_LLM_BASE_URL" "$MEMORY_LLM_API_KEY" "$MEMORY_LLM_MODEL" \
       "${MEMORY_LLM_PROTOCOL:-openai}"
 
-    # proxy 组（如果与 memory 组值完全一样，说明用户填的是同一份，只验 1 次即可）
+    # proxy group (if identical to the memory group, the user entered the same config, so check only once)
     if [[ "$PROXY_UPSTREAM_URL" == "$MEMORY_LLM_BASE_URL" && \
           "$PROXY_UPSTREAM_API_KEY" == "$MEMORY_LLM_API_KEY" && \
           "$PROXY_UPSTREAM_MODEL" == "$MEMORY_LLM_MODEL" ]]; then
-      ok "proxy 组 与 memory 组完全相同，跳过重复检查"
+      ok "proxy group is identical to memory group, skipping duplicate check"
     else
-      # proxy 组默认按 openai 协议（与 config.yaml 一致）
-      if ! check_llm_group "proxy 组" "$PROXY_UPSTREAM_URL" "$PROXY_UPSTREAM_API_KEY" \
+      # proxy group uses the openai protocol by default (consistent with config.yaml)
+      if ! check_llm_group "proxy group" "$PROXY_UPSTREAM_URL" "$PROXY_UPSTREAM_API_KEY" \
            "$PROXY_UPSTREAM_MODEL" openai; then
         ERRORS=$((ERRORS+1))
       fi
-      check_llm_from_container tdai-proxy "proxy 组 (from container)" \
+      check_llm_from_container tdai-proxy "proxy group (from container)" \
         "$PROXY_UPSTREAM_URL" "$PROXY_UPSTREAM_API_KEY" "$PROXY_UPSTREAM_MODEL" openai
     fi
   fi
@@ -272,12 +272,12 @@ fi
 
 echo ""
 if (( ERRORS > 0 )); then
-  echo "${C_RED}✗ ${ERRORS} 个错误，${WARNS} 个警告 —— 无法启动${C_RST}" >&2
+  echo "${C_RED}✗ ${ERRORS} errors, ${WARNS} warnings -- cannot start${C_RST}" >&2
   exit 1
 elif (( WARNS > 0 )); then
-  echo "${C_YLW}⚠ ${WARNS} 个警告 —— 可以启动，但请注意上面的提示${C_RST}"
+  echo "${C_YLW}⚠ ${WARNS} warnings -- can start, but note the messages above${C_RST}"
   exit 0
 else
-  echo "${C_GRN}✓ 全部检查通过 —— 可以直接 ./start-all.sh${C_RST}"
+  echo "${C_GRN}✓ All checks passed -- you can run ./start-all.sh directly${C_RST}"
   exit 0
 fi

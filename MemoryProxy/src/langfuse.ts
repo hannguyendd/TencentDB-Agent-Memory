@@ -1,25 +1,25 @@
 /**
- * Langfuse LLM trace 上报模块（官方 SDK 方式）。
+ * Langfuse LLM trace reporting module (official SDK approach).
  *
- * 使用 Langfuse 官方 SDK（@langfuse/tracing + @langfuse/otel）上报 LLM 调用。
+ * Reports LLM calls using the official Langfuse SDK (@langfuse/tracing + @langfuse/otel).
  *
- * 核心语义：**一个 trace = 一个会话里的一次用户输入（一个 turn）**。
- *   - 同一 turn 内的工具循环（model → tool → model → …）会产生多次 upstream 请求，
- *     它们共享同一个确定性 traceId，因此在 Langfuse 里归并到同一个 trace 下，
- *     每次 LLM 调用是该 trace 下的一个 generation observation。
- *   - traceId 由 `sessionKey + turnSeq` 经 SHA-256 派生（确定性），与官方
- *     `createTraceId(seed)` 的算法逐字节一致（取 SHA-256 hex 前 32 位）。
+ * Core semantics: **one trace = one user input within a session (one turn)**.
+ *   - The tool loop within a turn (model → tool → model → …) produces multiple upstream requests,
+ *     which share the same deterministic traceId and are therefore merged under one trace in Langfuse;
+ *     each LLM call is a generation observation under that trace.
+ *   - The traceId is derived from `sessionKey + turnSeq` via SHA-256 (deterministic), byte-for-byte
+ *     identical to the official `createTraceId(seed)` algorithm (first 32 hex chars of the SHA-256).
  *
- * 跨请求归并的机制：
- *   一个 turn 的多次请求是彼此独立的 HTTP handler 调用，没有共享的 async context。
- *   因此通过 `startObservation(..., { parentSpanContext: { traceId, ... } })` 显式把
- *   每个 generation 挂到已知的确定性 traceId 下（SDK 内部走
- *   `trace.setSpanContext(context.active(), parentSpanContext)`）。
+ * Cross-request merging mechanism:
+ *   The multiple requests of a turn are independent HTTP handler invocations with no shared async context.
+ *   So `startObservation(..., { parentSpanContext: { traceId, ... } })` is used to explicitly attach
+ *   each generation under the known deterministic traceId (internally the SDK goes through
+ *   `trace.setSpanContext(context.active(), parentSpanContext)`).
  *
- * 设计原则：
- *   - Fire-and-forget：span 由 LangfuseSpanProcessor 异步批量导出
- *   - 配置缺失 / SDK 初始化失败时 graceful degradation（全部 no-op）
- *   - 与 Opik 上报完全独立（各用各的 traceId）
+ * Design principles:
+ *   - Fire-and-forget: spans are exported asynchronously in batches by LangfuseSpanProcessor
+ *   - Graceful degradation when config is missing / SDK initialization fails (everything is a no-op)
+ *   - Fully independent of Opik reporting (each uses its own traceId)
  */
 
 import { createHash } from "node:crypto";
@@ -29,18 +29,18 @@ import type { ProxyConfig } from "./types.js";
 import { log } from "./report/log.js";
 
 // ============================
-// 生命周期
+// Lifecycle
 // ============================
 
 let _enabled = false;
 let _initCalled = false;
-// OpenTelemetry NodeSDK 实例（用于优雅关闭时 flush）。
+// OpenTelemetry NodeSDK instance (used to flush on graceful shutdown).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _sdk: { shutdown: () => Promise<void> } | null = null;
 
 /**
- * 初始化 Langfuse 上报。在 server 启动时调用一次，后续调用为 no-op。
- * 返回是否成功启用。
+ * Initialize Langfuse reporting. Called once at server startup; later calls are no-ops.
+ * Returns whether it was enabled successfully.
  */
 export async function initLangfuse(config: ProxyConfig): Promise<boolean> {
   if (_initCalled) return _enabled;
@@ -53,8 +53,8 @@ export async function initLangfuse(config: ProxyConfig): Promise<boolean> {
   }
 
   try {
-    // BatchSpanProcessor 的 maxQueueSize 只能通过 OTel env var 注入（Langfuse 构造器不透传）。
-    // 在 SDK 初始化前设好，确保 BatchSpanProcessor 读到我们的值。
+    // BatchSpanProcessor's maxQueueSize can only be injected via the OTel env var (the Langfuse constructor does not pass it through).
+    // Set it before SDK initialization so BatchSpanProcessor reads our value.
     if (lf.maxQueueSize && !process.env.OTEL_BSP_MAX_QUEUE_SIZE) {
       process.env.OTEL_BSP_MAX_QUEUE_SIZE = String(lf.maxQueueSize);
     }
@@ -69,8 +69,8 @@ export async function initLangfuse(config: ProxyConfig): Promise<boolean> {
       publicKey: lf.publicKey,
       secretKey: lf.secretKey,
       baseUrl,
-      flushAt: lf.flushAt || undefined,           // 每批最大 span 数
-      flushInterval: lf.flushInterval || undefined, // 定时 flush 间隔（秒）
+      flushAt: lf.flushAt || undefined,           // max spans per batch
+      flushInterval: lf.flushInterval || undefined, // timed flush interval (seconds)
     });
 
     const sdk = new NodeSDK({ spanProcessors: [processor] });
@@ -93,7 +93,7 @@ export async function initLangfuse(config: ProxyConfig): Promise<boolean> {
 }
 
 /**
- * 优雅关闭 Langfuse 上报，确保所有待发送 span 已 flush。
+ * Gracefully shut down Langfuse reporting, ensuring all pending spans are flushed.
  */
 export async function shutdownLangfuse(): Promise<void> {
   if (_sdk) {
@@ -109,15 +109,15 @@ export async function shutdownLangfuse(): Promise<void> {
 }
 
 // ============================
-// 确定性 turn traceId
+// Deterministic turn traceId
 // ============================
 
 /**
- * 由 `sessionKey + turnSeq` 派生确定性 traceId（32 位小写 hex）。
+ * Derive a deterministic traceId (32 lowercase hex chars) from `sessionKey + turnSeq`.
  *
- * 与官方 `createTraceId(seed)` 算法一致：SHA-256(seed) 的 hex 取前 32 位。
- * 同一 turn 内每次请求都用相同 (sessionKey, turnSeq) → 得到相同 traceId →
- * 在 Langfuse 中归并到同一个 trace。
+ * Consistent with the official `createTraceId(seed)` algorithm: the first 32 hex chars of SHA-256(seed).
+ * Every request within the same turn uses the same (sessionKey, turnSeq) → gets the same traceId →
+ * merged into the same trace in Langfuse.
  */
 export function langfuseTurnTraceId(sessionKey: string, turnSeq: number): string {
   const seed = `${sessionKey}:${turnSeq}`;
@@ -125,116 +125,116 @@ export function langfuseTurnTraceId(sessionKey: string, turnSeq: number): string
 }
 
 // ============================
-// 上报：generation observation
+// Reporting: generation observation
 // ============================
 
 /**
- * Langfuse turn-trace 上下文 —— 同属一个 turn（一个 Langfuse trace）的所有
- * generation 共享的 trace 级属性。由 handler 构造后传给各上报函数。
+ * Langfuse turn-trace context -- trace-level attributes shared by all generations
+ * belonging to one turn (one Langfuse trace). Constructed by the handler and passed to the reporting functions.
  */
 export interface LangfuseTurnContext {
-  /** 该 turn 的确定性 traceId（langfuseTurnTraceId 生成）。 */
+  /** Deterministic traceId of this turn (generated by langfuseTurnTraceId). */
   traceId: string;
-  /** turn 序号（countHumanTurns）—— 也用于 ClickHouse 按 turn 聚合。 */
+  /** Turn sequence number (countHumanTurns) -- also used for ClickHouse per-turn aggregation. */
   turnSeq: number;
-  /** trace 名。 */
+  /** Trace name. */
   traceName: string;
-  /** trace userId（一般为 keyId）。 */
+  /** trace userId (usually keyId). */
   userId: string;
-  /** trace sessionId（会话隔离键；可据此聚合多个 turn）。 */
+  /** trace sessionId (session isolation key; can be used to aggregate multiple turns). */
   sessionId: string;
   /**
-   * trace 级标签 —— 只放该 turn 内稳定的维度（protocol / stream / session），
-   * 不含随请求变化的路由标签，避免同一 turn 的工具循环请求互相覆盖（last-write-wins）。
+   * Trace-level tags -- only dimensions stable within the turn (protocol / stream / session),
+   * excluding per-request routing tags, so tool-loop requests of the same turn do not overwrite each other (last-write-wins).
    */
   tags: string[];
   /**
-   * 本次请求的 observation 级附加标签 —— 随请求变化，写入 generation 的
-   * observation metadata，而非 trace 级 tags。宿主默认不填充。
+   * Observation-level extra tags for this request -- vary per request, written into the generation's
+   * observation metadata rather than trace-level tags. Not populated by the host by default.
    */
   routeTags: string[];
   /**
-   * 去噪后的最新用户问题 —— 仅在该 turn 首次人类输入请求非空，工具循环延续时为 ""。
-   * 用作 trace 级 input。
+   * The denoised latest user question -- non-empty only on the first human-input request of this turn, "" when the tool loop continues.
+   * Used as the trace-level input.
    */
   userQuery: string;
 }
 
-/** 一次 LLM 调用的上报参数（挂到指定 turn trace 下的 generation）。 */
+/** Reporting parameters of one LLM call (attached as a generation under the given turn trace). */
 export interface LangfuseGenerationReport {
-  /** 所属 turn 的确定性 traceId（langfuseTurnTraceId 生成）。 */
+  /** Deterministic traceId of the turn it belongs to (generated by langfuseTurnTraceId). */
   traceId: string;
-  /** observation 名称（一般为模型名，或 `[internal] <model>`）。 */
+  /** Observation name (usually the model name, or `[internal] <model>`). */
   name: string;
-  /** 模型名。 */
+  /** Model name. */
   model: string;
-  /** ISO 8601 开始时间。 */
+  /** ISO 8601 start time. */
   startTime: string;
-  /** ISO 8601 结束时间。 */
+  /** ISO 8601 end time. */
   endTime: string;
-  /** generation 输入（messages 数组或字符串）。 */
+  /** Generation input (messages array or string). */
   input?: unknown;
-  /** generation 输出（assistant message 或字符串）。 */
+  /** Generation output (assistant message or string). */
   output?: unknown;
-  /** 原始 usage 对象（会被归一化为 Langfuse usageDetails）。 */
+  /** Raw usage object (will be normalized into Langfuse usageDetails). */
   usage?: Record<string, unknown>;
-  /** observation 级别（默认 DEFAULT；失败时传 ERROR）。 */
+  /** Observation level (default DEFAULT; pass ERROR on failure). */
   level?: "DEBUG" | "DEFAULT" | "WARNING" | "ERROR";
-  /** 状态信息（一般用于 ERROR，描述失败原因）。 */
+  /** Status message (usually for ERROR, describing the failure reason). */
   statusMessage?: string;
-  // ── trace 级属性（同一 turn 的多次调用应传相同值；last-write-wins）──
-  /** trace 名。 */
+  // ── trace-level attributes (multiple calls of the same turn should pass the same values; last-write-wins) ──
+  /** Trace name. */
   traceName: string;
-  /** trace userId（一般为 keyId）。 */
+  /** trace userId (usually keyId). */
   userId: string;
-  /** trace sessionId（会话隔离键；Langfuse 上可据此聚合多个 turn）。 */
+  /** trace sessionId (session isolation key; Langfuse can aggregate multiple turns by it). */
   sessionId: string;
-  /** trace 标签。 */
+  /** Trace tags. */
   tags?: string[];
   /**
-   * trace 级 input —— 仅在该 turn 的"首次人类输入"请求传入（传 turn 最初的用户问题）。
-   * 工具循环延续请求应留空，避免把带 tool_result 的请求体覆盖成 trace input。
-   * 内部路由等子步骤也应留空，避免污染 trace 级输入。
+   * Trace-level input -- passed only on the turn's "first human input" request (the turn's original user question).
+   * Tool-loop continuation requests should leave it empty, to avoid overwriting trace input with a request body carrying tool_result.
+   * Sub-steps such as internal routing should also leave it empty, to avoid polluting the trace-level input.
    */
   traceInput?: unknown;
   /**
-   * trace 级 output —— 传该 turn 的最终回答。同一 turn 多次调用 last-write-wins，
-   * 因此最后一次（turn 收尾）的输出会成为 trace output。
+   * Trace-level output -- pass the turn's final answer. Multiple calls in the same turn are last-write-wins,
+   * so the output of the last one (the turn's closing call) becomes the trace output.
    */
   traceOutput?: unknown;
-  /** trace 级 metadata。 */
+  /** Trace-level metadata. */
   traceMetadata?: Record<string, unknown>;
-  /** observation 级 metadata。 */
+  /** Observation-level metadata. */
   observationMetadata?: Record<string, unknown>;
 }
 
 /**
- * 派生一个合法的 phantom parent spanId（16 位 hex，非零）。
- * 用于把 generation 挂到确定性 traceId 下。同一 traceId 始终得到同一 spanId，
- * 因此一个 turn 内所有 generation 的 parent 一致（指向同一个不存在的 root span，
- * Langfuse 据此把它们都视为该 trace 下的顶层 observation）。
+ * Derive a valid phantom parent spanId (16 hex chars, non-zero).
+ * Used to attach generations under the deterministic traceId. The same traceId always yields the same spanId,
+ * so all generations in a turn share the same parent (pointing to the same nonexistent root span,
+ * from which Langfuse treats them all as top-level observations under that trace).
  */
 function deriveParentSpanId(traceId: string): string {
   return traceId.slice(0, 16);
 }
 
 /**
- * 归一化原始 LLM usage → Langfuse usageDetails（Record<string, number>）。
+ * Normalize raw LLM usage → Langfuse usageDetails (Record<string, number>).
  *
- * Token 口径与 ClickHouse 的 `buildClickHouseRow` 保持一致（此处独立复刻，不跨模块依赖），
- * 覆盖 Anthropic / OpenAI / DeepSeek 三种 usage 格式：
- *   - Anthropic(TokenHub)：`input_tokens` 已排除 cache，总输入 = input + cache_read + cache_write，
- *     且响应无 `total_tokens`，需回退为 prompt + completion。
- *   - OpenAI / DeepSeek：`prompt_tokens` 即含 cache 的总输入，通常也带 `total_tokens`。
+ * Token accounting matches ClickHouse's `buildClickHouseRow` (reimplemented independently here, no cross-module dependency),
+ * covering three usage formats: Anthropic / OpenAI / DeepSeek:
+ *   - Anthropic (TokenHub): `input_tokens` already excludes cache, total input = input + cache_read + cache_write,
+ *     and the response has no `total_tokens`, so it must fall back to prompt + completion.
+ *   - OpenAI / DeepSeek: `prompt_tokens` is the total input including cache, and usually also carries `total_tokens`.
  *
- * 输出遵循 Langfuse 惯例（各分项之和 = total，避免与内置 cost 计算重复计数）：
- *   - `input`：未命中缓存的输入（= 总输入 − cache_read − cache_write），按 input 单价计费
- *   - `cache_read_input_tokens` / `cache_creation_input_tokens`：缓存读 / 写
- *   - `output`：输出
- *   - `total`：总 token（= 总输入 + 输出）
+ * Output follows Langfuse convention (sum of parts = total, avoiding double counting with built-in cost calculation):
+ *   - `input`: uncached input (= total input − cache_read − cache_write), billed at the input unit price
+ *   - `cache_read_input_tokens` / `cache_creation_input_tokens`: cache reads / writes
+ *   - `output`: output
+ *   - `total`: total tokens (= total input + output)
  *
- * 修复要点：此前 `total = input_tokens + output_tokens` 对 Anthropic 会漏掉 cache token
- * （cache 常占绝大多数），导致 Langfuse 的 total 少一到两个数量级。
+ * Fix note: previously `total = input_tokens + output_tokens` missed cache tokens for Anthropic
+ * (cache often accounts for the vast majority), making Langfuse's total one to two orders of magnitude too small.
  *
  * Exported for unit testing.
  */
@@ -249,15 +249,15 @@ export function normalizeUsageDetails(usage: Record<string, unknown>): Record<st
     num(usage.prompt_cache_write_tokens) ||
     num(usage.cache_creation_input_tokens);
 
-  // 总输入（含缓存）：OpenAI/DeepSeek 取 prompt_tokens；
-  // Anthropic 无 prompt_tokens，用 input_tokens(已排除 cache) 加回 cache_read + cache_write。
+  // Total input (including cache): OpenAI/DeepSeek take prompt_tokens;
+  // Anthropic has no prompt_tokens, so use input_tokens (cache excluded) plus cache_read + cache_write.
   const inputTokens = num(usage.input_tokens);
   const promptTokens = num(usage.prompt_tokens) || inputTokens + cacheRead + cacheWrite;
   const outputTokens = num(usage.completion_tokens) || num(usage.output_tokens);
-  // 总 token：优先上游给的 total_tokens，否则 prompt + completion（prompt 已含缓存）。
+  // Total tokens: prefer the total_tokens given by upstream, otherwise prompt + completion (prompt already includes cache).
   const totalTokens = num(usage.total_tokens) || promptTokens + outputTokens;
 
-  // 未命中缓存的输入（分项之和 = total，不与 cache_* 重复计数）。
+  // Uncached input (sum of parts = total, no double counting with cache_*).
   const uncachedInput = Math.max(promptTokens - cacheRead - cacheWrite, 0);
 
   const out: Record<string, number> = {
@@ -270,21 +270,21 @@ export function normalizeUsageDetails(usage: Record<string, unknown>): Record<st
   return out;
 }
 
-/** 取数值字段（非数值按 0），与 ClickHouse 的 `num()` 口径一致。 */
+/** Take a numeric field (non-numeric as 0), matching ClickHouse's `num()` semantics. */
 function num(v: unknown): number {
   return typeof v === "number" ? v : 0;
 }
 
-/** 把任意值转为可写入 OTel 属性的字符串。 */
+/** Convert any value into a string writable as an OTel attribute. */
 function asAttrString(v: unknown): string {
   return typeof v === "string" ? v : JSON.stringify(v);
 }
 
 /**
- * 上报一次 LLM 调用：在指定 turn trace 下创建一个 generation observation，
- * 并把 trace 级属性写到该 span 上（SDK 会据此设置所属 trace 的字段）。
+ * Report one LLM call: create a generation observation under the given turn trace,
+ * and write trace-level attributes onto that span (the SDK uses them to set the fields of the owning trace).
  *
- * 失败静默（仅 debug 日志），绝不影响业务请求。
+ * Failures are silent (debug log only) and never affect business requests.
  */
 export function langfuseReportGeneration(report: LangfuseGenerationReport): void {
   if (!_enabled) return;
@@ -313,7 +313,7 @@ export function langfuseReportGeneration(report: LangfuseGenerationReport): void
       },
     );
 
-    // trace 级属性：直接写 OTel 属性，SDK 会传播到所属 trace。
+    // Trace-level attributes: write OTel attributes directly; the SDK propagates them to the owning trace.
     const span = generation.otelSpan;
     span.setAttribute(LangfuseOtelSpanAttributes.TRACE_NAME, report.traceName);
     span.setAttribute(LangfuseOtelSpanAttributes.TRACE_USER_ID, report.userId);
@@ -321,8 +321,8 @@ export function langfuseReportGeneration(report: LangfuseGenerationReport): void
     if (report.tags && report.tags.length > 0) {
       span.setAttribute(LangfuseOtelSpanAttributes.TRACE_TAGS, JSON.stringify(report.tags));
     }
-    // trace 级 input/output 与 observation 级解耦：仅在显式传入时写。
-    // 首次人类输入请求传 traceInput（turn 最初的问题）；收尾请求传 traceOutput。
+    // Trace-level input/output are decoupled from observation-level: written only when explicitly passed.
+    // The first human-input request passes traceInput (the turn's original question); the closing request passes traceOutput.
     if (report.traceInput !== undefined) {
       span.setAttribute(LangfuseOtelSpanAttributes.TRACE_INPUT, asAttrString(report.traceInput));
     }
@@ -342,31 +342,31 @@ export function langfuseReportGeneration(report: LangfuseGenerationReport): void
   }
 }
 
-/** 一次失败请求的上报参数（上游错误 / 转发失败）。 */
+/** Reporting parameters of one failed request (upstream error / forwarding failure). */
 export interface LangfuseFailureReport {
-  /** turn 上下文。 */
+  /** Turn context. */
   lf: LangfuseTurnContext;
-  /** observation 名称（一般为模型名）。 */
+  /** Observation name (usually the model name). */
   model: string;
-  /** ISO 8601 开始时间。 */
+  /** ISO 8601 start time. */
   startTime: string;
-  /** ISO 8601 结束时间。 */
+  /** ISO 8601 end time. */
   endTime: string;
-  /** 该请求的输入 messages（用于排查）。 */
+  /** Input messages of this request (for troubleshooting). */
   input?: unknown;
-  /** HTTP 状态码（转发异常时可缺省）。 */
+  /** HTTP status code (may be omitted on forwarding exceptions). */
   status?: number;
-  /** 失败描述（如错误体片段或 "timeout/error"）。 */
+  /** Failure description (e.g. an error body snippet or "timeout/error"). */
   statusMessage: string;
-  /** 额外标签（如 ["error"]）。 */
+  /** Extra tags (e.g. ["error"]). */
   extraTags?: string[];
-  /** observation 级 metadata。 */
+  /** Observation-level metadata. */
   observationMetadata?: Record<string, unknown>;
 }
 
 /**
- * 上报一次失败请求：在所属 turn trace 下创建一个 ERROR generation。
- * 不设 trace 级 input/output（失败不代表 turn 的最终结果），仅记录该次失败本身。
+ * Report one failed request: create an ERROR generation under the owning turn trace.
+ * No trace-level input/output is set (failure does not represent the turn's final result); only the failure itself is recorded.
  */
 export function langfuseReportFailure(report: LangfuseFailureReport): void {
   if (!_enabled) return;
@@ -388,7 +388,7 @@ export function langfuseReportFailure(report: LangfuseFailureReport): void {
     userId: lf.userId,
     sessionId: lf.sessionId,
     tags: report.extraTags && report.extraTags.length > 0 ? [...lf.tags, ...report.extraTags] : lf.tags,
-    // trace 级 input 仍记录用户问题（便于在失败 trace 上看到原始诉求）；不写 output。
+    // Trace-level input still records the user question (so the original intent is visible on a failed trace); output is not written.
     traceInput: lf.userQuery || undefined,
     observationMetadata: {
       ...report.observationMetadata,

@@ -1,30 +1,30 @@
 /**
- * stages/response-tail-fix.ts — 客户端特化的响应尾字节兼容层。
+ * stages/response-tail-fix.ts — client-specific response tail-byte compatibility layer.
  *
- * 上游合入的 a08d67e9 dsh SSE 严格 parser 修复原本内联在 anthropicHandler.ts,
- * 迁到 pipeline 后应按重构标准抽成 stage 让所有 runner 都能复用同一份实现,
- * 而非在 anthropic runner 里定义了 openai-chat 未来无法复用。
+ * The upstream-merged a08d67e9 dsh SSE strict parser fix was originally inlined in anthropicHandler.ts;
+ * after migrating to the pipeline it should be extracted into a stage per the refactoring standard so all runners can reuse the same implementation,
+ * instead of being defined in the anthropic runner where openai-chat cannot reuse it in the future.
  *
- * 目前只有一条规则 (dsh v0.2 需要 SSE 尾补 \n), 未来若有其他客户端 quirk,
- * 都在这里扩展 (加 case), caller 只调 stageResponseTailFix() 就够。
+ * Currently there is only one rule (dsh v0.2 needs SSE to be padded with a trailing \n); if other client quirks appear in the future,
+ * extend them here (add a case), and the caller only needs to call stageResponseTailFix().
  */
 
 /**
- * 客户端特化 SSE 尾字节修补。
+ * Client-specific SSE tail-byte patch.
  *
- * 目前唯一规则:
- *   agentSource === "dsh" + isStream + response.body 非空 →
- *     在 stream 末尾补一个 \n, 让最后一个 event 满足 SSE `\n\n` 结束规范。
+ * The only rule currently:
+ *   agentSource === "dsh" + isStream + response.body non-empty ->
+ *     append a \n at the end of the stream so the last event satisfies the SSE `\n\n` termination spec.
  *
- * 背景 (a08d67e9):
- *   dsh v0.2 llm-deepseek-api-key adapter 的 SSE parser (源码
- *   `packages/llm/llm-deepseek/src/translate.ts:165`) 严格判 `\n\n` 结束 event,
- *   proxy 的 mem-command shared response builder (mem-command/response-builder.ts)
- *   末尾 `lines.join('\n')` 只补一个 `\n`, dsh 收不到 message_stop → STREAM_CLOSED。
- *   CC / Anthropic 官方 SDK parser 宽松, 单 `\n` 也能收到 terminal event, 所以
- *   shared builder 不能动 (改了会影响 CC), 由本 stage 只对 dsh 补一字节。
+ * Background (a08d67e9):
+ *   The SSE parser of the dsh v0.2 llm-deepseek-api-key adapter (source
+ *   `packages/llm/llm-deepseek/src/translate.ts:165`) strictly checks `\n\n` to end an event,
+ *   while the proxy's mem-command shared response builder (mem-command/response-builder.ts)
+ *   only appends one `\n` via `lines.join('\n')` at the end, so dsh never receives message_stop -> STREAM_CLOSED.
+ *   The CC / Anthropic official SDK parsers are lenient and a single `\n` still gets the terminal event, so
+ *   the shared builder must not be changed (changing it would affect CC); this stage pads one byte for dsh only.
  *
- * CC / CB / WB / opencode / codex 完全零影响 (首行硬 gate 挡住)。
+ * Zero impact on CC / CB / WB / opencode / codex (blocked by the hard gate on the first line).
  */
 export function stageResponseTailFix(
   response: Response,
@@ -42,7 +42,7 @@ export function stageResponseTailFix(
           if (done) break;
           controller.enqueue(value);
         }
-        // 补上末尾的第 2 个 `\n`, 让最后一个 event 满足 SSE `\n\n` 结束规范
+        // append the 2nd trailing `\n` so the last event satisfies the SSE `\n\n` termination spec
         controller.enqueue(new TextEncoder().encode("\n"));
       } catch (err) {
         controller.error(err);

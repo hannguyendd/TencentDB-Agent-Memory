@@ -404,12 +404,12 @@ export class OffloadContextEngine {
   private formatContextForL1(prompt: string, recentMsgs: RecentMessage[]): string {
     const parts: string[] = [];
     if (recentMsgs.length > 0) {
-      parts.push("历史消息，可作为参考：");
+      parts.push("Conversation history, for reference:");
       for (const m of recentMsgs) {
         parts.push(`[${m.role === "user" ? "User" : "Assistant"}]: ${m.content}`);
       }
     }
-    parts.push(`\n最新user message：\n[User]: ${prompt.slice(0, 500)}`);
+    parts.push(`\nLatest user message:\n[User]: ${prompt.slice(0, 500)}`);
     return parts.join("\n");
   }
 

@@ -27,18 +27,18 @@ export interface LlmConfig {
    * Per-instance bindings always override this default.
    */
   mode: "proxy" | "custom";
-  /** LLM 协议：openai 走 /chat/completions，anthropic 走 /messages。默认 openai（向后兼容）。 */
+  /** LLM protocol: openai uses /chat/completions, anthropic uses /messages. Defaults to openai (backward compatible). */
   protocol: "openai" | "anthropic";
   provider: string;
   apiKey: string;
   model: string;
   baseUrl: string;
   maxTokens: number;
-  /** LLM request timeout in ms. Defaults to 1200000 (20min) — reasoning 模型需要更长时间。 */
+  /** LLM request timeout in ms. Defaults to 1200000 (20min) — reasoning models need longer. */
   timeoutMs: number;
   /**
-   * 是否用流式请求(streamText)调用上游。默认 false(非流式)。
-   * 个别只接受流式请求的兼容上游需置 true。per-instance binding 不覆盖此字段(部署级开关)。
+   * Whether to call the upstream with streaming requests (streamText). Defaults to false (non-streaming).
+   * Some compatible upstreams that only accept streaming requests need this set to true. The per-instance binding does not override this field (deployment-level switch).
    */
   stream?: boolean;
 }
@@ -61,8 +61,8 @@ export interface ServiceConfig {
   port: number;
   /**
    * Service-to-service auth.
-   * serviceKey 为空 = 不启用鉴权（向后兼容本地/开发部署）；
-   * 非空 = /v3 下除只读白名单外的端点均要求 `Authorization: Bearer <serviceKey>`。
+   * Empty serviceKey = auth disabled (backward compatible with local/dev deployments);
+   * Non-empty = all endpoints under /v3 except the read-only whitelist require `Authorization: Bearer <serviceKey>`.
    */
   auth: {
     serviceKey: string;
@@ -102,8 +102,8 @@ function clamp(n: number, min: number, max: number): number {
 }
 
 /**
- * 单 wiki 内阶段1 并发 LLM 抽取数。
- * KNOWLEDGE_WIKI_INGEST_CONCURRENCY，默认 3，clamp 1~10。
+ * Number of concurrent stage-1 LLM extractions within a single wiki.
+ * KNOWLEDGE_WIKI_INGEST_CONCURRENCY, default 3, clamped to 1~10.
  */
 export function getIngestConcurrency(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_WIKI_INGEST_CONCURRENCY ?? "", 10);
@@ -111,8 +111,8 @@ export function getIngestConcurrency(env: NodeJS.ProcessEnv = process.env): numb
 }
 
 /**
- * 全局 LLM 最大并发数（跨所有 wiki 的 extract + merge）。
- * KNOWLEDGE_LLM_GLOBAL_CONCURRENCY，默认 5，clamp 1~20。
+ * Global max LLM concurrency (across extract + merge of all wikis).
+ * KNOWLEDGE_LLM_GLOBAL_CONCURRENCY, default 5, clamped to 1~20.
  */
 export function getGlobalLlmConcurrency(env: NodeJS.ProcessEnv = process.env): number {
   const raw = parseInt(env.KNOWLEDGE_LLM_GLOBAL_CONCURRENCY ?? "", 10);

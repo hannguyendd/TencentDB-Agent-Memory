@@ -1,13 +1,13 @@
 /**
- * 公共类型 + 纯函数。
- * 无 React 依赖，方便被 hooks / 各 Dialog 子模块共用。
+ * Shared types + pure functions.
+ * No React dependency, easy to share between hooks / Dialog submodules.
  */
 
 import { isTeamAdmin, isGlobalAdmin, type Team } from '@/services';
 
 export const MAX_IMPORTED_CHAT_MEMORIES = 2;
 
-/** 排除 agent 自身默认拥有的 chat_memory（chat_memory-{team}-{agent}），得到「额外导入」的部分。 */
+/** Exclude the chat_memory an agent owns by default (chat_memory-{team}-{agent}) to get the "additionally imported" part. */
 export function importedChatMemoryIds(teamId: string, agentId: string, ids: string[]): string[] {
   const selfChatMemoryId = `chat_memory-${teamId}-${agentId}`;
   return Array.from(new Set(ids.filter((id) => id !== selfChatMemoryId)));
@@ -65,7 +65,7 @@ export function emptyMountedCounts(): AgentMountedCounts {
   return { skills: 0, code_graph: 0, llm_wiki: 0, chat_memory: 0 };
 }
 
-/** 移除成员权限：全局 admin / team owner / team admin 可以移除非 owner 成员；owner 不可被移除（含全局 admin）。 */
+/** Remove-member permission: global admin / team owner / team admin can remove non-owner members; an owner cannot be removed (including by global admin). */
 export function canRemoveMember(
   team: Team,
   targetUserId: string,

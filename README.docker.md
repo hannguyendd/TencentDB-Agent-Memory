@@ -1,50 +1,50 @@
 # TencentDB-Agent-Memory
 
-AI Agent 长期记忆服务，为任意 Agent 框架提供四层渐进式记忆能力（L0 对话 → L1 原子记忆 → L2 场景归纳 → L3 用户画像）。
+Long-term memory service for AI Agents, providing four-layer progressive memory for any Agent framework (L0 conversations → L1 atomic memories → L2 scene summaries → L3 user profile).
 
-## 镜像信息
+## Image Info
 
-| 项目 | 值 |
+| Item | Value |
 |------|---|
-| 镜像名 | `tencentdb-agent-memory` |
-| 基础镜像 | `node:22-slim` |
-| 大小 | ~920MB |
-| 端口 | 8420 |
-| 运行用户 | tdai (uid 10001) |
+| Image name | `tencentdb-agent-memory` |
+| Base image | `node:22-slim` |
+| Size | ~920MB |
+| Port | 8420 |
+| Run as user | tdai (uid 10001) |
 | PID 1 | tini |
 
-## 快速开始
+## Quick Start
 
-以下命令默认在 `MemoryCore/` 目录内执行；如果你位于仓库根目录，请先 `cd MemoryCore`。
+The commands below are run from the `MemoryCore/` directory by default; if you are at the repository root, run `cd MemoryCore` first.
 
-### 1. 构建镜像
+### 1. Build the image
 
 ```bash
 docker build -t tencentdb-agent-memory:latest .
 ```
 
-### 2. 准备配置文件
+### 2. Prepare the config file
 
-项目提供两个配置模板：
+The project provides two config templates:
 
-| 模板 | 适用场景 |
+| Template | Use case |
 |------|---------|
-| `tdai-gateway.standalone.yaml` | 本地开发、单机部署，零外部依赖 |
-| `tdai-gateway.service.yaml` | K8s 多副本、多租户云服务 |
+| `tdai-gateway.standalone.yaml` | Local development, single-node deployment, zero external dependencies |
+| `tdai-gateway.service.yaml` | K8s multi-replica, multi-tenant cloud service |
 
-复制模板并修改：
+Copy a template and edit it:
 
 ```bash
-# 单机模式
+# Standalone mode
 cp tdai-gateway.standalone.yaml tdai-gateway.yaml
 
-# 服务模式
+# Service mode
 cp tdai-gateway.service.yaml tdai-gateway.yaml
 ```
 
-### 3. 启动容器
+### 3. Start the container
 
-**Standalone 模式（最简）：**
+**Standalone mode (simplest):**
 
 ```bash
 docker run -d --name agent-memory \
@@ -54,13 +54,13 @@ docker run -d --name agent-memory \
   tencentdb-agent-memory:latest
 ```
 
-**Service 模式（需要 Redis）：**
+**Service mode (requires Redis):**
 
 ```bash
-# 启动 Redis（如果没有远端 Redis）
+# Start Redis (if you have no remote Redis)
 docker run -d --name redis -p 6379:6379 redis:7-alpine
 
-# 启动 mock-shark（本地提供 VDB/COS 凭证）
+# Start mock-shark (provides VDB/COS credentials locally)
 VDB_ENDPOINT=http://your-vdb:8100 \
 VDB_API_KEY=xxx \
 VDB_DATABASE=your-db \
@@ -70,7 +70,7 @@ COS_SECRET_ID=xxx \
 COS_SECRET_KEY=xxx \
 npx tsx scripts/mock-shark-server.ts &
 
-# 启动 Memory Service
+# Start Memory Service
 docker run -d --name agent-memory \
   -v $(pwd)/tdai-gateway.real.yaml:/data/config/tdai-gateway.yaml:ro \
   -e TDAI_LLM_API_KEY=sk-your-key \
@@ -78,19 +78,19 @@ docker run -d --name agent-memory \
   tencentdb-agent-memory:latest
 ```
 
-**Docker Compose 一键启动（含 Redis）：**
+**Docker Compose one-command start (includes Redis):**
 
 ```bash
 TDAI_LLM_API_KEY=sk-your-key docker compose -f docker-compose.local.yaml up --build
 ```
 
-### 4. 验证服务
+### 4. Verify the service
 
 ```bash
 curl http://localhost:8420/health
 ```
 
-正常返回：
+Expected response:
 
 ```json
 {
@@ -104,25 +104,25 @@ curl http://localhost:8420/health
 }
 ```
 
-## 配置方式
+## Configuration
 
-### 配置文件 + 环境变量（推荐）
+### Config file + environment variables (recommended)
 
-所有配置项同时支持 **YAML 配置文件** 和 **环境变量**，环境变量优先级更高。
+All settings support both a **YAML config file** and **environment variables**; environment variables take precedence.
 
-容器内配置文件路径由 `TDAI_GATEWAY_CONFIG` 环境变量指定，默认 `/data/config/tdai-gateway.yaml`。
+The config file path inside the container is set by the `TDAI_GATEWAY_CONFIG` environment variable, defaulting to `/data/config/tdai-gateway.yaml`.
 
 ```
 ┌─────────────────────────────┐
-│  环境变量 (最高优先级)        │  ← Secret 敏感凭证
+│  Env vars (highest priority) │  ← Secret credentials
 ├─────────────────────────────┤
-│  tdai-gateway.yaml 配置文件  │  ← ConfigMap 挂载
+│  tdai-gateway.yaml config    │  ← ConfigMap mount
 ├─────────────────────────────┤
-│  代码默认值                  │  ← 兜底
+│  Code defaults               │  ← Fallback
 └─────────────────────────────┘
 ```
 
-### 配置文件结构
+### Config file structure
 
 ```yaml
 deployMode: service          # standalone | service
@@ -131,16 +131,16 @@ server:
   port: 8420
   host: "0.0.0.0"
 
-llm:                         # LLM API (OpenAI 兼容)
+llm:                         # LLM API (OpenAI-compatible)
   baseUrl: "https://api.lkeap.cloud.tencent.com/v1"
   apiKey: "${TDAI_LLM_API_KEY}"
   model: "deepseek-v3.2"
 
-redis:                       # Redis (service 模式必需)
+redis:                       # Redis (required in service mode)
   host: "redis:6379"
   keyPrefix: "tdai_memory"
 
-shark:                       # Shark 配置中心 (下发 VDB/COS 凭证)
+shark:                       # Shark config center (issues VDB/COS credentials)
   baseUrl: "http://shark:8000"
 
 scanner:                     # Timer Scanner
@@ -149,7 +149,7 @@ scanner:                     # Timer Scanner
 worker:                      # Pipeline Worker
   pollMs: 200
 
-memory:                      # 记忆引擎调参
+memory:                      # Memory engine tuning
   pipeline:
     everyNConversations: 5
     enableWarmup: true
@@ -158,37 +158,37 @@ memory:                      # 记忆引擎调参
     strategy: "hybrid"
 ```
 
-完整配置参考 `tdai-gateway.standalone.yaml` 和 `tdai-gateway.service.yaml`。
+See `tdai-gateway.standalone.yaml` and `tdai-gateway.service.yaml` for the full configuration.
 
-### 环境变量与配置文件对照表
+### Environment variable to config file mapping
 
-| 环境变量 | YAML 路径 | 默认值 | 说明 |
+| Environment variable | YAML path | Default | Description |
 |---------|----------|--------|------|
-| `TDAI_DEPLOY_MODE` | `deployMode` | `standalone` | 部署模式 |
-| `TDAI_GATEWAY_CONFIG` | — | `/data/config/tdai-gateway.yaml` | 配置文件路径 |
+| `TDAI_DEPLOY_MODE` | `deployMode` | `standalone` | Deploy mode |
+| `TDAI_GATEWAY_CONFIG` | — | `/data/config/tdai-gateway.yaml` | Config file path |
 | `TDAI_LLM_API_KEY` | `llm.apiKey` | — | LLM API Key |
-| `TDAI_LLM_BASE_URL` | `llm.baseUrl` | `https://api.openai.com/v1` | LLM 地址 |
-| `TDAI_LLM_MODEL` | `llm.model` | `gpt-4o` | 模型名 |
-| `REDIS_HOST` | `redis.host` | `127.0.0.1` | Redis 地址 |
-| `REDIS_PORT` | `redis.port` | `6379` | Redis 端口 |
-| `REDIS_PASSWORD` | `redis.password` | — | Redis 密码 |
-| `REDIS_KEY_PREFIX` | `redis.keyPrefix` | `tdai_memory` | Key 前缀 |
-| `SHARK_BASE_URL` | `shark.baseUrl` | — | Shark 地址 |
-| `STATE_BACKEND` | `stateBackend` | 自动 | `redis` / `local` |
-| `SCANNER_INTERVAL_MS` | `scanner.intervalMs` | `500` | 扫描间隔 |
-| `WORKER_POLL_MS` | `worker.pollMs` | `200` | Worker 轮询 |
-| `COS_DOMAIN` | `cos.domain` | — | COS 内网域名 |
+| `TDAI_LLM_BASE_URL` | `llm.baseUrl` | `https://api.openai.com/v1` | LLM URL |
+| `TDAI_LLM_MODEL` | `llm.model` | `gpt-4o` | Model name |
+| `REDIS_HOST` | `redis.host` | `127.0.0.1` | Redis host |
+| `REDIS_PORT` | `redis.port` | `6379` | Redis port |
+| `REDIS_PASSWORD` | `redis.password` | — | Redis password |
+| `REDIS_KEY_PREFIX` | `redis.keyPrefix` | `tdai_memory` | Key prefix |
+| `SHARK_BASE_URL` | `shark.baseUrl` | — | Shark URL |
+| `STATE_BACKEND` | `stateBackend` | auto | `redis` / `local` |
+| `SCANNER_INTERVAL_MS` | `scanner.intervalMs` | `500` | Scan interval |
+| `WORKER_POLL_MS` | `worker.pollMs` | `200` | Worker poll interval |
+| `COS_DOMAIN` | `cos.domain` | — | COS internal domain |
 
-## K8s / TKE 部署
+## K8s / TKE Deployment
 
-本仓库当前未提交可直接应用的 Kubernetes manifests；下面列出 K8s/TKE 部署所需的核心配置做法：
+This repository does not currently include ready-to-apply Kubernetes manifests; the key configuration steps for a K8s/TKE deployment are listed below:
 
-1. **ConfigMap** 挂载 `tdai-gateway.yaml` 到 `/app/config/`
-2. **Secret** 通过环境变量注入 `TDAI_LLM_API_KEY` + `REDIS_PASSWORD`
-3. **Deployment** 设置 `TDAI_GATEWAY_CONFIG=/data/config/tdai-gateway.yaml`
+1. **ConfigMap**: mount `tdai-gateway.yaml` at `/app/config/`
+2. **Secret**: inject `TDAI_LLM_API_KEY` + `REDIS_PASSWORD` via environment variables
+3. **Deployment**: set `TDAI_GATEWAY_CONFIG=/data/config/tdai-gateway.yaml`
 
 ```yaml
-# Deployment 中的关键配置
+# Key settings in the Deployment
 env:
   - name: TDAI_GATEWAY_CONFIG
     value: /data/config/tdai-gateway.yaml
@@ -207,19 +207,19 @@ volumes:
       name: tdai-memory-config
 ```
 
-## API 概览
+## API Overview
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |------|------|------|
-| GET | `/health` | 健康检查 |
-| POST | `/recall` | 记忆召回 |
-| POST | `/capture` | 写入对话 |
-| POST | `/search/memories` | L1 记忆搜索 |
-| POST | `/search/conversations` | L0 对话搜索 |
-| POST | `/session/end` | 结束会话 |
-| POST | `/v2/*` | v2 多租户 API（需 Bearer Token） |
+| GET | `/health` | Health check |
+| POST | `/recall` | Memory recall |
+| POST | `/capture` | Write conversation |
+| POST | `/search/memories` | L1 memory search |
+| POST | `/search/conversations` | L0 conversation search |
+| POST | `/session/end` | End session |
+| POST | `/v2/*` | v2 multi-tenant API (requires Bearer Token) |
 
-## 架构
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -227,7 +227,7 @@ volumes:
 │                                                      │
 │  ┌──────────┐  ┌──────────────┐  ┌───────────────┐  │
 │  │ Gateway  │  │ TimerScanner │  │ PipelineWorker│  │
-│  │ HTTP API │  │ 500ms 扫描   │  │ 竞争消费      │  │
+│  │ HTTP API │  │ 500ms scan   │  │ competing    │  │
 │  └────┬─────┘  └──────┬───────┘  └──────┬────────┘  │
 │       │               │                 │            │
 │  ┌────▼─────────────────────────────────▼────────┐  │
@@ -236,28 +236,28 @@ volumes:
 │       │                                              │
 │  ┌────▼───────────┐  ┌────────────┐  ┌───────────┐  │
 │  │  TdaiCore      │  │ StorePool  │  │ COS       │  │
-│  │  L0→L1→L2→L3   │  │ VDB 连接池 │  │ 对象存储  │  │
+│  │  L0→L1→L2→L3   │  │ VDB pool   │  │ object store│  │
 │  └────────────────┘  └────────────┘  └───────────┘  │
 └─────────────────────────────────────────────────────┘
          │                    │               │
     ┌────▼────┐         ┌────▼────┐     ┌────▼────┐
     │  LLM    │         │  TCVDB  │     │  COS    │
-    │ API     │         │ 向量库   │     │ 对象存储│
+    │ API     │         │ vector DB│     │ obj store│
     └─────────┘         └─────────┘     └─────────┘
 ```
 
-## 文件结构
+## File Structure
 
 ```
 .
 ├── MemoryCore/
-│   ├── Dockerfile                       # 镜像构建
-│   ├── docker-compose.local.yaml        # 本地一键测试 (含 Redis)
-│   ├── tdai-gateway.standalone.yaml     # Standalone 配置模板
-│   ├── tdai-gateway.service.yaml        # Service 配置模板
-│   ├── tdai-gateway.real.yaml           # 本地测试配置 (连真实服务)
-│   ├── scripts/mock-shark-server.ts     # Mock Shark (本地开发)
-│   └── src/gateway/server.ts            # 服务入口
+│   ├── Dockerfile                       # Image build
+│   ├── docker-compose.local.yaml        # Local one-command test (includes Redis)
+│   ├── tdai-gateway.standalone.yaml     # Standalone config template
+│   ├── tdai-gateway.service.yaml        # Service config template
+│   ├── tdai-gateway.real.yaml           # Local test config (connects to real services)
+│   ├── scripts/mock-shark-server.ts     # Mock Shark (local development)
+│   └── src/gateway/server.ts            # Service entry point
 ```
 
 ## License

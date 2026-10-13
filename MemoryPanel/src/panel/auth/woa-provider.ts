@@ -30,9 +30,9 @@ export interface WoaProviderConfig {
   logoutUrl: string;
   paasId: string;
   /**
-   * Core `meta_users.auth_provider` 写入域标识（对齐 `PanelAuthConfig.woa.authProvider`）。
-   * 建号 / 反查用同一值；构造 Provider 时由 Service 层从 config 注入。
-   * 兼容：老调用方未传时视为 'local'（与 Core 默认对齐），行为等价。
+   * Domain identifier written to Core `meta_users.auth_provider` (aligned with `PanelAuthConfig.woa.authProvider`).
+   * The same value is used for account creation and lookup; the Service layer injects it from config when constructing the Provider.
+   * Compatibility: if an old caller does not pass it, it is treated as 'local' (aligned with the Core default); behavior is equivalent.
    */
   authProvider?: string;
 }
@@ -48,10 +48,10 @@ export class WoaProvider implements HeaderInjectedProvider {
   readonly displayName = 'WOA / iOA';
   readonly authProviderDomain: string;
   /**
-   * 上游网关注入身份的请求头名。
+   * Name of the request header through which the upstream gateway injects identity.
    *
-   * 硬编字面量（不做默认值 fallback）：这是 WOA/iOA 网关的固定协议头，
-   * 换协议就换 Provider 类，而不是把它变成配置。
+   * Hard-coded literal (no default fallback): this is the fixed protocol header of the WOA/iOA gateway;
+   * a different protocol means a different Provider class, not turning it into configuration.
    */
   readonly ingressHeaderName = 'x-tai-identity';
 
@@ -63,9 +63,9 @@ export class WoaProvider implements HeaderInjectedProvider {
       throw new Error('PANEL_AUTH_WOA_APP_URL is required when WOA auth is enabled');
     }
     if (config.enabled) {
-      // APP_URL 是**我方**面板的对外地址（WOA 认证后回跳到这里），不是 WOA 的站点，
-      // 因此不能套用"WOA 只注册 https"的约束：内网/本地部署用 http 是合法的。
-      // 这里只校验它必须是绝对 URL —— WOA 需要把浏览器重定向回来，相对路径无法回跳。
+      // APP_URL is the external address of **our** panel (WOA redirects back here after auth), not the WOA site,
+      // so the "WOA only registers https" constraint does not apply: http is legitimate for intranet/local deployments.
+      // We only validate that it must be an absolute URL -- WOA needs to redirect the browser back, and a relative path cannot be redirected to.
       try {
         new URL(config.appUrl);
       } catch {
@@ -76,9 +76,9 @@ export class WoaProvider implements HeaderInjectedProvider {
   }
 
   /**
-   * `HeaderInjectedProvider` 契约的入口。
+   * Entry point of the `HeaderInjectedProvider` contract.
    *
-   * 保留 `authenticate` 作为等价别名（老测试/兼容用），二者内部同一实现。
+   * Keeps `authenticate` as an equivalent alias (for old tests/compat); both share the same implementation internally.
    */
   async authenticateFromHeaders(
     headers: Record<string, string | undefined>,
@@ -86,7 +86,7 @@ export class WoaProvider implements HeaderInjectedProvider {
     return this.doAuthenticate(headers);
   }
 
-  /** @deprecated 使用 `authenticateFromHeaders`。保留以兼容既有测试与调用点。 */
+  /** @deprecated Use `authenticateFromHeaders`. Kept for compatibility with existing tests and call sites. */
   async authenticate(headers: Record<string, string | undefined>): Promise<ExternalIdentity | null> {
     return this.doAuthenticate(headers);
   }
@@ -126,11 +126,11 @@ export class WoaProvider implements HeaderInjectedProvider {
   }
 
   /**
-   * 取必须由配置提供的 URL。
+   * Get a URL that must be supplied by configuration.
    *
-   * 不设内置默认值：WOA 的登录/登出地址属于内网基础设施信息，硬编码进源码既是信息暴露，
-   * 也让"忘记配置"退化成静默错误（跳到错误地址、无任何报错，极难排查）。
-   * 显式抛错，让漏配在启动/建链时立刻暴露。
+   * No built-in default: WOA login/logout URLs are intranet infrastructure information; hard-coding them into source is an information exposure,
+   * and also turns "forgot to configure" into a silent error (redirecting to a wrong address with no error at all, very hard to debug).
+   * Throw explicitly so a missing configuration surfaces immediately at startup / when building the link.
    */
   private requiredUrl(value: string, envKey: string): string {
     const trimmed = (value ?? '').trim();

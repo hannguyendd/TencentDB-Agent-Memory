@@ -1,18 +1,18 @@
 /**
- * api/auth.ts — 登录验活 + 环境绑定。
+ * api/auth.ts - login verification + environment binding.
  *
- * 登录流程：
- *   ① GET /meta/instances 选实例
- *   ② 用户输入自持的 user_key（sk-mem-…）
- *   ③ POST /meta/auth/verify（Header 仅 X-Tdai-Service-Id，body 带 user_key）
- *   ④ data.valid === true → 登录成功，前端把 { instance_id, user_key, user } 写入 session
- * 无 OAuth、无 Cookie；见 lib/panelSession.ts。
+ * Login flow:
+ *   ① GET /meta/instances to choose an instance
+ *   ② The user enters their own user_key (sk-mem-…)
+ *   ③ POST /meta/auth/verify (Header only has X-Tdai-Service-Id, body carries user_key)
+ *   ④ data.valid === true → login succeeds, the frontend writes { instance_id, user_key, user } into the session
+ * No OAuth, no Cookie; see lib/panelSession.ts.
  */
 import { request, metaCall } from './base';
 import type { PublicUser } from './types';
 
 export const authVerifyApi = {
-  /** 登录验活：Header 仅带实例 ID，user_key 只放 body（meta-api.openapi.yaml §auth/verify） */
+  /** Login verification: Header carries only the instance ID, user_key goes only in the body (meta-api.openapi.yaml §auth/verify) */
   verify: (instanceId: string, userKey: string) =>
     metaCall<{ valid: boolean; user?: PublicUser }>(
       'auth/verify',
@@ -29,12 +29,12 @@ export interface AuthMethod {
 }
 
 /**
- * user_key 登录（兼容用户自持 key）。
+ * user_key login (compatible with user-held keys).
  *
- * 与 WOA 流程的两步确认同构：先 preview 看清"这把 key 属于谁"，再 login 确认。
- * 系统内没有这把 key 时，login 会用它新建账号（首次登录即注册）。
+ * Isomorphic to the two-step confirmation of the WOA flow: first preview to see "who this key belongs to", then login to confirm.
+ * When the system has no such key, login uses it to create a new account (register on first login).
  *
- * 走 Panel 而非前端直连 core：建号需要实例 admin 凭据，前端拿不到。
+ * Goes through the Panel instead of the frontend connecting to core directly: creating an account needs the instance admin credentials, which the frontend cannot get.
  */
 export const userKeyLoginApi = {
   preview: (instanceId: string, userKey: string) =>
@@ -88,8 +88,8 @@ export const authMethodsApi = {
     }>('GET', `/api/v1/auth/session${query}`);
   },
   /**
-   * 预览用户填的 user_key 在系统内是否已有对应账号。
-   * exists=true 时返回该账号信息，供用户确认"绑定到它"还是"新建"。
+   * Preview whether the user_key entered by the user already has a matching account in the system.
+   * When exists=true, returns that account's info for the user to confirm "bind to it" or "create new".
    */
   previewWoaKey: (userKey: string) =>
     request<{
@@ -116,42 +116,42 @@ export const authMethodsApi = {
       '/api/v1/auth/idp/woa/complete',
       {
         username: input.username,
-        // 两个字段都必须传：后端 completePendingWoaLogin 取
-        // `input.userKey || input.customUserKey`。此前只发了 custom_user_key，
-        // 而调用方（LoginGate）传的是 userKey → 后端收到空 key →
-        // 400 INVALID_USER_KEY，建号请求根本发不出去。
+        // Both fields must be sent: the backend completePendingWoaLogin takes
+        // `input.userKey || input.customUserKey`. Previously only custom_user_key was sent,
+        // while the caller (LoginGate) passes userKey → the backend received an empty key →
+        // 400 INVALID_USER_KEY, and the account creation request could never be sent.
         user_key: input.userKey,
         custom_user_key: input.customUserKey,
       },
     ),
   /**
-   * 放弃 WOA 待确认登录，改用 user_key 登录。
+   * Abandon the WOA pending-confirmation login and use user_key login instead.
    *
-   * 后端会清掉 pending Cookie 并下发一个抑制标记：网关对每次请求都会注入 WOA 身份头，
-   * 只清 pending 的话刷新页面会被立刻重新弹回 WOA 确认页。
+   * The backend clears the pending Cookie and issues a suppression flag: the gateway injects WOA identity headers on every request,
+   * and if only pending were cleared, refreshing the page would immediately bounce back to the WOA confirmation page.
    */
   dismissWoa: () => request<{ ok: boolean }>('POST', '/api/v1/auth/idp/woa/dismiss'),
 
   /**
-   * 撤销 dismiss，改回 iOA 登录（清除抑制标记）。
+   * Undo dismiss and switch back to iOA login (clear the suppression flag).
    *
-   * 与 dismissWoa 成对：用户在 user_key 页点「切换到 iOA 登录」时调用，
-   * 否则之前落下的抑制标记会让 WOA ingress 直接放行、停在 user_key 表单。
+   * Paired with dismissWoa: called when the user clicks "Switch to iOA login" on the user_key page,
+   * otherwise the previously set suppression flag would let the WOA ingress pass straight through and stay on the user_key form.
    */
   resumeWoa: () => request<{ ok: boolean }>('POST', '/api/v1/auth/idp/woa/resume'),
 };
 
 // ========================= Environment Bindings =========================
 //
-// ⚠️ 当前部署未注册 /api/v1/users/* 路由，以下接口可能 404。
-// 保留代码用于兼容仍启用该路由的环境；若某个页面依赖这组接口，请先确认路由已注册。
+// ⚠️ The current deployment does not register /api/v1/users/* routes, so the following APIs may 404.
+// The code is kept for compatibility with environments that still enable those routes; if a page depends on this group of APIs, first confirm the routes are registered.
 
 /**
- * 环境绑定（environment_bindings）：把用户在外部环境（IDE / 编程助手等）的
- * 外部 user_id 与本平台 user 关联，供 proxy 通过 (environment, environment_user_id)
- * 反查到团队 / agent / task。
+ * Environment binding (environment_bindings): associates the user's external user_id in an external environment (IDE / coding assistant, etc.)
+ * with the platform user, so the proxy can reverse-lookup the team / agent / task
+ * via (environment, environment_user_id).
  *
- * 唯一约束：(environment, environment_user_id) 全局唯一；被他人占用 → 409。
+ * Uniqueness constraint: (environment, environment_user_id) is globally unique; occupied by someone else → 409.
  */
 export interface EnvironmentBinding {
   id: string;
@@ -163,13 +163,13 @@ export interface EnvironmentBinding {
 }
 
 export const environmentBindingsApi = {
-  /** 列出当前登录用户的全部绑定 */
+  /** List all bindings of the current logged-in user */
   list: () => request<EnvironmentBinding[]>('GET', '/api/v1/users/me/environment-bindings'),
 
-  /** 新增一条绑定（幂等：同 user 重复 POST 同样的 (env, env_user_id) 不报错） */
+  /** Add a binding (idempotent: repeated POST of the same (env, env_user_id) by the same user does not error) */
   create: (data: { environment: string; environment_user_id: string }) =>
     request<EnvironmentBinding>('POST', '/api/v1/users/me/environment-bindings', data),
 
-  /** 删除一条绑定（只能删自己的；删别人 → 403） */
+  /** Delete a binding (only your own; deleting someone else's → 403) */
   remove: (id: string) => request<{ ok: boolean }>('DELETE', `/api/v1/users/me/environment-bindings/${id}`),
 };

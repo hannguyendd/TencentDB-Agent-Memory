@@ -1,8 +1,8 @@
 /**
- * TeamHeaderCard — 当前 team 概览卡片（头像 + 名称 + team_id + 成员数 + 描述）。
+ * TeamHeaderCard - current team overview card (avatar + name + team_id + member count + description).
  *
- * 抽自 TeamManagementPanel 头部，供 team 管理页与 Task 工作台等页面复用，
- * 统一「我现在操作的是哪个 team」的展示。样式类定义在 team-management-panel.css。
+ * Extracted from the TeamManagementPanel header, reused by the team management page and pages such as the Task workbench,
+ * to present "which team am I operating in" consistently. Style classes are defined in team-management-panel.css.
  */
 
 import type { ReactNode } from 'react';

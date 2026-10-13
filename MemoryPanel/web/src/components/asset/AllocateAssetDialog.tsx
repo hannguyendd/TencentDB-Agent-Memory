@@ -1,9 +1,9 @@
 /**
- * AllocateAssetDialog — 通用「资产分配到 Agent」弹窗。
+ * AllocateAssetDialog — Generic "assign asset to Agent" dialog.
  *
- * 与 AllocateSkillDialog 视觉对齐，但不限于 skill：用 assetType + assetLabel
- * 参数化标题，支持 wiki / code_graph / chat_memory 等任何挂载到 agent 固定
- * 资产的场景。
+ * Visually aligned with AllocateSkillDialog but not limited to skills: assetType + assetLabel assetType + assetLabel
+ * parameterize the title, supporting wiki / code_graph / chat_memory and any other scenario where a fixed
+ * asset is mounted to an agent.
  */
 
 import { useState } from 'react';

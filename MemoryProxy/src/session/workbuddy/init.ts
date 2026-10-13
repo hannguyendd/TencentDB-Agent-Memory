@@ -1,34 +1,34 @@
 /**
- * WorkBuddy session-init —— **header-preselect-only** 独立实现。
+ * WorkBuddy session-init -- **header-preselect-only** standalone implementation.
  *
- * ⚠️ 独立性铁律：本文件不 import 任何 sibling handler / sibling session 模块
- * (session/codebuddy/*, session/codex/*, session/claude-code/*)。只依赖
- * **多 client 共用的通用基础设施**：
- *   - session/store.ts        （通用 KV store）
- *   - session/preset.ts       （header解析 + 校验，client-agnostic）
- *   - session/registrar.ts    （SessionInfo 构造）
- *   - session/context-injector.ts（session_context XML 生成）
- *   - session/types.ts（通用类型）
- *   - meta/client.ts          （TDAI kernel API客户端）
+ * ⚠️ Independence rule: this file does not import any sibling handler / sibling session module
+ * (session/codebuddy/*, session/codex/*, session/claude-code/*). It depends only on
+ * **generic infrastructure shared by multiple clients**:
+ *   - session/store.ts        (generic KV store)
+ *   - session/preset.ts       (header parsing + validation, client-agnostic)
+ *   - session/registrar.ts    (SessionInfo construction)
+ *   - session/context-injector.ts (session_context XML generation)
+ *   - session/types.ts (generic types)
+ *   - meta/client.ts          (TDAI kernel API client)
  *
  * ============================================================================
- * WorkBuddy 客户端语义
+ * WorkBuddy client semantics
  * ============================================================================
- * 抓包结论（详见 docs/workbuddy-recon/）：
- *   - Wire protocol：OpenAI Responses API（同 codex 底层协议）
- *   - **系统提示词不含 request_user_input 类 form 工具**（真实抓包证实）
- *   - 客户端无法弹交互式选择表单让用户选 team/agent/task
+ * Packet-capture conclusions (see docs/workbuddy-recon/ for details):
+ *   - Wire protocol: OpenAI Responses API (same underlying protocol as codex)
+ *   - **The system prompt contains no request_user_input-style form tool** (confirmed by real packet capture)
+ *   - The client cannot show an interactive selection form for the user to pick team/agent/task
  *
- * 因此本 session-init 的行为退化为纯**入口守门**：
- *   - 请求 header 含完整 team+agent+task ID → 校验后直接注册 → 继续注入
- *   - 缺任一 → **静默 bypass**（透传上游，不注入资产）
- *   - 已有 session state（同 sessionKey 复用）→ 走recovered 快通道
+ * So this session-init degrades to a pure **entry gatekeeper**:
+ *   - Request headers contain complete team+agent+task IDs → validate, register directly → continue to inject
+ *   - Any one missing → **silent bypass** (pass through upstream, no assets injected)
+ *   - Existing session state (same sessionKey reused) → take the recovered fast path
  *
- * 与 CB/codex/CC 三家 session-init 状态机的**关键差异**：
- *   1. 不返回 `intercepted=true`（本客户端不能接收 form response）
- *   2. 不做 Default gate 检测（客户端本身不发 gate 信号）
- *   3. 不做 MORE 分页（不需要交互）
- *   4. 不做 form 拦截（客户端无 form 工具）
+ * **Key differences** from the CB/codex/CC session-init state machines:
+ *   1. Does not return `intercepted=true` (this client cannot receive a form response)
+ *   2. No Default gate detection (the client itself sends no gate signal)
+ *   3. No MORE pagination (no interaction needed)
+ *   4. No form interception (the client has no form tool)
  * ============================================================================
  */
 
@@ -52,38 +52,38 @@ import {
 // ── Result type ──────────────────────────────────────────────────────────────
 
 /**
- * WorkBuddy session-init 结果。与 CB/CC/codex 三家的 SessionInitResult 语义
- * 对齐（sessionInfo/agentDetail/taskDetail/systemAppend/bypassed 字段名一致），
- * 但**独立类型**避免跨 handler 类型共享。
+ * WorkBuddy session-init result. Semantics aligned with the SessionInitResult of CB/CC/codex
+ * (sessionInfo/agentDetail/taskDetail/systemAppend/bypassed field names are identical),
+ * but a **separate type** to avoid sharing types across handlers.
  */
 export interface WorkbuddySessionInitResult {
   /**
-   * 会话是否已成功注册。false 时caller 应跳过 injection、直接透传上游。
+   * Whether the session was registered successfully. When false, the caller should skip injection and pass through upstream directly.
    */
   bypassed: boolean;
-  /** 注册成功时的 SessionInfo；bypass 分支为 null。 */
+  /** SessionInfo on successful registration; null on the bypass branch. */
   sessionInfo: SessionInfo | null;
-  /** Agent 详情（含 prompt / persona）；bypass 分支为 null。 */
+  /** Agent details (including prompt / persona); null on the bypass branch. */
   agentDetail: AgentDetail | null;
-  /** Task 详情（含 description / goal）；bypass 分支为 null。 */
+  /** Task details (including description / goal); null on the bypass branch. */
   taskDetail: TaskDetail | null;
   /**
-   * 预构造的 `<session_context>` block；供injection 阶段合成 body 时预填
-   * system message。bypass 分支为 null。
+   * Pre-built `<session_context>` block; used to pre-fill the system message when the injection stage composes the body.
+   * null on the bypass branch.
    */
   systemAppend: string | null;
   /**
-   * 本轮是否**新注册**（recovered 快通道复用 = false, 首次注册 = true）。
-   * 用于决定是否触发 injection prewarm。
+   * Whether this turn is a **new registration** (recovered fast-path reuse = false, first registration = true).
+   * Used to decide whether to trigger injection prewarm.
    */
   justRegistered: boolean;
   /**
-   * 走 bypass 时的原因，用于日志/埋点分析：
-   *   - "no-header"：请求未带 x-tdai-team-id 头（客户端无 form 兜底 → 直接绕过）
-   *   - "incomplete-header"：header 有 team 但缺 agent或 task
-   *   - "mismatch"：header值与 kernel 返回的 team/agent 列表不一致
-   *   - "kernel-error"：调用 kernel API 失败
-   *   - "config-disabled"：sessionInit.enabled=false 或 headerAutoSelect.enabled=false
+   * Reason for taking bypass, for log/telemetry analysis:
+   *   - "no-header": the request has no x-tdai-team-id header (the client has no form fallback → bypass directly)
+   *   - "incomplete-header": the header has team but lacks agent or task
+   *   - "mismatch": the header values are inconsistent with the team/agent lists returned by the kernel
+   *   - "kernel-error": the kernel API call failed
+   *   - "config-disabled": sessionInit.enabled=false or headerAutoSelect.enabled=false
    */
   bypassReason?:
     | "no-header"
@@ -96,44 +96,44 @@ export interface WorkbuddySessionInitResult {
 // ── Request context ──────────────────────────────────────────────────────────
 
 /**
- * 调用 handleWorkbuddySessionInit 时透传的运行时上下文（与请求无关的参数从
- * 独立参数走）。
+ * Runtime context passed through when calling handleWorkbuddySessionInit (parameters unrelated to the request
+ * go through separate arguments).
  */
 export interface WorkbuddyRequestContext {
-  /** SSE stream 标志——供未来 form 场景使用；本 handler 当前不构造 form 响应。 */
+  /** SSE stream flag -- for future form scenarios; this handler currently builds no form response. */
   stream: boolean;
-  /** 客户端请求的模型 ID；透传给日志/埋点。 */
+  /** Model ID requested by the client; passed through to logs/telemetry. */
   modelId: string;
 }
 
 // ── Main entry ──────────────────────────────────────────────────────────────
 
 /**
- * WorkBuddy session-init 入口。
+ * WorkBuddy session-init entry point.
  *
- * 流程（详见 module doc 顶部）：
+ * Flow (see the module doc at the top for details):
  *   1. sessionInit.enabled=false → bypass(config-disabled)
- *   2. 从 store 复用已有 state → 直接 recovered 快通道
- *   2.5 **DEBUG**：`sessionInit.debugForceIdentity` 齐全（team+agent+task）→
- *      跳过 header 与 kernel listTeams 校验，直接用固定三元组注册（本地/e2e 专用）
- *   3. 解析 preset identity（三header）：
- *      - 无 team header → bypass(no-header)
- *      - 有 team header 但缺 agent 或 task → bypass(incomplete-header)
- *      - team+agent+task 齐全 → 拉 kernel team list 校验
- *        - resolvePresetIdentity.canRegister=true → 完成注册
- *        - 校验失败 → bypass(mismatch)
- *   4. 注册成功后落 store（下一轮走 recovered 分支）
+ *   2. Reuse existing state from the store → go straight to the recovered fast path
+ *   2.5 **DEBUG**: when `sessionInit.debugForceIdentity` is complete (team+agent+task) →
+ *      skip header and kernel listTeams validation, register directly with the fixed triple (local/e2e only)
+ *   3. Parse the preset identity (three headers):
+ *      - no team header → bypass(no-header)
+ *      - team header present but agent or task missing → bypass(incomplete-header)
+ *      - team+agent+task complete → fetch the kernel team list to validate
+ *        - resolvePresetIdentity.canRegister=true → complete registration
+ *        - validation fails → bypass(mismatch)
+ *   4. After successful registration, persist to the store (the next turn takes the recovered branch)
  *
- * @param sessionKey     去重键（一般是客户端 session_id 或 fallback keyId:traceId）
- * @param userId         apiKey 解析出的用户 ID（可为 null）
- * @param config         SessionInitConfig（含 headerAutoSelect 配置）
- * @param store          通用 SessionStore（多 client 共用，`workbuddy:` 前缀隔离）
- * @param reqCtx         请求运行时上下文
- * @param headers        小写化后的请求头 map
- * @param agentSource    固定为 "workbuddy"（compositeKey 前缀）
- * @param metadataClient TDAI kernel 客户端；bypass 分支可传 undefined
- * @param userKey        原始 apiKey，落 SessionInfo.user_key
- * @param spaceId        URL path 里的 spaceId
+ * @param sessionKey     dedup key (usually the client session_id or fallback keyId:traceId)
+ * @param userId         user ID resolved from the apiKey (may be null)
+ * @param config         SessionInitConfig (including headerAutoSelect config)
+ * @param store          generic SessionStore (shared by multiple clients, isolated by the `workbuddy:` prefix)
+ * @param reqCtx         request runtime context
+ * @param headers        lower-cased request header map
+ * @param agentSource    fixed as "workbuddy" (compositeKey prefix)
+ * @param metadataClient TDAI kernel client; may be undefined on the bypass branch
+ * @param userKey        raw apiKey, stored into SessionInfo.user_key
+ * @param spaceId        spaceId from the URL path
  */
 export async function handleWorkbuddySessionInit(
   sessionKey: string,
@@ -147,9 +147,9 @@ export async function handleWorkbuddySessionInit(
   userKey: string | undefined,
   spaceId: string | undefined,
 ): Promise<WorkbuddySessionInitResult> {
-  void reqCtx; // 保留供未来扩展（form / MORE 分页时会用到 stream/modelId）
+  void reqCtx; // reserved for future extension (stream/modelId will be used for form / MORE pagination)
 
-  // ── 1. 配置门控 ────────────────────────────────────────────────────────────
+  // ── 1. Config gating ──────────────────────────────────────────────────────
   if (!config.enabled) {
     return bypassResult("config-disabled");
   }
@@ -162,11 +162,11 @@ export async function handleWorkbuddySessionInit(
     spaceId: spaceId || "",
   };
 
-  // ── 2. 复用已有 state（recovered 快通道）─────────────────────────────────
-  // getOrRecover 内部自动 bind 身份，无需另外调store.bind
+  // ── 2. Reuse existing state (recovered fast path) ─────────────────────────
+  // getOrRecover automatically binds the identity internally; no separate store.bind call needed
   const recovered = await store.getOrRecover(compositeKey, identity, {
     metadataClient,
-    messages: [], // WorkBuddy 无form → 不需要历史扫描回收
+    messages: [], // WorkBuddy has no form → no history scan recovery needed
   });
 
   if (recovered && recovered.status === "initialized") {
@@ -194,18 +194,18 @@ export async function handleWorkbuddySessionInit(
     };
   }
 
-  // ── 2.5 DEBUG BYPASS：debugForceIdentity 强制注入（本地开发 / e2e）─────────
-  // 目的：绕过 header 解析 + kernel listTeams 校验，用配置里指定的固定三元组
-  //       (team_id, agent_id, task_id) 直接完成注册。仅用于本地跑通/联调。
-  // 语义与 CC 版对齐：需要 team+agent+task 三者齐全才能走这条路（缺任一即忽略
-  // debug 配置、退回正常 preset 流程），保证 injection 需要的 task 一定存在。
+  // ── 2.5 DEBUG BYPASS: debugForceIdentity forced injection (local dev / e2e) ─────
+  // Purpose: bypass header parsing + kernel listTeams validation, and complete registration directly with the fixed triple
+  //       (team_id, agent_id, task_id) specified in config. For local bring-up / integration testing only.
+  // Semantics aligned with the CC version: team+agent+task must all be present to take this path (if any is missing, the
+  // debug config is ignored and the normal preset flow resumes), ensuring the task needed by injection always exists.
   if (
     config.debugForceIdentity &&
     config.debugForceIdentity.team_id &&
     config.debugForceIdentity.agent_id &&
     config.debugForceIdentity.task_id
   ) {
-    // 提到局部常量，让 TS 把 task_id 收窄成 string（原类型是 string | undefined）
+    // Hoisted into a local constant so TS narrows task_id to string (the original type is string | undefined)
     const forcedTeamId: string = config.debugForceIdentity.team_id;
     const forcedAgentId: string = config.debugForceIdentity.agent_id;
     const forcedTaskId: string = config.debugForceIdentity.task_id;
@@ -215,7 +215,7 @@ export async function handleWorkbuddySessionInit(
         `team=${forcedTeamId} agent=${forcedAgentId} task=${forcedTaskId} user=${forcedUserId}`,
     );
 
-    // 尝试补 agent/task detail（失败降级为空）—— 与主路径 5. 段落一致
+    // Try to fill in agent/task detail (degrade to empty on failure) -- consistent with section 5 of the main path
     let agentDetail: AgentDetail | null = null;
     let taskDetail: TaskDetail | null = null;
     if (metadataClient) {
@@ -287,29 +287,29 @@ export async function handleWorkbuddySessionInit(
     };
   }
 
-  // ── 3. 解析 preset identity ────────────────────────────────────────────────
+  // ── 3. Parse preset identity ───────────────────────────────────────────────
   const preset: PresetIdentity | undefined = parsePresetIdentity(config, headers);
   if (!preset || !preset.teamId) {
-    // 无 team header → WorkBuddy 客户端无 form 兜底 → 直接 bypass
+    // No team header → the WorkBuddy client has no form fallback → bypass directly
     await persistBypass(store, compositeKey, identity);
     return bypassResult("no-header");
   }
   if (!preset.agentId || !preset.taskId) {
-    // team 齐了但缺 agent 或 task → 无法完整注册，直接 bypass
-    // （resolvePresetIdentity 也会返回 canRegister=false，此处提前 return 减少 kernel 调用）
+    // Team present but agent or task missing → cannot register fully, bypass directly
+    // (resolvePresetIdentity would also return canRegister=false; returning early here reduces kernel calls)
     await persistBypass(store, compositeKey, identity);
     return bypassResult("incomplete-header");
   }
 
-  // ── 4. 拉 kernel team list 校验 preset ────────────────────────────────────
+  // ── 4. Fetch kernel team list to validate preset ──────────────────────────
   if (!metadataClient) {
-    // 没有 kernel 客户端（config 未配置 tdai.endpoint / apiKey 不完整）→ bypass
-    // 不落 store bypass —— 配置修复后可自动恢复
+    // No kernel client (config lacks tdai.endpoint / apiKey incomplete) → bypass
+    // without persisting the bypass to the store -- it can recover automatically once the config is fixed
     return bypassResult("kernel-error");
   }
 
-  // 通过 kernel 拉取当前用户可见的 team 列表，并fan-out 补齐 agents / tasks
-  // （resolvePresetIdentity 需要 TeamOption[] 结构）
+  // Fetch the team list visible to the current user via the kernel, and fan out to fill in agents / tasks
+  // (resolvePresetIdentity needs the TeamOption[] structure)
   let teams: import("../types.js").TeamOption[];
   try {
     const teamsRaw = await metadataClient.listTeams(identity.userId);
@@ -337,19 +337,19 @@ export async function handleWorkbuddySessionInit(
     console.warn(
       `[workbuddy-init] session=${sessionKey} listTeams failed: ${err instanceof Error ? err.message : String(err)}`,
     );
-    // 不落 store bypass —— kernel 错误可能是临时的，下一轮请求可以重试
+    // Do not persist the bypass to the store -- the kernel error may be transient; the next request can retry
     return bypassResult("kernel-error");
   }
 
   const resolution = resolvePresetIdentity(teams, preset);
   if (!resolution.canRegister) {
-    // 校验失败：header 值与用户可见 team/agent/task 不一致 → 长期 bypass
-    // （客户端下一轮请求还是会带同一 header，重试无益）
+    // Validation failed: header values are inconsistent with the user-visible team/agent/task → long-term bypass
+    // (the client will send the same header on the next request, so retrying is pointless)
     await persistBypass(store, compositeKey, identity);
     return bypassResult("mismatch");
   }
 
-  // ── 5. 拉 agent / task detail ─────────────────────────────────────────────
+  // ── 5. Fetch agent / task detail ──────────────────────────────────────────
   let agentDetail: AgentDetail | null = null;
   let taskDetail: TaskDetail | null = null;
   try {
@@ -382,7 +382,7 @@ export async function handleWorkbuddySessionInit(
     );
   }
 
-  // ── 6. 构造 SessionInfo & 落 store ────────────────────────────────────────
+  // ── 6. Build SessionInfo & persist to store ───────────────────────────────
   const sessionInfo = buildSessionInfo(
     {
       session_id: sessionKey,
@@ -442,11 +442,11 @@ function bypassResult(
 }
 
 /**
- * 把 bypass 决定落进 SessionStore（terminal `initialized` + `bypassed=true`），
- * 下一轮请求会走 recovered 快通道直接返回 bypass。
+ * Persist the bypass decision into the SessionStore (terminal `initialized` + `bypassed=true`);
+ * the next request takes the recovered fast path and returns the bypass directly.
  *
- * bypassReason 不落 store（SessionInitState 无此字段）；仅在本 handler
- * return value 侧携带。
+ * bypassReason is not persisted in the store (SessionInitState has no such field); it is carried only
+ * on this handler's return value side.
  */
 async function persistBypass(
   store: SessionStore,

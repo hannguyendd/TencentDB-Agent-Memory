@@ -117,7 +117,7 @@ export function opikCreateTrace(
   config: ProxyConfig,
   input: OpikTraceInput,
 ): string {
-  // 本地 JSONL 归档（独立于 Opik 远程上报，由 traceArchive.enabled 控制）
+  // Local JSONL archive (independent of remote Opik reporting, controlled by traceArchive.enabled)
   archiveTrace({
     type: "trace",
     id: input.traceId,
@@ -234,7 +234,7 @@ export function opikCreateLlmSpan(
   config: ProxyConfig,
   span: OpikLlmSpan,
 ): void {
-  // 本地 JSONL 归档（独立于 Opik 远程上报，由 traceArchive.enabled 控制）
+  // Local JSONL archive (independent of remote Opik reporting, controlled by traceArchive.enabled)
   archiveSpan({
     type: "span",
     id: uuidv7(),
@@ -281,8 +281,8 @@ export function opikCreateLlmSpan(
     type: "llm",
     start_time: span.startTime,
     end_time: span.endTime,
-    input: span.inputMessages,    // 直接传 messages 数组
-    output: outputMessages,       // 直接传 messages 数组
+    input: span.inputMessages,    // pass the messages array directly
+    output: outputMessages,       // pass the messages array directly
     model: span.model,
     usage: flatUsage,
   };

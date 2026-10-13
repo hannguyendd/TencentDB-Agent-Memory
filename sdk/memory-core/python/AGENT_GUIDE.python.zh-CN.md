@@ -1,34 +1,34 @@
-# Agent 接入指南（Python）
+# Agent Integration Guide (Python)
 
-本文讲怎么把 `tencentdb-agent-memory-sdk-python` 接到一个 AI Agent 里。SDK 的 14 个 API 速查见 [`README.md`](./README.md)，本文讲**怎么把它们组装成一套长期记忆**。
-
----
-
-## 接入要做的四件事
-
-```
-用户输入  →  ① 召回（注入 prompt） → LLM → ② 捕获（写 L0）
-                            ↑
-                  ③ 工具：让 LLM 自己再查
-                            ↑
-                  ④ 错误降级：失败不挂主流程
-```
+This guide explains how to wire `tencentdb-agent-memory-sdk-python` into an AI Agent. For a quick reference of the SDK's 14 APIs see [`README.md`](./README.md); this guide covers **how to assemble them into a long-term memory system**.
 
 ---
 
-## 0. 初始化
+## Four things to do when integrating
+
+```
+User input  →  ① Recall (inject into prompt) → LLM → ② Capture (write L0)
+                            ↑
+                  ③ Tools: let the LLM search again on its own
+                            ↑
+                  ④ Error degradation: failures must not break the main flow
+```
+
+---
+
+## 0. Initialization
 
 ```python
 from tencentdb_agent_memory import MemoryClient, AsyncMemoryClient
 
-# 同步
+# Sync
 client = MemoryClient(
     endpoint="https://your-memory-gateway",
     api_key=os.environ["MEMORY_API_KEY"],
     service_id="your-instance-id",
 )
 
-# 异步（推荐 Agent 场景用）
+# Async (recommended for Agent scenarios)
 async with AsyncMemoryClient(
     endpoint="https://your-memory-gateway",
     api_key=os.environ["MEMORY_API_KEY"],
@@ -37,13 +37,13 @@ async with AsyncMemoryClient(
     ...
 ```
 
-`service_id` 决定 memory space 隔离粒度，同 id 数据共享、不同 id 完全隔离。Agent 场景几乎都用 async，别用同步版（会阻塞事件循环）。
+`service_id` determines the memory space isolation granularity: the same id shares data, different ids are fully isolated. Agent scenarios almost always use async; do not use the sync version (it blocks the event loop).
 
 ---
 
-## 1. 召回（Recall）
+## 1. Recall
 
-在用户消息发给 LLM 前，并行拉三类记忆，拼到 system prompt 里。
+Before sending the user message to the LLM, fetch three kinds of memory in parallel and assemble them into the system prompt.
 
 ```python
 import asyncio
@@ -51,9 +51,9 @@ import asyncio
 async def recall(client: AsyncMemoryClient, user_query: str) -> dict:
     l1, persona, scenes = await asyncio.gather(
         client.search_atomic(query=user_query, limit=5),
-        client.read_core(),                            # L3 用户画像
-        client.list_scenarios(),                       # L2 场景索引
-        return_exceptions=True,                        # 关键：单路挂不影响其它
+        client.read_core(),                            # L3 user persona
+        client.list_scenarios(),                       # L2 scene index
+        return_exceptions=True,                        # Key: one failing path does not affect the others
     )
 
     l1_items = l1["items"] if not isinstance(l1, Exception) else []
@@ -63,12 +63,12 @@ async def recall(client: AsyncMemoryClient, user_query: str) -> dict:
     return format_prompt(l1_items, persona_text, scene_list)
 ```
 
-`asyncio.gather(..., return_exceptions=True)` 是关键——任何一路超时/失败，其它两路结果照常用，不影响主对话。
+`asyncio.gather(..., return_exceptions=True)` is the key: if any one path times out or fails, the other two results are still used and the main conversation is unaffected.
 
-### 拼 prompt 的两个区块
+### Two blocks for assembling the prompt
 
-- **prepend_context（动态）**：L1 召回结果，每轮都变，放在用户消息前。
-- **append_system_context（稳定）**：Persona + Scene 索引 + 工具调用指南，放在 system prompt 末尾，KV cache 友好。 _（待确定：放到 system prompt 末尾仍可能造成 KV cache miss，需要继续讨论。）_
+- **prepend_context (dynamic)**: L1 recall results, which change every turn; placed before the user message.
+- **append_system_context (stable)**: Persona + Scene index + tool usage guide; placed at the end of the system prompt, KV-cache friendly. _(TBD: placing it at the end of the system prompt can still cause KV cache misses; needs further discussion.)_
 
 ```python
 def format_prompt(l1_items, persona, scenes) -> dict:
@@ -81,42 +81,42 @@ def format_prompt(l1_items, persona, scenes) -> dict:
     if persona:
         parts.append(f"<user-persona>\n{persona}\n</user-persona>")
     if scenes:
-        parts.append("## Scene Navigation\n*以下场景可用 tdai_read_file 读取详情*")
+        parts.append("## Scene Navigation\n*The following scenes can be read in detail with tdai_read_file*")
         parts.extend(f"- `{s['path']}`" for s in scenes)
-    parts.append(MEMORY_TOOLS_GUIDE)  # 见下文
+    parts.append(MEMORY_TOOLS_GUIDE)  # See below
 
     return {"prepend": prepend, "append": "\n\n".join(parts)}
 ```
 
-> 实现要点：在召回阶段**缓存原始用户文本**（清洁版，未注入 recall），后面 capture 阶段要用——见第 2 节。
+> Implementation note: during recall, **cache the original user text** (the clean version, without injected recall); the capture phase needs it later -- see Section 2.
 
 ---
 
-## 2. 捕获（Capture）
+## 2. Capture
 
-在 agent 一轮跑完后，把这一轮新增的 user/assistant 消息清洗后写回 L0。
+After an agent turn finishes, clean the new user/assistant messages from that turn and write them back to L0.
 
 ```python
 async def capture(
     client: AsyncMemoryClient,
     session_key: str,
-    raw_messages: list,                  # 框架给的完整消息历史
-    original_user_text: str,             # 召回阶段缓存的清洁版用户文本
-    original_user_message_count: int,    # 召回阶段缓存的消息数
+    raw_messages: list,                  # Full message history provided by the framework
+    original_user_text: str,             # Clean user text cached during recall
+    original_user_message_count: int,    # Message count cached during recall
 ):
-    # ① 位置切片：只保留这一轮新增的消息
+    # ① Positional slice: keep only the messages added in this turn
     new_messages = raw_messages[original_user_message_count:]
 
-    # ② 提取 user/assistant，去掉 tool calls / system / 多模态噪声
+    # ② Extract user/assistant, dropping tool calls / system / multimodal noise
     extracted = extract_user_assistant(new_messages)
 
-    # ③ 把被 recall 污染的用户消息换回原始版
+    # ③ Swap the recall-polluted user message back to the original
     for m in extracted:
         if m["role"] == "user" and m["timestamp"] == new_messages[0].get("timestamp"):
             m["content"] = original_user_text
             break
 
-    # ④ 文本清洗：去图片 base64、去代码块、过滤太短/纯符号
+    # ④ Text cleanup: strip image base64, strip code blocks, filter too-short / symbol-only content
     cleaned = [
         {**m, "content": sanitize(m["content"])}
         for m in extracted
@@ -126,7 +126,7 @@ async def capture(
     if not cleaned:
         return
 
-    # ⑤ 提交
+    # ⑤ Submit
     await client.add_conversation(
         session_id=session_key,
         messages=[
@@ -140,60 +140,60 @@ async def capture(
     )
 ```
 
-### 为什么要替换"被污染的用户消息"
+### Why replace the "polluted user message"
 
-召回阶段会往用户消息前 prepend 一段 `<relevant-memories>...</relevant-memories>`。如果不还原成原始文本就写 L0，下一轮召回就会基于这段被污染的文本去 search/embedding——形成**反馈环**，记忆会越来越乱。
+During recall, a `<relevant-memories>...</relevant-memories>` block is prepended to the user message. If it is written to L0 without restoring the original text, the next recall will search/embed based on this polluted text, forming a **feedback loop** that makes memory increasingly messy.
 
-### 为什么要位置切片
+### Why use a positional slice
 
-agent 一轮结束时框架给的是**完整历史**，不是本轮新增。直接全发会重复写。召回阶段记一下消息数 N，结束时 `messages[N:]` 就是新增的。
+When an agent turn ends, the framework hands you the **full history**, not just this turn's additions. Sending it all would write duplicates. Record the message count N during recall; at the end, `messages[N:]` is the new content.
 
 ---
 
-## 3. 工具暴露
+## 3. Exposing tools
 
-只靠 prompt 注入的记忆有限。再注册三个工具让 LLM 自己查：
+Memory injected via the prompt alone is limited. Register three more tools so the LLM can search on its own:
 
-| 工具 | 何时用 | 实现 |
+| Tool | When to use | Implementation |
 |---|---|---|
-| `tdai_memory_search` | 找结构化偏好/事实 | `client.search_atomic(query=..., limit=...)` |
-| `tdai_conversation_search` | 找原始对话片段 | `client.search_conversation(query=..., limit=...)` |
-| `tdai_read_file` | 读 persona / scene block 全文 | `client.read_file(path)` |
+| `tdai_memory_search` | Find structured preferences/facts | `client.search_atomic(query=..., limit=...)` |
+| `tdai_conversation_search` | Find raw conversation snippets | `client.search_conversation(query=..., limit=...)` |
+| `tdai_read_file` | Read the full persona / scene block | `client.read_file(path)` |
 
-在 system prompt 里说清楚什么时候调，加上次数上限：
+State clearly in the system prompt when to call them, and add a call limit:
 
 ```
-## 记忆工具
-- tdai_memory_search：搜结构化记忆（用户偏好、规则、历史事件）
-- tdai_conversation_search：搜原始对话原文
-- tdai_read_file：读取场景文件（用 Scene Navigation 列出的路径）
+## Memory tools
+- tdai_memory_search: search structured memory (user preferences, rules, historical events)
+- tdai_conversation_search: search raw conversation text
+- tdai_read_file: read a scene file (use the paths listed in Scene Navigation)
 
-⚠️ memory_search + conversation_search 一轮总共最多调 3 次。
+⚠️ memory_search + conversation_search may be called at most 3 times in total per turn.
 ```
 
-不限次数 LLM 会反复瞎搜。
+Without a limit, the LLM will search aimlessly over and over.
 
 ---
 
-## 4. 错误降级
+## 4. Error degradation
 
-记忆服务挂了**不能挂主对话**。三条原则：
+A memory service outage **must not break the main conversation**. Three principles:
 
-1. **召回**用 `asyncio.gather(..., return_exceptions=True)`，单路失败不影响其它。
-2. **捕获**包 try/except，失败只记日志：
+1. **Recall** uses `asyncio.gather(..., return_exceptions=True)`, so one failing path does not affect the others.
+2. **Capture** is wrapped in try/except; on failure just log:
    ```python
    try:
        await capture(...)
    except Exception as e:
        logger.warning(f"capture failed: {e}")
    ```
-3. **工具**返回错误字符串而不是抛异常，让 LLM 自己看到 "memory unavailable" 然后继续聊。
+3. **Tools** return an error string instead of raising, so the LLM sees "memory unavailable" and keeps chatting.
 
 ---
 
-## 5. 错误处理
+## 5. Error handling
 
-非零 code 抛 `TDAMError`：
+A non-zero code raises `TDAMError`:
 
 ```python
 from tencentdb_agent_memory import TDAMError
@@ -202,27 +202,27 @@ try:
     content = await client.read_file("scene_blocks/x.md")
 except TDAMError as e:
     if e.code == 404:
-        pass  # 文件不存在，正常情况
+        pass  # File does not exist; normal case
     else:
         logger.warning(f"memory error code={e.code} request_id={e.request_id}")
 ```
 
-`request_id` 在 server 端也有日志，排障时给后端就行。
+`request_id` is also logged on the server side; just give it to the backend when troubleshooting.
 
 ---
 
-## 6. 性能建议
+## 6. Performance tips
 
-- **召回总预算 < 200ms**：三路并行后取最快可用结果，超时的丢掉。
-- **prompt 注入控制大小**：L1 ≤ 5 条、Scene 列表只列 path 不列内容、Persona 一份就够。让 LLM 不够用时再用工具拉详情。
-- **session 粒度**：`session_key` 是 L0 partition key，长期对话用稳定 id（用户 id + 会话 id），不要每轮换。
-- **不要在主线程同步调**：用 `AsyncMemoryClient`，别用 `MemoryClient`，否则会阻塞事件循环。
+- **Total recall budget < 200ms**: run the three paths in parallel, use the fastest available results, and drop any that time out.
+- **Keep injected prompt size small**: L1 <= 5 items, list only the path (not the content) in the Scene list, and one Persona is enough. Let the LLM pull details with tools when it needs more.
+- **Session granularity**: `session_key` is the L0 partition key; for long-running conversations use a stable id (user id + conversation id) and do not change it every turn.
+- **Do not call synchronously on the main thread**: use `AsyncMemoryClient`, not `MemoryClient`, otherwise the event loop is blocked.
 
 ---
 
-## 7. 管理面：Knowledge / 元数据
+## 7. Management plane: Knowledge / metadata
 
-上面讲的都是 `MemoryClient`（数据面：读写记忆）。如果你还需要**管理** Knowledge 知识源（wiki / code-graph）的元数据，用 `MetadataClient`（v3 管理面，不需要 isolation 四元组）：
+Everything above is about `MemoryClient` (data plane: reading and writing memory). If you also need to **manage** the metadata of Knowledge sources (wiki / code-graph), use `MetadataClient` (v3 management plane; no isolation 4-tuple needed):
 
 ```python
 from tencentdb_agent_memory.v3 import MetadataClient
@@ -233,7 +233,7 @@ meta = MetadataClient(
     service_id="your-instance-id",
 )
 
-# 登记 / 列出 / 改名 / 删除 Knowledge 实体（管理面 CRUD，详见 README.md）
+# Register / list / rename / delete Knowledge entities (management-plane CRUD, see README.md)
 meta.create_knowledge({
     "knowledge_id": "wiki-1", "type": "wiki",
     "service_url": "http://ks:8421/v3", "name": "Wiki", "team_id": "team-1",
@@ -241,13 +241,13 @@ meta.create_knowledge({
 meta.list_knowledge({"team_id": "team-1", "type": "wiki"})
 ```
 
-注意：`MetadataClient` 只管元数据 CRUD；真正搜 wiki 内容、读页面、同步仓库要调 Knowledge Service 数据面（`service_url` 指向的 `:8421`），那是另一组接口，不在本 SDK 范围内。
+Note: `MetadataClient` only handles metadata CRUD; actually searching wiki content, reading pages, or syncing repositories requires calling the Knowledge Service data plane (`:8421`, pointed to by `service_url`). That is a separate set of endpoints and is outside the scope of this SDK.
 
 ---
 
-## 附：sanitize 实现参考
+## Appendix: sanitize reference implementation
 
-清洗函数处理这几类噪声：
+The cleanup functions handle these kinds of noise:
 
 ```python
 import re
@@ -257,15 +257,15 @@ _IMAGE_DATA_URI = re.compile(r"data:image/[a-z+]+;base64,[A-Za-z0-9+/=]+", re.IG
 _CODE_BLOCK = re.compile(r"```[\s\S]*?```")
 
 def sanitize(text: str) -> str:
-    # 去 base64 图片
+    # Strip base64 images
     text = _IMAGE_DATA_URI.sub("[image]", text)
-    # 去代码块（assistant 输出常见，对 embedding 是噪声）
+    # Strip code blocks (common in assistant output; noise for embeddings)
     text = _CODE_BLOCK.sub("[code]", text)
     return text.strip()
 
 
 def extract_user_assistant(messages: list) -> list:
-    """从原始消息列表里提取 user/assistant 文本，丢掉 tool / system / 空内容。"""
+    """Extract user/assistant text from the raw message list, dropping tool / system / empty content."""
     out = []
     for m in messages:
         role = m.get("role")
@@ -273,7 +273,7 @@ def extract_user_assistant(messages: list) -> list:
             continue
         content = m.get("content")
         if isinstance(content, list):
-            # 多模态消息：拼接 text 部分
+            # Multimodal message: concatenate the text parts
             content = "\n".join(p.get("text", "") for p in content if p.get("type") == "text")
         if not isinstance(content, str) or not content.strip():
             continue

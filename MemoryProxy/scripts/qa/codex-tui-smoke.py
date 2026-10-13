@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-codex-tui-smoke.py —— 用 pexpect PTY 起真 Codex TUI，模拟真实用户交互
-走完 session-init 5-step form，捕获用户可见的第一条 assistant 回复。
+codex-tui-smoke.py —— use a pexpect PTY to start the real Codex TUI, simulating real user interaction
+to walk through the session-init 5-step form and capture the first assistant reply visible to the user.
 
-关键目的：验证 P1-1 —— form 完成后模型是否会 hallucinate 解释最后一条
-form output（如"我们需要理解用户说的\"否，本次不关联\"是什么意思"）。
-真 CLI 会全量重放 input[]，上游看到完整 tool loop 理论上不该幻觉；
-但必须真跑一遍 TUI 才能断言。
+Key goal: verify P1-1 -- after the form completes, does the model hallucinate an explanation of the last
+form output (e.g. "we need to understand what the user means by \"No, do not link this time\"").
+The real CLI replays input[] in full, so upstream sees the complete tool loop and in theory should not hallucinate;
+but the TUI must actually be run to assert that.
 
-依赖: pexpect
-用法:
-    python3 codex-tui-smoke.py                      # 完整 init 流程
-    python3 codex-tui-smoke.py --bypass             # asset_confirm 选"否"
-    python3 codex-tui-smoke.py --prompt "1+1=?"     # 覆盖首条 user 消息
+Dependency: pexpect
+Usage:
+        python3 codex-tui-smoke.py                      # full init flow
+        python3 codex-tui-smoke.py --bypass             # choose "No" on asset_confirm
+        python3 codex-tui-smoke.py --prompt "1+1=?"     # override the first user message
 """
 import argparse
 import os
@@ -24,7 +24,7 @@ import pexpect
 
 
 def strip_ansi(data):
-    """去掉 ANSI escape 让 log 可读"""
+    """Strip ANSI escapes so the log is readable"""
     try:
         txt = data.decode(errors="ignore") if isinstance(data, bytes) else data
     except Exception:
@@ -36,7 +36,7 @@ def strip_ansi(data):
 
 
 class Sink:
-    """pexpect logfile_read hook — 写文件 + 打屏（stripped）"""
+    """pexpect logfile_read hook — write to file + print to screen (stripped)"""
 
     def __init__(self, path):
         self.f = open(path, "wb")
@@ -53,9 +53,9 @@ class Sink:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--bypass", action="store_true", help="asset_confirm 选'否'走 bypass 路径")
-    ap.add_argument("--prompt", default="1+1=?", help="首条 user 消息")
-    ap.add_argument("--cwd", default="/tmp", help="启动目录（需已 trusted）")
+    ap.add_argument("--bypass", action="store_true", help="choose 'No' on asset_confirm to take the bypass path")
+    ap.add_argument("--prompt", default="1+1=?", help="first user message")
+    ap.add_argument("--cwd", default="/tmp", help="launch directory (must already be trusted)")
     ap.add_argument("--log", default="/tmp/codex-tui-smoke.log")
     args = ap.parse_args()
 
@@ -74,81 +74,81 @@ def main():
     )
     child.logfile_read = Sink(args.log)
 
-    # 等 TUI 就绪
+    # wait for the TUI to be ready
     try:
         child.expect(rb"directory:", timeout=20)
     except pexpect.TIMEOUT:
-        print("\n[FAIL] TUI 未就绪", file=sys.stderr)
+        print("\n[FAIL] TUI not ready", file=sys.stderr)
         return 1
 
     time.sleep(1.5)
 
-    # ── 首条 user 消息 ────────────────────────────────────────────────────
-    # 依赖 ~/.codex/config.toml 里 features.default_mode_request_user_input = true
-    # 让 Default 模式也能弹 request_user_input form (跟 Plan 模式等价触发)。
+    # ── First user message ────────────────────────────────────────────────
+    # Depends on features.default_mode_request_user_input = true in ~/.codex/config.toml
+    # so that Default mode can also pop the request_user_input form (equivalent to triggering it in Plan mode).
     #
-    # codex TUI composer: 打字 → 再单独按 Enter 提交。sendline 里的 \n 会跟
-    # 文字一起送进输入框但不触发提交，所以拆两步 (send 文字 → sleep → 单独 Enter)。
-    print(f"\n=== [STEP 1] 发首条消息: {args.prompt} ===")
+    # codex TUI composer: type -> then press Enter separately to submit. The \n in sendline goes into
+    # the input box together with the text but does not trigger submit, so split into two steps (send text -> sleep -> Enter alone).
+    print(f"\n=== [STEP 1] send first message: {args.prompt} ===")
     child.send(args.prompt)
     time.sleep(1.5)
-    child.send("\r")  # Enter 提交
+    child.send("\r")  # Enter to submit
 
-    # 等 asset_confirm form —— 匹配中文"是否关联"或英文关键字
+    # wait for the asset_confirm form -- match the Chinese "是否关联" or English keywords
     try:
         child.expect(
             rb"\xe6\x98\xaf\xe5\x90\xa6\xe5\x85\xb3\xe8\x81\x94|\xe5\x85\xb3\xe8\x81\x94\xe5\x9b\xa2\xe9\x98\x9f\xe8\xb5\x84\xe4\xba\xa7|asset_confirm|Question",
             timeout=45,
         )
-        print("\n=== [STEP 2] asset_confirm form 出现 ✓ ===")
+        print("\n=== [STEP 2] asset_confirm form appeared ✓ ===")
     except pexpect.TIMEOUT:
-        print("\n[FAIL] 首帧未见 asset_confirm form (45s)", file=sys.stderr)
+        print("\n[FAIL] asset_confirm form not seen on first frame (45s)", file=sys.stderr)
         child.terminate(force=True)
         return 1
 
     time.sleep(1.5)
 
-    # ── 选 asset_confirm ─────────────────────────────────────────────────
-    # codex 每个 form 首选就是第 1 项 (是/关联)，Down 一次到第 2 项 (否/bypass)。
-    # 用 \r 而非 sendline 提交，避免把 \n 也解读成额外的 Down。
+    # ── Choose on asset_confirm ─────────────────────────────────────────
+    # In every codex form the default is item 1 (Yes/link); Down once reaches item 2 (No/bypass).
+    # Submit with \r rather than sendline, to avoid the \n being read as an extra Down.
     if args.bypass:
-        print("\n=== [STEP 3] 选 '否，本次不关联' → Down + Enter ===")
-        child.send("\x1b[B")  # Down 到第 2 项
+        print("\n=== [STEP 3] choose 'No, do not link this time' -> Down + Enter ===")
+        child.send("\x1b[B")  # Down to item 2
         time.sleep(0.8)
-        child.send("\r")      # Enter 提交
+        child.send("\r")      # Enter to submit
     else:
-        print("\n=== [STEP 3] 选 '是，关联团队资产' → Enter ===")
+        print("\n=== [STEP 3] choose 'Yes, link team assets' -> Enter ===")
         time.sleep(0.8)
         child.send("\r")
 
-    # ── 后续步骤（非 bypass）—— 每步 Enter 选首项 ─────────────────
+    # ── Following steps (non-bypass) -- press Enter on the first item each step ─────────────
     if not args.bypass:
         for step in range(6):
             try:
                 i = child.expect(
                     [
-                        rb"Question|\xe8\xaf\xb7\xe9\x80\x89\xe6\x8b\xa9",  # 请选择
+                        rb"Question|\xe8\xaf\xb7\xe9\x80\x89\xe6\x8b\xa9",  # "请选择" ("Please choose")
                         rb"tokens used|response\.completed|assistant",
                     ],
                     timeout=60,
                 )
                 if i == 1:
-                    print(f"\n=== [STEP {4 + step}] 到达 assistant 首条回复 ===")
+                    print(f"\n=== [STEP {4 + step}] reached the assistant's first reply ===")
                     break
-                print(f"\n=== [STEP {4 + step}] 下一步 form → Enter ===")
+                print(f"\n=== [STEP {4 + step}] next form -> Enter ===")
                 time.sleep(1)
                 child.send("\r")
             except pexpect.TIMEOUT:
                 print(f"\n[TIMEOUT step {4 + step}]")
                 break
 
-    # ── 抓 assistant 首条完整回复 ─────────────────────────────────────
-    print("\n=== [FINAL] 等 assistant 完成（tokens used 出现） ===")
+    # ── Capture the assistant's complete first reply ─────────────────────────────────────
+    print("\n=== [FINAL] wait for the assistant to finish (tokens used appears) ===")
     try:
         child.expect(rb"tokens used", timeout=90)
-        print("\n[DONE] assistant 已完成回复 ✓")
+        print("\n[DONE] assistant finished replying ✓")
     except pexpect.TIMEOUT:
-        print("\n[WARN] 90s 未见 tokens used", file=sys.stderr)
+        print("\n[WARN] no tokens used seen in 90s", file=sys.stderr)
 
     time.sleep(2)
     child.sendcontrol("c")
@@ -156,7 +156,7 @@ def main():
     child.sendcontrol("c")
     child.close(force=True)
 
-    print(f"\n\n=== 完整 log 落 {args.log} ===")
+    print(f"\n\n=== full log written to {args.log} ===")
     return 0
 
 

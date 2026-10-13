@@ -1,9 +1,9 @@
 /**
- * 数据 hooks：
- *   - loadAgentOverview / syncChatMemoryBindings：单次调用的资产总览接口
- *   - useTeamAssets：拉取团队级 skill/code_graph/wiki/chat_memory 列表
- *   - useAgentMountedCounts：批量拉取各 agent 已挂载资产数量，并在
- *     BACKEND_REFRESH_EVENT 后自动重新拉取
+ * Data hooks:
+ *   - loadAgentOverview / syncChatMemoryBindings: single-call asset overview API
+ *   - useTeamAssets: fetch team-level skill/code_graph/wiki/chat_memory lists
+ *   - useAgentMountedCounts: batch fetch the mounted asset count of each agent, and refetch automatically after
+ *     BACKEND_REFRESH_EVENT
  */
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
@@ -44,7 +44,7 @@ export async function syncChatMemoryBindings(teamId: string, agentId: string, ne
   await chatMemoryApi.setAgentFixed(teamId, agentId, imported);
 }
 
-/** 团队资产 Hook：从真实 API 拉取 Skill / CodeGraph / Wiki / ChatMemory */
+/** Team assets hook: fetch Skill / CodeGraph / Wiki / ChatMemory from the real API */
 export function useTeamAssets(teamId: string) {
   const [skills, setSkills] = useState<MountableAsset[]>([]);
   const [codeGraphs, setCodeGraphs] = useState<MountableAsset[]>([]);
@@ -84,10 +84,10 @@ export function useAgentMountedCounts(
   const [countsLoading, setCountsLoading] = useState(true);
   const agentsKey = useMemo(() => agents.map((a) => a.agent_id).join('|'), [agents]);
 
-  // list 计数直接用后端 agent-overview/bootstrap 的 counts —— 它读的是真实源
-  // （skill 表 owner_agent_id + agent-fixed-asset 表），与详情弹窗、运行时一致。
-  // 不再用 metadata_json.ui 做 fallback：.ui 是已废弃的影子存储，会导致展示≠真实。
-  // silent=true 的刷新（BACKEND_REFRESH_EVENT）不翻转 loading，避免操作后整屏骨架闪烁。
+  // List counts use the backend agent-overview/bootstrap counts directly - it reads the real sources
+  // (skill table owner_agent_id + agent-fixed-asset table), consistent with the detail dialog and runtime.
+  // No longer fall back to metadata_json.ui: .ui is a deprecated shadow store and would cause display != reality.
+  // Refreshes with silent=true (BACKEND_REFRESH_EVENT) do not flip loading, avoiding a full-screen skeleton flicker after operations.
   const load = useCallback((silent: boolean) => {
     if (!teamId || agents.length === 0) {
       setCounts({});
@@ -112,13 +112,13 @@ export function useAgentMountedCounts(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teamId, agentsKey]);
 
-  // 初始 / agent 变更加载：翻转 countsLoading，驱动骨架屏覆盖整个 bootstrap 加载期
+  // Initial / agent change load: flip countsLoading, driving the skeleton to cover the whole bootstrap load period
   useEffect(() => {
     return load(false);
   }, [load]);
 
-  // 保存后 invalidateBackendCache() 会广播 BACKEND_REFRESH_EVENT，静默重新拉 counts，
-  // 保留旧值原地更新，不闪骨架屏
+  // After saving, invalidateBackendCache() broadcasts BACKEND_REFRESH_EVENT, silently refetching counts,
+  // keeping old values updated in place without flashing the skeleton
   useEffect(() => {
     if (!teamId || agents.length === 0) return;
     const handler = () => { load(true); };

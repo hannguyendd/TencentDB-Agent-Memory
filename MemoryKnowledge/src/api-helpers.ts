@@ -33,7 +33,7 @@ export function isValidIdSegment(id: unknown): id is string {
 /**
  * Validate the `service_id` tenant identity taken from the `x-tdai-service-id`
  * header. Returns the value or null when missing/malformed (route → 400).
- * service_id 自报（内网信任，001 Q2/Q7），统一走 header（= 内核 x-tdai-service-id）。
+ * service_id self-reported (trusted on the internal network, 001 Q2/Q7), always passed via header (= kernel x-tdai-service-id).
  */
 export function extractServiceId(headerValue: string | undefined | null): string | null {
   return isValidIdSegment(headerValue) ? headerValue : null;
@@ -97,9 +97,9 @@ export interface WikiDetail {
   wiki_id: string;
   team_id: string;
   name: string;
-  /** 来源类型：null=手工上传；'iwiki' 等=外部来源（决定详情页 UI 走"添加文件"还是"从外部拉取"）。 */
+  /** Source type: null = manual upload; 'iwiki' etc. = external source (decides whether the detail page UI shows "Add file" or "Pull from external"). */
   source_type: string | null;
-  /** 外部来源 URL；仅 source_type 非 null 时有值。 */
+  /** External source URL; only set when source_type is non-null. */
   source_url: string | null;
   service_url: string | null;
   summary: string | null;
